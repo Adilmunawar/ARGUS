@@ -1,8 +1,8 @@
-# ZD Cloud Console — design
+# Argus Console — design
 
 **The web interface from which everything is controlled: deployments, servers, RDP sessions, databases, storage, secrets, identity, security, ML, cost.** One browser tab replaces the AWS Console, Remote Desktop Connection, SQL Server Management Studio for routine work, PowerShell for routine work, and the pile of RDP shortcuts on everyone's laptop.
 
-This document is the deep design. It studies what the AWS Console actually gives you, screen by screen, maps each to a ZD Cloud equivalent, and then specifies the things AWS does *not* do that we will.
+This document is the deep design. It studies what the AWS Console actually gives you, screen by screen, maps each to a Argus equivalent, and then specifies the things AWS does *not* do that we will.
 
 ## 0. What was missing before this document
 
@@ -12,7 +12,7 @@ This document is the deep design. It studies what the AWS Console actually gives
 
 ## 1. Study: what the AWS Console actually is
 
-Stripped of the 240 service pages, the AWS Console is nine repeating ideas. Every ZD Cloud screen is one of these, done better or deliberately differently.
+Stripped of the 240 service pages, the AWS Console is nine repeating ideas. Every Argus screen is one of these, done better or deliberately differently.
 
 | # | AWS pattern | Where you see it | What it gets right | What it gets wrong |
 |---|---|---|---|---|
@@ -26,7 +26,7 @@ Stripped of the 240 service pages, the AWS Console is nine repeating ideas. Ever
 | 8 | **Audit and compliance** — CloudTrail Event History, Config timeline, Security Hub, Trusted Advisor | separate consoles | "who did what, when" is answerable | scattered across four services with four data models |
 | 9 | **Cost** — Cost Explorer, Budgets, cost allocation tags | Billing console | tag-driven attribution | disconnected from the resource pages where decisions get made |
 
-**The one structural thing AWS gets wrong that we will not copy:** the console mutates production directly. You click *Terminate* and the instance dies. There is no review, no approval, no diff, and the only record is CloudTrail after the fact. ZD Cloud's console **opens a pull request** for every write (ADR-0021). The console is a rich, opinionated editor for the GitOps repo, plus a live reader of the running system.
+**The one structural thing AWS gets wrong that we will not copy:** the console mutates production directly. You click *Terminate* and the instance dies. There is no review, no approval, no diff, and the only record is CloudTrail after the fact. Argus's console **opens a pull request** for every write (ADR-0021). The console is a rich, opinionated editor for the GitOps repo, plus a live reader of the running system.
 
 ---
 
@@ -35,7 +35,7 @@ Stripped of the 240 service pages, the AWS Console is nine repeating ideas. Ever
 Nine sections, ordered by how often an operator touches them. No "services" list, because there are 22 things, not 240 — everything is reachable in two clicks from the sidebar or one keystroke from the command palette.
 
 ```
-ZD Cloud Console
+Argus Console
 │
 ├── Overview                     the morning screen
 │
@@ -89,7 +89,7 @@ ZD Cloud Console
 └── Audit                        every action by anyone, forever, searchable, exportable
 ```
 
-**Global shell** (present on every page): ZD leaf mark → section breadcrumb → **command palette (`⌘K` / `Ctrl+K`)** → environment switch (production / staging) → alert bell → account menu with tier badge and elevation state.
+**Global shell** (present on every page): Argus mark → section breadcrumb → **command palette (`⌘K` / `Ctrl+K`)** → environment switch (production / staging) → alert bell → account menu with tier badge and elevation state.
 
 The **environment switch** is the honest version of AWS's region selector: it is a two-state toggle, it is coloured (production is `cane`, staging is `brand`), and every destructive action re-states the environment in its confirm dialog.
 
@@ -154,7 +154,7 @@ How a connect actually works, so there is no ambiguity:
 2. Console API checks role and tier. If the operator is not currently elevated, it offers *Request elevation* → an access grant with a reason, an approver, and an expiry (default 2 hours).
 3. On approval, the API asks OpenBao for a **dynamic, one-time local credential** for that VM, valid for the session length. **The operator never sees a password**; Guacamole receives it directly and the operator never types one.
 4. Guacamole opens the session in the browser tab, inside the console's chrome, with a red banner: *Recorded session · sql-01 · expires 15:42 · reason: "restore drill"*.
-5. Every keystroke and the full screen video are recorded to `zd-sessions` (object-locked). Clipboard and file transfer are per-role: Operators get clipboard in only; Admins get both, and every file transfer is logged with a hash.
+5. Every keystroke and the full screen video are recorded to `argus-sessions` (object-locked). Clipboard and file transfer are per-role: Operators get clipboard in only; Admins get both, and every file transfer is logged with a hash.
 6. At expiry the session closes and the credential is revoked automatically.
 
 **Advanced beyond AWS:** AWS has no browser RDP at all — Session Manager is text-only, and Fleet Manager's Remote Desktop is Windows-only, licence-gated and unrecorded by default. Recorded, credential-less, time-boxed RDP in the same UI as the deploy button is genuinely better than what you are leaving behind, and it removes the VPN client and the RDP shortcuts from everyone's laptop.
@@ -169,7 +169,7 @@ How a connect actually works, so there is no ambiguity:
 
 **Query editor** — a browser SQL client for read-only investigation: role-scoped (Operators get `SELECT` on non-PII views; Security gets audit tables), every query logged to the audit with its text and row count, a hard row cap, a query timeout, and no `DELETE`/`UPDATE`/`DROP` grammar accepted at all for non-Admin roles. This is deliberately not a replacement for SSMS; it is the 90 % case (someone needs to check a number) without anyone RDP-ing into `sql-01`.
 
-**Object storage**: bucket list with size, object count, lock mode and remaining days, replication lag to Site B, lifecycle rules. A **browser** for prefixes and objects with preview (images from `zd-survey-pictures`, GeoTIFF thumbnails from `zd-rasters` via TiTiler, JSON/text inline) — because "find the survey photo for parcel X" should not require an S3 client. Upload/delete follow the bucket's own policy: `zd-backups` shows *Delete* disabled with the reason "object lock, 35 days".
+**Object storage**: bucket list with size, object count, lock mode and remaining days, replication lag to Site B, lifecycle rules. A **browser** for prefixes and objects with preview (images from `argus-survey-pictures`, GeoTIFF thumbnails from `argus-rasters` via TiTiler, JSON/text inline) — because "find the survey photo for parcel X" should not require an S3 client. Upload/delete follow the bucket's own policy: `argus-backups` shows *Delete* disabled with the reason "object lock, 35 days".
 
 **Cache**: Garnet memory, hit rate, keyspace by prefix, slow commands. **Queues**: NATS streams, message rate, consumer lag, dead-letter inspector with a *Replay* action.
 

@@ -1,4 +1,4 @@
-apiVersion: zdcloud/v1
+apiVersion: argus/v1
 kind: Environment
 name: production
 apps:

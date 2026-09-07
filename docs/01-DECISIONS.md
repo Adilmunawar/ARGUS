@@ -1,6 +1,6 @@
 # Architecture decisions
 
-The complete record of **why** ZD Cloud is built the way it is. Each decision is an ADR: context, the options weighed, the choice, and what it costs. Decisions are never edited once accepted — they are superseded by a later ADR that says so. `docs/adr/` holds the same entries as individual files for linking.
+The complete record of **why** Argus is built the way it is. Each decision is an ADR: context, the options weighed, the choice, and what it costs. Decisions are never edited once accepted — they are superseded by a later ADR that says so. `docs/adr/` holds the same entries as individual files for linking.
 
 Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
@@ -39,6 +39,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 | [0031](#adr-0031) | SQL Server recovery model returns to FULL once log backups exist | Proposed |
 | [0032](adr/ADR-0032-browser-rdp-ssh-via-guacamole.md) | Browser RDP/SSH/VM-console via Apache Guacamole, credential-less and recorded | Accepted |
 | [0033](adr/ADR-0033-console-is-primary-wac-retired-at-parity.md) | The console is the primary surface; Windows Admin Center retired at C6 parity | Accepted |
+| [0034](adr/ADR-0034-the-platform-is-named-argus.md) | The platform is named Argus; `argus` is the identifier prefix, never `arg` | Accepted |
 
 ---
 
@@ -104,7 +105,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 **Context.** With guest executables (ADR-0005) there are no images to store.
 
-**Decision.** Application packages are signed `.sfpkg` archives stored in the `zd-artifacts` bucket (SeaweedFS, object-locked), addressed by Git commit SHA. Harbor is not deployed.
+**Decision.** Application packages are signed `.sfpkg` archives stored in the `argus-artifacts` bucket (SeaweedFS, object-locked), addressed by Git commit SHA. Harbor is not deployed.
 
 **Why.** Harbor is Linux-only and would be a third Linux exception with no v1 consumer.
 
@@ -116,9 +117,9 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 **Options.** SeaweedFS (Apache-2.0, Windows build, weekly releases, small-object optimised, erasure coding, lifecycle, object lock). Garage (AGPL, geo-distributed, no Windows build). Ceph RGW (Linux only, heavy). RustFS (young).
 
-**Decision.** SeaweedFS at both sites, running as Windows services (WinSW), with async cross-site replication of the `zd-backups` bucket. Buckets: `zd-survey-pictures`, `zd-rasters`, `zd-sentinel`, `zd-artifacts`, `zd-backups`, `zd-ml`.
+**Decision.** SeaweedFS at both sites, running as Windows services (WinSW), with async cross-site replication of the `argus-backups` bucket. Buckets: `argus-survey-pictures`, `argus-rasters`, `argus-sentinel`, `argus-artifacts`, `argus-backups`, `argus-ml`.
 
-**Why.** Apache-2.0, native Windows binary, and the many-small-objects design fits the survey pictures exactly. Object-lock (WORM) on `zd-backups` and `zd-artifacts`.
+**Why.** Apache-2.0, native Windows binary, and the many-small-objects design fits the survey pictures exactly. Object-lock (WORM) on `argus-backups` and `argus-artifacts`.
 
 **Consequences.** SeaweedFS's S3 coverage is "good", not MinIO's "excellent": test every client (the .NET S3 SDK, `rclone`, `boto3`, Kopia) in Phase 1. Garage remains an option on `siem-01` for Site B if SeaweedFS replication proves fragile over the site link.
 
@@ -142,7 +143,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0010 — NATS JetStream for queues and events
 
-**Decision.** NATS server (Apache-2.0, Windows binary) with JetStream, 3-node cluster across the Service Fabric nodes. Subjects: `zd.ingest.*` (shapefile uploads), `zd.export.*`, `zd.ai.*`, `zd.sentinel.scene.landed`, `zd.pipeline.*`.
+**Decision.** NATS server (Apache-2.0, Windows binary) with JetStream, 3-node cluster across the Service Fabric nodes. Subjects: `argus.ingest.*` (shapefile uploads), `argus.export.*`, `argus.ai.*`, `argus.sentinel.scene.landed`, `argus.pipeline.*`.
 
 **Why.** One binary gives pub/sub, durable work queues, key-value and object store; MSMQ is legacy; Kafka is far too heavy for these volumes; RabbitMQ is fine but does not run natively as well on Windows and lacks JetStream's KV.
 
@@ -156,7 +157,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0012 — Active Directory + AD FS; tiered administration
 
-**Decision.** A new forest `zd.local` (two DCs at Site A, one at Site B); **AD FS** for OIDC/SAML to the console, Grafana, Windows Admin Center, JupyterHub and the Mills web login; **Windows Hello for Business / FIDO2** for humans; **gMSA** for every service; **LAPS**; **Tier 0/1/2** admin model with Privileged Access Workstations; **JEA** endpoints for operators; NTLM disabled; LDAP signing and channel binding enforced.
+**Decision.** A new forest `argus.local` (two DCs at Site A, one at Site B); **AD FS** for OIDC/SAML to the console, Grafana, Windows Admin Center, JupyterHub and the Mills web login; **Windows Hello for Business / FIDO2** for humans; **gMSA** for every service; **LAPS**; **Tier 0/1/2** admin model with Privileged Access Workstations; **JEA** endpoints for operators; NTLM disabled; LDAP signing and channel binding enforced.
 
 **Why.** Included in the Windows licence, the most mature identity system available, and the foundation every other Windows security control (Kerberos-authenticated IPsec, gMSA, Credential Guard) assumes. Keycloak was the Linux plan's choice; on Windows it would duplicate AD.
 
@@ -170,11 +171,11 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0014 — WDAC + Authenticode: only signed code runs
 
-**Decision.** **Windows Defender Application Control** in enforced mode on every server: only code signed by the ZD code-signing certificate (AD CS, key on an HSM or at minimum a TPM-bound cert on the build server) or by Microsoft runs — binaries, DLLs, drivers, PowerShell scripts. CI signs every artefact; `.sfpkg` packages are also signed and verified by the reconciler before deployment. PowerShell Constrained Language Mode everywhere but Tier 0 PAWs.
+**Decision.** **Windows Defender Application Control** in enforced mode on every server: only code signed by the Argus code-signing certificate (AD CS, key on an HSM or at minimum a TPM-bound cert on the build server) or by Microsoft runs — binaries, DLLs, drivers, PowerShell scripts. CI signs every artefact; `.sfpkg` packages are also signed and verified by the reconciler before deployment. PowerShell Constrained Language Mode everywhere but Tier 0 PAWs.
 
 **Why.** Stronger than container image signing: it covers the whole machine, and it makes most malware, unsigned tooling and living-off-the-land scripts simply fail to execute.
 
-**Consequences.** Every tool the team runs on a server must be signed or catalogued — including third-party binaries (SeaweedFS, NATS, OpenBao, Prometheus), which are catalogued with a ZD-signed catalog file per version. This is real ongoing work and is the reason `platform/policies/wdac/` exists.
+**Consequences.** Every tool the team runs on a server must be signed or catalogued — including third-party binaries (SeaweedFS, NATS, OpenBao, Prometheus), which are catalogued with a Argus-signed catalog file per version. This is real ongoing work and is the reason `platform/policies/wdac/` exists.
 
 ## ADR-0015 — IPsec domain isolation instead of a service mesh
 
@@ -206,29 +207,29 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0020 — Backups
 
-**Decision.** SQL Server: native full nightly + differential 6-hourly + **log every 15 min** (once ADR-0031 lands) to `zd-backups` with `CHECKSUM` and `RESTORE VERIFYONLY`, encrypted, object-locked 35 days at Site A, replicated to Site B and locked 90 days. PostgreSQL: pgBackRest (Windows via WSL is not allowed — use `pg_basebackup` + WAL archiving to S3 via the `wal-g` Windows build). Files (survey pictures, rasters): Kopia (Windows) content-addressed, encrypted. VMs: Hyper-V Replica to Site B (5-min RPO) + weekly Windows Server Backup of hosts. The backup gMSA has `PUT` but never `DELETE` on the buckets. **Restore drill monthly, DR drill quarterly**, reports signed and committed to `docs/runbooks/drills/`.
+**Decision.** SQL Server: native full nightly + differential 6-hourly + **log every 15 min** (once ADR-0031 lands) to `argus-backups` with `CHECKSUM` and `RESTORE VERIFYONLY`, encrypted, object-locked 35 days at Site A, replicated to Site B and locked 90 days. PostgreSQL: pgBackRest (Windows via WSL is not allowed — use `pg_basebackup` + WAL archiving to S3 via the `wal-g` Windows build). Files (survey pictures, rasters): Kopia (Windows) content-addressed, encrypted. VMs: Hyper-V Replica to Site B (5-min RPO) + weekly Windows Server Backup of hosts. The backup gMSA has `PUT` but never `DELETE` on the buckets. **Restore drill monthly, DR drill quarterly**, reports signed and committed to `docs/runbooks/drills/`.
 
 **Why.** Ransomware and destructive insiders are threat #1; immutability at a second site under different credentials is the only control that fully answers it.
 
 ## ADR-0021 — Control surface
 
-**Decision.** Three surfaces, one truth: a **web console** for operators and mill staff; a **PowerShell module (`ZDCloud`) and thin `zdc` CLI** for engineers; a **GitOps repository** (`platform/gitops/`) that is the only writer of production state. The console and CLI call the same console API; the console API writes to Git and the reconciler applies Git. Direct changes to production outside the reconciler are denied by WDAC/JEA and alerted by Wazuh. Owner's choice, 8 Sep 2026.
+**Decision.** Three surfaces, one truth: a **web console** for operators and mill staff; a **PowerShell module (`Argus`) and thin `argus` CLI** for engineers; a **GitOps repository** (`platform/gitops/`) that is the only writer of production state. The console and CLI call the same console API; the console API writes to Git and the reconciler applies Git. Direct changes to production outside the reconciler are denied by WDAC/JEA and alerted by Wazuh. Owner's choice, 8 Sep 2026.
 
 ## ADR-0022 — The console is .NET 10 + Next.js on Service Fabric
 
-**Decision.** `platform/console/`: a .NET 10 minimal API (`ZdCloud.Console.Api`) and a Next.js 16 front end, deployed as a Service Fabric application, authenticated by AD FS, authorised by AD groups mapped to console roles. Day one, before parity: Windows Admin Center for raw host management and Grafana for observability, both behind AD FS.
+**Decision.** `platform/console/`: a .NET 10 minimal API (`Argus.Console.Api`) and a Next.js 16 front end, deployed as a Service Fabric application, authenticated by AD FS, authorised by AD groups mapped to console roles. Day one, before parity: Windows Admin Center for raw host management and Grafana for observability, both behind AD FS.
 
 **Why.** The same stack that runs the Mills dashboard on the same Windows server today; the team's design system, testing habits and Claude Code plugins apply unchanged.
 
 ## ADR-0023 — First-party GitOps reconciler
 
-**Decision.** `ZdCloud.Reconciler`, a .NET Service Fabric stateful service: polls the GitOps repo, verifies commit signatures, diffs desired vs actual (Service Fabric apps, Hyper-V VMs via WMI, SeaweedFS buckets, OpenBao policies, GPO links via DSC), applies in dependency order, reports status to the console and Grafana.
+**Decision.** `Argus.Reconciler`, a .NET Service Fabric stateful service: polls the GitOps repo, verifies commit signatures, diffs desired vs actual (Service Fabric apps, Hyper-V VMs via WMI, SeaweedFS buckets, OpenBao policies, GPO links via DSC), applies in dependency order, reports status to the console and Grafana.
 
 **Why.** Flux and Argo are Kubernetes-only. The reconciler is ~2,000 lines of C# against APIs the team already knows, and it is the single most important piece of the platform: it is what makes "Git is the truth" true.
 
 ## ADR-0024 — CI on GitHub Actions self-hosted Windows runners; Forgejo mirror
 
-**Decision.** GitHub stays the collaboration surface; self-hosted runners (Windows, WDAC-compliant, no internet except allow-listed) build, test, sign and upload `.sfpkg` to `zd-artifacts`. Forgejo (Windows binary) mirrors every repo and can run the same workflows if GitHub is unreachable.
+**Decision.** GitHub stays the collaboration surface; self-hosted runners (Windows, WDAC-compliant, no internet except allow-listed) build, test, sign and upload `.sfpkg` to `argus-artifacts`. Forgejo (Windows binary) mirrors every repo and can run the same workflows if GitHub is unreachable.
 
 ## ADR-0025 — OpenTofu + DSC v3 for IaC
 
@@ -244,13 +245,13 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0028 — Local Sentinel mirror + STAC
 
-**Decision.** Sentinel-1 GRD and Sentinel-2 L2A for the Punjab and Sindh AOIs pulled via `eodag` from the Copernicus Data Space, converted to COGs, stored in `zd-sentinel`, indexed in `pgstac` on PostgreSQL. TiTiler (Python, Windows) serves dynamic raster tiles; Martin (Rust, Windows build) serves parcel vector tiles from PostGIS.
+**Decision.** Sentinel-1 GRD and Sentinel-2 L2A for the Punjab and Sindh AOIs pulled via `eodag` from the Copernicus Data Space, converted to COGs, stored in `argus-sentinel`, indexed in `pgstac` on PostgreSQL. TiTiler (Python, Windows) serves dynamic raster tiles; Martin (Rust, Windows build) serves parcel vector tiles from PostGIS.
 
 **Why.** The single largest performance change available: pipelines stop pulling scenes over Pakistani bandwidth on every run, and the dashboard map stops shipping megabyte GeoJSON.
 
 ## ADR-0029 — ML platform on one GPU node
 
-**Decision.** `gpu-01`: Ubuntu 24.04, 2 × NVIDIA L40S, Ray (head + workers on the same box), MLflow (artefacts to `zd-ml`), Dagster (asset graphs for the v5 classifier feature tables and the SegFormer/HRNet pipelines), JupyterHub with AD FS login. No Kubeflow, no KServe: inference endpoints are Ray Serve behind Caddy.
+**Decision.** `gpu-01`: Ubuntu 24.04, 2 × NVIDIA L40S, Ray (head + workers on the same box), MLflow (artefacts to `argus-ml`), Dagster (asset graphs for the v5 classifier feature tables and the SegFormer/HRNet pipelines), JupyterHub with AD FS login. No Kubeflow, no KServe: inference endpoints are Ray Serve behind Caddy.
 
 **Why.** The team's pipelines are Colab notebooks and Python scripts today; Ray + Dagster is the smallest step up that gives scheduling, lineage and resumability. Fractional GPU sharing is by Ray's resource accounting, not by the OS — adequate for a two-GPU box.
 
@@ -271,10 +272,16 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 Full text: [`adr/ADR-0032-browser-rdp-ssh-via-guacamole.md`](adr/ADR-0032-browser-rdp-ssh-via-guacamole.md).
 
-**Decision.** Apache Guacamole (Apache-2.0, clientless HTML5 gateway for RDP/SSH/VNC) on `guac-01`, embedded in the console's Connect tab. Credentials come from OpenBao as one-time, session-scoped values the operator never sees; every session is time-boxed and recorded to the object-locked `zd-sessions` bucket. **Amends ADR-0003: three Linux exceptions, not two.**
+**Decision.** Apache Guacamole (Apache-2.0, clientless HTML5 gateway for RDP/SSH/VNC) on `guac-01`, embedded in the console's Connect tab. Credentials come from OpenBao as one-time, session-scoped values the operator never sees; every session is time-boxed and recorded to the object-locked `argus-sessions` bucket. **Amends ADR-0003: three Linux exceptions, not two.**
 
 ## ADR-0033 — The console is primary; Windows Admin Center retired at parity
 
 Full text: [`adr/ADR-0033-console-is-primary-wac-retired-at-parity.md`](adr/ADR-0033-console-is-primary-wac-retired-at-parity.md).
 
 **Decision.** WAC is a bootstrap and break-glass tool, retired from daily use when console stage C6 lands. Grafana is not retired — the console embeds and links to it rather than rebuilding it.
+
+## ADR-0034 — The platform is named Argus
+
+Full text: [`adr/ADR-0034-the-platform-is-named-argus.md`](adr/ADR-0034-the-platform-is-named-argus.md).
+
+**Decision.** The platform is **Argus**, not ZD Cloud — a name of its own, separate from the company that owns it. The identifier prefix is the full word `argus` everywhere, deliberately not `arg`, because ADR-0023 rejects Argo and a three-letter prefix would read as it. Zaraat Dost remains the company and `zaraatdost.pk` remains the domain.

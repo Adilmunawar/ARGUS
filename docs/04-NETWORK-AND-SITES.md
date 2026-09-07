@@ -10,7 +10,7 @@
 | 20 | DMZ | 10.20.0.0/24 | yes | Caddy VIP `10.20.0.10`, Uptime Kuma (B) | Internet 443; nothing else |
 | 30 | PLATFORM | 10.30.0.0/23 | via firewall | SF nodes and their apps, legacy VM, Forgejo | DMZ (Caddy → app ports); BUILD (deploy); ADMIN VPN |
 | 31 | DATA | 10.31.0.0/24 | via firewall | SQL, PostgreSQL, SeaweedFS, Garnet, NATS | PLATFORM and ML by identity; BUILD never |
-| 32 | BUILD | 10.32.0.0/24 | via firewall | runners | Forgejo/GitHub via proxy; `zd-artifacts` S3 endpoint |
+| 32 | BUILD | 10.32.0.0/24 | via firewall | runners | Forgejo/GitHub via proxy; `argus-artifacts` S3 endpoint |
 | 40 | STORAGE | 10.40.0.0/24 | **non-routed** | S2D RDMA (RoCE v2), Live Migration, cluster heartbeat | hosts only |
 | 50 | ML | 10.50.0.0/24 | via firewall | `gpu-01` | PLATFORM (Ray Serve via Caddy), DATA by identity |
 | 90 | QUARANTINE | 10.90.0.0/24 | none | isolated hosts under investigation | SEC only |
@@ -20,7 +20,7 @@ Rules are in `platform/policies/firewall/opnsense-rules.yaml` and are applied by
 
 ## 2. Addressing and names
 
-DNS zone `zd.local` (AD-integrated, internal) and `zaraatdost.pk` (public, at the registrar; only DMZ names). Public names: `mills.zaraatdost.pk`, `loans.zaraatdost.pk`, `agis.zaraatdost.pk`, `console.zaraatdost.pk` (VPN-only despite public DNS — Caddy checks source), `ml.zaraatdost.pk`, `status.zaraatdost.pk` (Site B). Every internal service has an `A` record and an AD CS certificate; nothing is addressed by IP in configuration.
+DNS zone `argus.local` (AD-integrated, internal) and `zaraatdost.pk` (public, at the registrar; only DMZ names). Public names: `mills.zaraatdost.pk`, `loans.zaraatdost.pk`, `agis.zaraatdost.pk`, `console.zaraatdost.pk` (VPN-only despite public DNS — Caddy checks source), `ml.zaraatdost.pk`, `status.zaraatdost.pk` (Site B). Every internal service has an `A` record and an AD CS certificate; nothing is addressed by IP in configuration.
 
 ## 3. Edge
 

@@ -5,23 +5,23 @@ resources:
     type: Microsoft.Windows/WindowsFeature
     properties: { names: [NET-Framework-45-Core], ensure: present }
   - name: wdac
-    type: ZdCloud/WdacPolicy
-    properties: { policyId: zd-base, mode: audit }            # → enforced in Phase 6
+    type: Argus/WdacPolicy
+    properties: { policyId: argus-base, mode: audit }            # → enforced in Phase 6
   - name: gpo-membership
-    type: ZdCloud/OuPlacement
-    properties: { ou: "OU=SF,OU=Tier1,OU=Servers,DC=zd,DC=local" }
+    type: Argus/OuPlacement
+    properties: { ou: "OU=SF,OU=Tier1,OU=Servers,DC=argus,DC=local" }
   - name: sysmon
-    type: ZdCloud/WinSwService
-    properties: { name: Sysmon64, source: "zd-artifacts/tools/sysmon/15.15/Sysmon64.exe", sha256: "<pinned>", args: "-i C:\\ZdCloud\\policies\\sysmon.xml" }
+    type: Argus/WinSwService
+    properties: { name: Sysmon64, source: "argus-artifacts/tools/sysmon/15.15/Sysmon64.exe", sha256: "<pinned>", args: "-i C:\\Argus\\policies\\sysmon.xml" }
   - name: windows-exporter
-    type: ZdCloud/WinSwService
-    properties: { name: windows_exporter, source: "zd-artifacts/tools/windows_exporter/0.30.0/windows_exporter.exe", sha256: "<pinned>", args: "--collectors.enabled=cpu,memory,logical_disk,net,service,process,tcp" }
+    type: Argus/WinSwService
+    properties: { name: windows_exporter, source: "argus-artifacts/tools/windows_exporter/0.30.0/windows_exporter.exe", sha256: "<pinned>", args: "--collectors.enabled=cpu,memory,logical_disk,net,service,process,tcp" }
   - name: wazuh-agent
-    type: ZdCloud/MsiPackage
-    properties: { source: "zd-artifacts/tools/wazuh/4.13/wazuh-agent.msi", sha256: "<pinned>", args: "WAZUH_MANAGER=siem-01.zd.local" }
+    type: Argus/MsiPackage
+    properties: { source: "argus-artifacts/tools/wazuh/4.13/wazuh-agent.msi", sha256: "<pinned>", args: "WAZUH_MANAGER=siem-01.argus.local" }
   - name: alloy
-    type: ZdCloud/WinSwService
-    properties: { name: alloy, source: "zd-artifacts/tools/alloy/1.9.0/alloy.exe", sha256: "<pinned>", args: "run C:\\ZdCloud\\alloy\\config.alloy" }
+    type: Argus/WinSwService
+    properties: { name: alloy, source: "argus-artifacts/tools/alloy/1.9.0/alloy.exe", sha256: "<pinned>", args: "run C:\\Argus\\alloy\\config.alloy" }
   - name: servicefabric
-    type: ZdCloud/ServiceFabricNode
-    properties: { cluster: zd-sf-a, nodeType: primary, certThumbprintFrom: "ZD-Issuing-CA:sf-node" }
+    type: Argus/ServiceFabricNode
+    properties: { cluster: argus-sf-a, nodeType: primary, certThumbprintFrom: "Argus-Issuing-CA:sf-node" }

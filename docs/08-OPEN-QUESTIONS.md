@@ -16,3 +16,4 @@ Numbered so ADRs and phase gates can reference them. Answered questions move to 
 | Q10 | **Defender for Endpoint** licences as a commercial EDR on top of Sysmon/Wazuh? | Phase 6 | Optional; revisit after the pen test |
 | Q11 | **Retention** — 400 days for logs and 90 days for Site B backups: any regulatory requirement (SBP for the loan product?) that changes these? | Phase 1 | Ask the bank partner |
 | Q12 | **Console name and domain** — `console.zaraatdost.pk`? And the public API host for the apps — `api.zaraatdost.pk`? | Phase 2 | As proposed |
+| Q13 | **Argus name clearance** (ADR-0034) — trademark search and `.pk` domain availability. An older network-monitoring tool and a commodities-pricing firm both use the name; neither is in this market, but neither has been checked. | Anything public; Phase 2 | Check before the name leaves this repository |

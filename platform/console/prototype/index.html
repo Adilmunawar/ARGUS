@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Overview — ZD Cloud Console</title>
+<title>Overview — Argus Console</title>
 <style>
 /* ── Tokens: Mills DESIGN.md, verbatim. Never hardcode a hex outside this block. ──
    Fonts are a local-first stack on purpose: the console runs inside an
@@ -323,7 +323,7 @@ td.st{width:1%;white-space:nowrap}
 <nav class="side" id="side" aria-label="Sections">
   <p class="mark">
     <span class="leafmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#c8e36f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
-    <span class="txt"><b>ZD Cloud</b><span>Zaraat Dost</span></span>
+    <span class="txt"><b>Argus</b><span>Zaraat Dost</span></span>
   </p>
 
   <p class="navgroup">Run</p>
@@ -350,7 +350,7 @@ td.st{width:1%;white-space:nowrap}
   <button class="burger" id="burger" aria-label="Open navigation" aria-expanded="false" aria-controls="side">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
   </button>
-  <nav class="crumbs" aria-label="Breadcrumb"><button data-go="overview">ZD Cloud</button><span class="sep" aria-hidden="true">/</span><b id="crumb">Overview</b></nav>
+  <nav class="crumbs" aria-label="Breadcrumb"><button data-go="overview">Argus</button><span class="sep" aria-hidden="true">/</span><b id="crumb">Overview</b></nav>
 
   <button class="kbar" id="kbar">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -446,7 +446,7 @@ td.st{width:1%;white-space:nowrap}
       <tbody>
         <tr><td style="width:92px;color:var(--muted)">09:14</td><td>Zayan proposed <b>mills 2026.09.08.1</b> for production</td><td class="st"><span class="pill info"><i aria-hidden="true"></i>Awaiting approval</span></td></tr>
         <tr><td style="color:var(--muted)">08:02</td><td>Reconciler applied <b>mills 2026.09.08.1</b> to staging</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Healthy</span></td></tr>
-        <tr><td style="color:var(--muted)">07:30</td><td>Backup <b>umairv3_db</b> log written to zd-backups and verified</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Locked 35 d</span></td></tr>
+        <tr><td style="color:var(--muted)">07:30</td><td>Backup <b>umairv3_db</b> log written to argus-backups and verified</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Locked 35 d</span></td></tr>
         <tr><td style="color:var(--muted)">Yesterday</td><td>Adil connected to <b>sql-01</b> by desktop — “restore drill”</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Recorded 41 m</span></td></tr>
       </tbody></table></div></div>
   </div>
@@ -482,7 +482,7 @@ td.st{width:1%;white-space:nowrap}
         <div class="node"><b>sql-01</b><small>umairv3_db · Kerberos</small></div>
         <div class="node"><b>Garnet</b><small>cache</small></div>
         <div class="node"><b>NATS</b><small>ingest · export</small></div>
-        <div class="node"><b>zd-survey-pictures</b><small>1.16 M objects</small></div>
+        <div class="node"><b>argus-survey-pictures</b><small>1.16 M objects</small></div>
         <div class="node"><b>Anthropic</b><small>via egress proxy</small></div>
       </div>
       <p class="note" style="margin-top:14px">Four secrets are referenced by name only — the values live in OpenBao and are injected when the service starts. <button class="link" style="color:inherit">See who read them</button></p>
@@ -584,7 +584,7 @@ td.st{width:1%;white-space:nowrap}
           <div class="screen" role="img" aria-label="Remote desktop of sql-01 showing a RESTORE VERIFYONLY command that completed successfully">
             <span class="tb">sql-01 — Windows Server 2025 · SQL Server Management Studio</span>
 RESTORE VERIFYONLY FROM DISK =
-  N'\\zd-backups\sql\umairv3_db\2026-09-08T0730Z.bak'
+  N'\\argus-backups\sql\umairv3_db\2026-09-08T0730Z.bak'
   WITH CHECKSUM;
 
 The backup set on file 1 is valid.
@@ -655,10 +655,10 @@ Completion time: 2026-09-08T09:22:41
       <caption class="sr">Object storage buckets</caption>
       <thead><tr><th scope="col">Bucket</th><th scope="col" class="num">Size</th><th scope="col" class="num">Objects</th><th scope="col">Lock</th><th scope="col">Site B</th></tr></thead>
       <tbody>
-        <tr><td><button class="link">zd-survey-pictures</button></td><td class="num">1.2 TB</td><td class="num">1,163,402</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>None</span></td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Local only</span></td></tr>
-        <tr><td><button class="link">zd-backups</button></td><td class="num">3.2 TB</td><td class="num">141</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>35 days</span></td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>90 days</span></td></tr>
-        <tr><td><button class="link">zd-sentinel</button></td><td class="num">5.4 TB</td><td class="num">28,110</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>None</span></td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Re-pullable</span></td></tr>
-        <tr><td><button class="link">zd-sessions</button></td><td class="num">88 GB</td><td class="num">412</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>400 days</span></td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Replicated</span></td></tr>
+        <tr><td><button class="link">argus-survey-pictures</button></td><td class="num">1.2 TB</td><td class="num">1,163,402</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>None</span></td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Local only</span></td></tr>
+        <tr><td><button class="link">argus-backups</button></td><td class="num">3.2 TB</td><td class="num">141</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>35 days</span></td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>90 days</span></td></tr>
+        <tr><td><button class="link">argus-sentinel</button></td><td class="num">5.4 TB</td><td class="num">28,110</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>None</span></td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Re-pullable</span></td></tr>
+        <tr><td><button class="link">argus-sessions</button></td><td class="num">88 GB</td><td class="num">412</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>400 days</span></td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Replicated</span></td></tr>
       </tbody>
     </table></div></div>
   </div>
@@ -698,7 +698,7 @@ Completion time: 2026-09-08T09:22:41
     <caption class="sr">Active access grants</caption>
     <thead><tr><th scope="col">Who</th><th scope="col">Group</th><th scope="col">Reason</th><th scope="col">Expires</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
     <tbody>
-      <tr><td>Adil</td><td>ZD-Tier1-Operators</td><td>September restore drill</td><td>15:42 today</td><td class="st"><button class="link">Revoke</button></td></tr>
+      <tr><td>Adil</td><td>Argus-Tier1-Operators</td><td>September restore drill</td><td>15:42 today</td><td class="st"><button class="link">Revoke</button></td></tr>
     </tbody></table></div>
     <p class="empty">No other elevations are active.</p></div></div>
 </section>
@@ -738,7 +738,7 @@ Completion time: 2026-09-08T09:22:41
         <tr><td>09:14</td><td>Zayan</td><td>Proposed deployment</td><td>mills</td><td class="st"><button class="link">#1843</button></td></tr>
         <tr><td>09:18</td><td>Adil</td><td>Opened desktop session</td><td>sql-01</td><td class="st"><button class="link">Recording</button></td></tr>
         <tr><td>08:02</td><td>Reconciler</td><td>Applied to staging</td><td>mills</td><td class="st"><button class="link">#1841</button></td></tr>
-        <tr><td>07:30</td><td>gmsa-backup$</td><td>Wrote backup</td><td>zd-backups</td><td>Locked 35 days</td></tr>
+        <tr><td>07:30</td><td>gmsa-backup$</td><td>Wrote backup</td><td>argus-backups</td><td>Locked 35 days</td></tr>
       </tbody>
     </table></div></div>
   </div>
@@ -783,7 +783,7 @@ Completion time: 2026-09-08T09:22:41
     var nav = document.querySelector('.nav[data-go="' + id + '"]');
     var name = nav ? nav.querySelector('.lbl').textContent.trim() : id;
     crumb.textContent = name;
-    document.title = name + ' — ZD Cloud Console';
+    document.title = name + ' — Argus Console';
     live.textContent = name + ' loaded';
     var h = target.querySelector('h1');
     if (h) h.focus({ preventScroll: true });
@@ -821,7 +821,7 @@ Completion time: 2026-09-08T09:22:41
         approve: 'Approved. The reconciler verifies the commit and package signatures, then runs a health-gated rolling upgrade that rolls itself back if the health policy fails.',
         reject: 'Rejected. Zayan is notified with your reason.',
         release: 'Elevation released. Access grants are time-boxed and expire on their own.',
-        disconnect: 'Session ended. The recording is written to zd-sessions and the one-time credential is revoked.'
+        disconnect: 'Session ended. The recording is written to argus-sessions and the one-time credential is revoked.'
       };
       var m = msgs[act.dataset.act] || 'Prototype — no action taken.';
       live.textContent = m;

@@ -14,13 +14,13 @@ AWS itself has no answer here — Session Manager is text-only.
 
 ## Decision
 
-(c). Apache Guacamole (Apache-2.0), which is a clientless remote desktop gateway supporting VNC, RDP and SSH, with the client delivered as an HTML5 web application so access is not tied to any device or location. Deployed as `guac-01` (a Linux VM — a **third Linux exception**, amending ADR-0003) running `guacd` plus the client, embedded in the ZD Cloud Console's Connect tab and never exposed as its own UI.
+(c). Apache Guacamole (Apache-2.0), which is a clientless remote desktop gateway supporting VNC, RDP and SSH, with the client delivered as an HTML5 web application so access is not tied to any device or location. Deployed as `guac-01` (a Linux VM — a **third Linux exception**, amending ADR-0003) running `guacd` plus the client, embedded in the Argus Console's Connect tab and never exposed as its own UI.
 
 Session mechanics are mandatory, not optional:
 
 1. Role and tier checked by the console API; elevation requested inline if absent, with a reason and an approver.
 2. OpenBao issues a **one-time credential** scoped to that VM and session length. Guacamole receives it directly over the internal channel; **the operator never sees or types a password**.
-3. Session recording (full screen video plus keystroke timeline) written to the object-locked `zd-sessions` bucket, retained 400 days.
+3. Session recording (full screen video plus keystroke timeline) written to the object-locked `argus-sessions` bucket, retained 400 days.
 4. Clipboard and file transfer gated by role; every transfer logged with a SHA-256.
 5. Automatic expiry closes the session and revokes the credential.
 6. `guac-01` is reachable only from the console's identity, never directly.
@@ -34,7 +34,7 @@ Option (b) is Windows-only, unrecorded by default, and dies with ADR-0033. Optio
 ## Consequences
 
 - A third Linux VM to patch, in Tier 1, covered by Wazuh, IPsec (strongSwan) and backups. ADR-0003 is amended from two exceptions to three; a fourth still needs its own ADR.
-- `zd-sessions` is added to `storage/buckets.yaml` with a 400-day object lock; recordings are large — budget ~1 GB per hour of RDP.
+- `argus-sessions` is added to `storage/buckets.yaml` with a 400-day object lock; recordings are large — budget ~1 GB per hour of RDP.
 - Recording people's sessions is a workplace matter, not only a technical one: the team is told plainly, the red recording banner is always visible, and the retention period is written down. Nobody is recorded secretly.
 - Guacamole must be validated on the day-one lab alongside Service Fabric and SeaweedFS; it becomes assumption **A11** in `09-VALIDATION-STATUS.md`.
 - The admin VPN remains for PAW and management-plane access; it is no longer needed for routine server work.

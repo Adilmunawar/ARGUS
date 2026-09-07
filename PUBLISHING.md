@@ -15,15 +15,15 @@ Then create a fresh one, scoped to what you actually need, with a short expiry. 
 **Name**
 
 ```
-zd-cloud
+argus
 ```
 
-Short, and it matches the product name used throughout the docs. Alternatives if you want the scope obvious from the name alone: `zd-cloud-platform`, or `sovereign-cloud-platform` if you'd rather lead with the idea than the company.
+Short, and it matches the product name used throughout the docs. Alternatives if you want the scope obvious from the name alone: `argus-platform`, or `sovereign-cloud-platform` if you'd rather lead with the idea than the company.
 
 **Description** (350 char limit; this is what shows in search results)
 
 ```
-Sovereign, Windows-first private cloud replacing AWS on owned hardware. 33 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not.
+Sovereign, Windows-first private cloud replacing AWS on owned hardware. 34 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not.
 ```
 
 **Website**
@@ -46,15 +46,15 @@ accessibility
 ## Publish
 
 ```bash
-cd zd-cloud
+cd argus
 
 # 1. Create the repository (GitHub CLI — it prompts for auth, so no token in your shell history)
 gh auth login
-gh repo create zd-cloud \
+gh repo create argus \
   --public \
   --source=. \
   --remote=origin \
-  --description "Sovereign, Windows-first private cloud replacing AWS on owned hardware. 33 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
+  --description "Sovereign, Windows-first private cloud replacing AWS on owned hardware. 34 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
 
 # 2. Topics
 gh repo edit --add-topic private-cloud,self-hosted,windows-server,hyper-v,service-fabric,active-directory,gitops,infrastructure-as-code,architecture-decision-records,zero-trust,devops,aws-alternative,cloud-migration,disaster-recovery,openbao,seaweedfs,powershell,dotnet,design-system,accessibility
@@ -64,15 +64,15 @@ git push -u origin main
 git push --tags
 
 # 4. Cut the release
-gh release create v0.4.0 \
-  --title "v0.4.0 — compact laptop density, CI, public release" \
-  --notes-file <(sed -n '/## \[0.4.0\]/,/## \[0.3.0\]/p' CHANGELOG.md | head -n -1)
+gh release create v0.5.0 \
+  --title "v0.5.0 — the platform is named Argus" \
+  --notes-file <(sed -n '/## \[0.5.0\]/,/## \[0.4.0\]/p' CHANGELOG.md | head -n -1)
 ```
 
 Without `gh`: create the repository in the web UI (public, no README, no licence, no `.gitignore` — this repo has all three), then:
 
 ```bash
-git remote add origin https://github.com/<you>/zd-cloud.git
+git remote add origin https://github.com/<you>/argus.git
 git push -u origin main && git push --tags
 ```
 

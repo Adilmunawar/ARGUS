@@ -10,8 +10,8 @@ groups:
         for: 10m
         labels: { severity: page, app: mills }
       - alert: MillsPrecomputeOverrun
-        expr: time() - zd_functions_last_success_timestamp{function="mills-precompute"} > 5400
+        expr: time() - argus_functions_last_success_timestamp{function="mills-precompute"} > 5400
         labels: { severity: page, app: mills }
       - alert: UmairDbBackupStale
-        expr: time() - zd_sql_last_log_backup_timestamp{database="umairv3_db"} > 1800
+        expr: time() - argus_sql_last_log_backup_timestamp{database="umairv3_db"} > 1800
         labels: { severity: page, app: mills }

@@ -1,5 +1,5 @@
 # Service Fabric application: Mills Dashboard
-apiVersion: zdcloud/v1
+apiVersion: argus/v1
 kind: ServiceFabricApp
 metadata:
   name: mills
@@ -8,7 +8,7 @@ metadata:
   tier: 1
 spec:
   package:
-    bucket: zd-artifacts
+    bucket: argus-artifacts
     key: mills/{{ version }}.sfpkg          # version comes from environments/*.yaml
     signature: authenticode                 # reconciler verifies before registering
   identity: gmsa-mills$                     # RunAs for every service below
@@ -29,16 +29,16 @@ spec:
       endpoints: [{ name: http, port: 5141 }]
       env:
         ASPNETCORE_URLS: http://0.0.0.0:5141
-        ConnectionStrings__Default: "Server=sql-01.zd.local,1433;Database=umairv3_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;MultipleActiveResultSets=False;Min Pool Size=5;Packet Size=32767;Connect Timeout=30;Application Name=MillsDashboardApi;"
-        ConnectionStrings__Finance: "Server=sql-01.zd.local,1433;Database=FarmerFacilitatorDb;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;"
+        ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=umairv3_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;MultipleActiveResultSets=False;Min Pool Size=5;Packet Size=32767;Connect Timeout=30;Application Name=MillsDashboardApi;"
+        ConnectionStrings__Finance: "Server=sql-01.argus.local,1433;Database=FarmerFacilitatorDb;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;"
         Jwt__SigningKey: "{{ openbao:kv/mills/jwt-signing-key }}"
         LegacyJwt__SigningKey: "{{ openbao:kv/mills/legacy-jwt }}"
         Ai__ApiKey: "{{ openbao:kv/mills/anthropic }}"
-        OpenRouteService__BaseUrl: http://ors.zd.local:8082/ors
-        Cache__Redis: garnet.zd.local:6379,ssl=true
-        Nats__Url: nats://nats.zd.local:4222
-        SurveyImages__S3Bucket: zd-survey-pictures
-        OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.zd.local:4318
+        OpenRouteService__BaseUrl: http://ors.argus.local:8082/ors
+        Cache__Redis: garnet.argus.local:6379,ssl=true
+        Nats__Url: nats://nats.argus.local:4222
+        SurveyImages__S3Bucket: argus-survey-pictures
+        OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.argus.local:4318
       resources: { cpuCores: 2, memoryMiB: 4096 }
     - name: MillsWeb
       type: GuestExecutable
@@ -51,7 +51,7 @@ spec:
         HOSTNAME: 0.0.0.0
         MILLS_API_BASE: http://localhost:5141/api/v1
         EE_BASE64_KEY: "{{ openbao:kv/mills/ee-service-key }}"
-        HTTPS_PROXY: http://egress.zd.local:3128
+        HTTPS_PROXY: http://egress.argus.local:3128
   ingress:
     host: mills.zaraatdost.pk
     upstream: MillsGateway

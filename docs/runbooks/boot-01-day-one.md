@@ -19,7 +19,7 @@ One spare machine — a workstation, an old server, even a well-specified deskto
 Install Windows Server 2025 **Datacenter evaluation**, Desktop Experience for now. Enable Hyper-V, Failover Clustering (single node), Windows Admin Center. Confirm Secure Boot and TPM in `msinfo32`. This host stands in for `hv-01`.
 
 ### 2. Domain (day 1)
-VM `dc-01`, 2 vCPU / 4 GB. Promote to a new forest `zdlab.local`. This is a throwaway forest — do not name it `zd.local` yet.
+VM `dc-01`, 2 vCPU / 4 GB. Promote to a new forest `arguslab.local`. This is a throwaway forest — do not name it `argus.local` yet.
 
 ### 3. **Test A1 — Service Fabric** (day 2, the single most important test)
 Three VMs `sf-01..03`, 4 vCPU / 8 GB, domain-joined. Download the current Service Fabric standalone package for Windows Server. Run `TestConfiguration.ps1` against a 3-node `ClusterConfig.json`, then `CreateServiceFabricCluster.ps1`. Open Service Fabric Explorer.

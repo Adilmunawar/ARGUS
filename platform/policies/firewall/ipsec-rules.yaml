@@ -1,14 +1,14 @@
 # East–west: who may talk to whom, by identity (ADR-0015). Applied as Windows Firewall
 # connection-security + inbound rules via GPO; strongSwan equivalents generated for Linux hosts.
-apiVersion: zdcloud/v1
+apiVersion: argus/v1
 kind: IpsecRules
 default: deny-unauthenticated-inbound
-authentication: [kerberos-machine, certificate:ZD-Issuing-CA]
+authentication: [kerberos-machine, certificate:Argus-Issuing-CA]
 encryption: aes256-gcm
 rules:
   - { to: "sql-01,sql-02",       port: 1433,  from: [gmsa-mills$, gmsa-mills-jobs$, gmsa-loan$, gmsa-console$, gmsa-backup$, gmsa-restore$, svc-ml, "grafana:sql-02-only"] }
   - { to: pg-01,                 port: 5432,  from: [gmsa-geo$, svc-ml, gmsa-console$, gmsa-backup$, gmsa-agis$] }
-  - { to: "sw-master-*",         port: 8333,  from: [PLATFORM, ML, "BUILD:zd-artifacts-only", gmsa-backup$] }   # S3 gateway (TLS)
+  - { to: "sw-master-*",         port: 8333,  from: [PLATFORM, ML, "BUILD:argus-artifacts-only", gmsa-backup$] }   # S3 gateway (TLS)
   - { to: garnet,                port: 6379,  from: [gmsa-mills$, gmsa-loan$, gmsa-console$] }
   - { to: nats,                  port: 4222,  from: [PLATFORM, ML] }
   - { to: openbao,               port: 8200,  from: [PLATFORM, ML, BUILD, gmsa-reconciler$] }

@@ -1,20 +1,20 @@
 <div align="center">
 
-# ZD Cloud
+# Argus
 
 **A sovereign, Windows-first private cloud — the complete design record for replacing AWS with hardware you own.**
 
-[![validate](https://github.com/Adilmunawar/zd-cloud/actions/workflows/validate.yml/badge.svg)](https://github.com/Adilmunawar/zd-cloud/actions/workflows/validate.yml)
+[![validate](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml/badge.svg)](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml)
 [![console tests](https://img.shields.io/badge/console%20tests-65%2F65-046c4e)](platform/console/prototype/tests/run-tests.js)
-[![ADRs](https://img.shields.io/badge/ADRs-33-1e6f4a)](docs/01-DECISIONS.md)
+[![ADRs](https://img.shields.io/badge/ADRs-34-1e6f4a)](docs/01-DECISIONS.md)
 [![licence](https://img.shields.io/badge/licence-MIT-113a2b)](LICENSE)
-[![status](https://img.shields.io/badge/status-planning%20%C2%B7%20v0.4.0-b07f23)](CHANGELOG.md)
+[![status](https://img.shields.io/badge/status-planning%20%C2%B7%20v0.5.0-b07f23)](CHANGELOG.md)
 
 </div>
 
 ---
 
-Most "leave the cloud" write-ups are opinion pieces. This is the working record of an actual migration: thirty-three architecture decisions with the options weighed and the costs named, every application traced down to its service account and backup, a security architecture rooted in hardware, a hardware bill of materials, and a web console designed against AWS Cloudscape, Google Cloud and the Azure portal — with a tested prototype you can open in a browser.
+Most "leave the cloud" write-ups are opinion pieces. This is the working record of an actual migration: thirty-four architecture decisions with the options weighed and the costs named, every application traced down to its service account and backup, a security architecture rooted in hardware, a hardware bill of materials, and a web console designed against AWS Cloudscape, Google Cloud and the Azure portal — with a tested prototype you can open in a browser.
 
 It also says plainly what has **not** been proven. `docs/09-VALIDATION-STATUS.md` grades every claim as verified, grounded, reasoned or assumed, and lists the eleven assumptions most likely to be wrong. Read that before trusting anything else here.
 
@@ -32,10 +32,10 @@ It also says plainly what has **not** been proven. `docs/09-VALIDATION-STATUS.md
 | | |
 |---|---|
 | Owner | Adil Munawar, ML Research & Development |
-| Status | Planning · v0.4.0 · 8 September 2026 |
+| Status | Planning · v0.5.0 · 8 September 2026 |
 | Base | Windows Server 2025 Datacenter · Hyper-V · Failover Clustering · Storage Spaces Direct · Service Fabric · Active Directory |
 | Exceptions | One Linux GPU node · one Linux VM for the Wazuh SIEM manager · OPNsense edge appliances |
-| Control | Web console (custom, .NET 10 + Next.js) · PowerShell/`zdc` CLI · GitOps repo as the single source of truth |
+| Control | Web console (custom, .NET 10 + Next.js) · PowerShell/`argus` CLI · GitOps repo as the single source of truth |
 
 ## Start here
 
@@ -62,8 +62,8 @@ Run [`docs/runbooks/boot-01-day-one.md`](docs/runbooks/boot-01-day-one.md): a fi
 docs/               the plan (read these first)
 docs/adr/           one file per architecture decision, numbered
 docs/runbooks/      operational procedures — one per failure or task
-platform/console/   ZD Cloud Console (.NET 10 API + Next.js) — the web control surface
-platform/cli/       ZDCloud PowerShell module + zdc thin CLI
+platform/console/   Argus Console (.NET 10 API + Next.js) — the web control surface
+platform/cli/       Argus PowerShell module + argus thin CLI
 platform/gitops/    desired state of the platform: apps, VMs, buckets, secrets refs, policies
 platform/policies/  WDAC, GPO baselines, firewall/IPsec, Wazuh rules — enforced, versioned
 platform/iac/       OpenTofu (Hyper-V provider) + DSC v3 for hosts and VMs

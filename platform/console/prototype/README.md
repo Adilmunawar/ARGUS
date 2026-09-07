@@ -1,6 +1,6 @@
 # Console prototype
 
-`index.html` — a static, clickable prototype of the ZD Cloud Console. Open it in any browser; no build, no server, no data, no network.
+`index.html` — a static, clickable prototype of the Argus Console. Open it in any browser; no build, no server, no data, no network.
 
 ## Running the tests
 

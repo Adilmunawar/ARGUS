@@ -10,7 +10,7 @@ Ranked by likelihood × impact for a Pakistani agri-tech company holding farmer 
 |---|---|---|---|
 | 1 | Ransomware or destructive insider hitting DB and backups together | Object-locked backups at Site B under a credential that cannot delete; separate backup admin forest | ReFS snapshots, VSS, Defender ASR + Controlled Folder Access, Wazuh ransomware rules |
 | 2 | Credential theft (leaked config file, phished operator) | No long-lived credentials: gMSA for services, OpenBao 1 h leases, WHfB/FIDO2 for humans, Credential Guard | Tiered admin, PAW, JEA, LAPS, NTLM off |
-| 3 | Malicious or vulnerable code executed on a server | WDAC enforced: only ZD- or Microsoft-signed code runs | CI signing gate, SBOM per package, Trivy/`dotnet list package --vulnerable` in CI |
+| 3 | Malicious or vulnerable code executed on a server | WDAC enforced: only Argus- or Microsoft-signed code runs | CI signing gate, SBOM per package, Trivy/`dotnet list package --vulnerable` in CI |
 | 4 | Lateral movement after a foothold | IPsec domain isolation, default-deny east–west, per-identity inbound rules | Sysmon + Wazuh detection, Hyper-V switch ACLs, VLANs |
 | 5 | Perimeter attack, DDoS, credential stuffing | OPNsense + Suricata + CrowdSec + Coraza WAF + Caddy rate limits + the apps' own per-IP limiters | GeoIP policy, HTTP/3 with QUIC retry |
 | 6 | Physical theft or seizure | BitLocker TPM+PIN, Shielded VMs (host admin cannot read VM disks), offline root CA in a safe | HGS attestation, chassis intrusion alerts via IPMI |
@@ -35,7 +35,7 @@ Ranked by likelihood × impact for a Pakistani agri-tech company holding farmer 
 
 ### 3.1 Forest and tiers
 
-`zd.local` forest, three DCs. **Tier 0**: DCs, AD FS, CAs, HGS, OpenBao, the reconciler's write credentials. **Tier 1**: Hyper-V hosts, SF nodes, SQL, storage, SIEM. **Tier 2**: user workstations. An account is a member of exactly one tier; Tier 0 accounts log on only from **Privileged Access Workstations** (dedicated laptops, WDAC-locked, no email/browser) over the admin VPN with FIDO2.
+`argus.local` forest, three DCs. **Tier 0**: DCs, AD FS, CAs, HGS, OpenBao, the reconciler's write credentials. **Tier 1**: Hyper-V hosts, SF nodes, SQL, storage, SIEM. **Tier 2**: user workstations. An account is a member of exactly one tier; Tier 0 accounts log on only from **Privileged Access Workstations** (dedicated laptops, WDAC-locked, no email/browser) over the admin VPN with FIDO2.
 
 ### 3.2 Humans
 
@@ -60,12 +60,12 @@ NTLM: deny all (audit for 30 days first). LDAP: signing required, channel bindin
 
 | Control | Detail |
 |---|---|
-| WDAC policy | `platform/policies/wdac/zd-base.xml`: allow Microsoft-signed, allow ZD code-signing certificate chain, allow catalogues in `platform/policies/wdac/catalogs/`; deny everything else. Audit mode Phase 0–5, enforced Phase 6 with per-host enforcement as each is validated. |
-| Third-party binaries | each version of SeaweedFS, NATS, OpenBao, Prometheus, Loki, Grafana, Caddy, Garnet, Forgejo, `windows_exporter`: download by pinned SHA-256 (in IaC), Trivy scan, `New-CIPolicy`-generated catalogue, catalogue signed by ZD, committed |
-| Application packages | CI signs every `.exe`/`.dll` with the ZD code-signing certificate (key on the HSM/TPM of `runner-01`, cert from `ca-issuing-01`, template `ZD-CodeSigning`, 1-year validity); `.sfpkg` zipped and signed; reconciler verifies before `Register-ServiceFabricApplicationType` |
+| WDAC policy | `platform/policies/wdac/argus-base.xml`: allow Microsoft-signed, allow Argus code-signing certificate chain, allow catalogues in `platform/policies/wdac/catalogs/`; deny everything else. Audit mode Phase 0–5, enforced Phase 6 with per-host enforcement as each is validated. |
+| Third-party binaries | each version of SeaweedFS, NATS, OpenBao, Prometheus, Loki, Grafana, Caddy, Garnet, Forgejo, `windows_exporter`: download by pinned SHA-256 (in IaC), Trivy scan, `New-CIPolicy`-generated catalogue, catalogue signed by Argus, committed |
+| Application packages | CI signs every `.exe`/`.dll` with the Argus code-signing certificate (key on the HSM/TPM of `runner-01`, cert from `ca-issuing-01`, template `Argus-CodeSigning`, 1-year validity); `.sfpkg` zipped and signed; reconciler verifies before `Register-ServiceFabricApplicationType` |
 | PowerShell | Constrained Language Mode everywhere except PAWs; script-block, module and transcription logging to WEF; AMSI enabled; execution policy `AllSigned` |
 | Drivers | HVCI blocks unsigned; Microsoft vulnerable-driver blocklist enabled |
-| Commits | every commit to `zd-cloud` and `zd-cloud-gitops` signed (SSH or GPG); reconciler refuses unsigned or unknown-key commits |
+| Commits | every commit to `argus` and `argus-gitops` signed (SSH or GPG); reconciler refuses unsigned or unknown-key commits |
 
 ## 5. Network
 
@@ -85,10 +85,10 @@ Detail in `04-NETWORK-AND-SITES.md`. The security-relevant summary:
 | Data | At rest | In transit | Field level |
 |---|---|---|---|
 | SQL databases | BitLocker on `sql-01` disks + **TDE** (keys in AD CS-issued cert, backed up in the safe) | IPsec + TLS 1.3 (`Encrypt=True;TrustServerCertificate=False`) | CNIC, phone numbers: **Always Encrypted** columns (column master key in OpenBao transit via a custom provider) — Phase 6 |
-| PostgreSQL | BitLocker | IPsec + TLS | `pgcrypto` for PII in `zd_geo` |
+| PostgreSQL | BitLocker | IPsec + TLS | `pgcrypto` for PII in `argus_geo` |
 | Object storage | SeaweedFS volume encryption + BitLocker | TLS from Caddy-fronted S3 endpoint; IPsec | applicant photos: OpenBao transit encryption before upload |
 | Backups | encrypted (SQL `ENCRYPTION` clause with AD CS cert; Kopia AES-256; wal-g) | TLS | — |
-| Logs | Loki chunks in `zd-logs` (object lock 400 d) | TLS | PII redaction in Alloy pipelines for known fields |
+| Logs | Loki chunks in `argus-logs` (object lock 400 d) | TLS | PII redaction in Alloy pipelines for known fields |
 | Secrets | OpenBao Raft storage encrypted by the master key (Shamir 3-of-5) | TLS with AD CS certs | — |
 
 ## 7. Detection and response
@@ -100,12 +100,12 @@ Detail in `04-NETWORK-AND-SITES.md`. The security-relevant summary:
 | Linux auditd, journald | Wazuh agent, Alloy | same | 400 d |
 | Suricata, OPNsense firewall | syslog → Loki; Wazuh | same | 400 d |
 | Caddy/Coraza access + WAF | Loki; CrowdSec | Grafana; CrowdSec | 400 d |
-| OpenBao audit device | Loki | Wazuh rule pack `zd-openbao` | 400 d |
+| OpenBao audit device | Loki | Wazuh rule pack `argus-openbao` | 400 d |
 | S3 access logs (SeaweedFS) | Loki | Wazuh | 400 d |
 | Kubernetes-equivalent: Service Fabric events | SF EventStore → Alloy → Loki | Grafana | 400 d |
-| Console actions, reconciler applies | `zd_console_events` + Loki | console audit UI | forever |
+| Console actions, reconciler applies | `argus_console_events` + Loki | console audit UI | forever |
 
-**Rules that page** (Alertmanager → WhatsApp, on-call rota): new local admin created; Tier 0 group change outside the console; WDAC block event on a production host; Sysmon event 1 with an unsigned parent on a server; LSASS access; Kerberoast pattern; backup age > 30 min; OpenBao sealed; AG not synchronising; Suricata high-severity; CrowdSec ban of an internal IP; Wazuh FIM change under `C:\ZdCloud\` or `/etc`.
+**Rules that page** (Alertmanager → WhatsApp, on-call rota): new local admin created; Tier 0 group change outside the console; WDAC block event on a production host; Sysmon event 1 with an unsigned parent on a server; LSASS access; Kerberoast pattern; backup age > 30 min; OpenBao sealed; AG not synchronising; Suricata high-severity; CrowdSec ban of an internal IP; Wazuh FIM change under `C:\Argus\` or `/etc`.
 
 **Response:** runbooks in `docs/runbooks/` (`sec-01-suspected-compromise.md` isolates a host by moving its VM NIC to the QUARANTINE VLAN through the console; `sec-02-credential-leak.md` revokes OpenBao leases and rotates the gMSA; `sec-03-ransomware.md` freezes S3 buckets and starts restore from Site B). Blameless post-mortem within 5 working days, committed.
 
@@ -119,8 +119,8 @@ Wazuh SCA scores every host against the **Microsoft Security Baseline** and **CI
 developer commit (signed) ──► GitHub PR ──► required checks:
    build · tests · dotnet vulnerable-packages · Trivy fs · secret scan (gitleaks) · SBOM (syft)
    ──► merge ──► self-hosted Windows runner (WDAC, no egress):
-   publish self-contained · signtool sign every binary · package .sfpkg · sign package · upload zd-artifacts (WORM)
-   ──► PR to zd-cloud-gitops bumping the version (auto-generated, signed by gmsa-ci$)
+   publish self-contained · signtool sign every binary · package .sfpkg · sign package · upload argus-artifacts (WORM)
+   ──► PR to argus-gitops bumping the version (auto-generated, signed by gmsa-ci$)
    ──► human approval for prod (Tier 1 reviewer; console shows the diff)
    ──► merge ──► reconciler: verify commit signature · verify package signature · SF rolling upgrade with health policy · auto-rollback on failure
 ```

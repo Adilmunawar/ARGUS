@@ -51,7 +51,7 @@ These are the things most likely to be wrong, in the order they will bite:
 
 ## Not built at all
 
-The reconciler, every console screen and API endpoint beyond `/health`, every runbook body, the WDAC base policy, the GPO baselines, the Wazuh rule packs, the OpenTofu `shielded-vm` module, every DSC resource named `ZdCloud/*`, the CI signing pipeline. The files that exist are **specifications in executable formats**, not working code.
+The reconciler, every console screen and API endpoint beyond `/health`, every runbook body, the WDAC base policy, the GPO baselines, the Wazuh rule packs, the OpenTofu `shielded-vm` module, every DSC resource named `Argus/*`, the CI signing pipeline. The files that exist are **specifications in executable formats**, not working code.
 
 ## What would change this document
 

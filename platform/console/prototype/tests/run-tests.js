@@ -1,5 +1,5 @@
 /**
- * ZD Cloud Console prototype — automated test suite.
+ * Argus Console prototype — automated test suite.
  *
  *   node tests/run-tests.js [path-to-index.html]
  *
@@ -274,7 +274,7 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
   const fails = results.filter(r => !r.pass);
   const bySuite = {};
   for (const r of results) { (bySuite[r.suite] ||= { p: 0, f: 0 })[r.pass ? 'p' : 'f']++; }
-  console.log('\n  ZD Cloud Console — prototype test run');
+  console.log('\n  Argus Console — prototype test run');
   console.log('  ' + '─'.repeat(66));
   for (const [s, v] of Object.entries(bySuite)) {
     console.log(`  ${s.padEnd(7)} ${String(v.p).padStart(3)} passed   ${v.f ? String(v.f).padStart(3) + ' FAILED' : '  0 failed'}`);

@@ -1,4 +1,4 @@
-# ZD Cloud — Master Plan (Windows-first)
+# Argus — Master Plan (Windows-first)
 
 **Version 0.1.0 · 8 September 2026 · supersedes the Linux/Cozystack plan of 7 September (kept in `docs/adr/superseded/`).**
 
@@ -26,7 +26,7 @@ It is **not** a copy of AWS. It is the fourteen capabilities Zaraat Dost uses, b
 
 ## 3. Capabilities and their implementation
 
-| # | Capability | AWS | ZD Cloud | ADR |
+| # | Capability | AWS | Argus | ADR |
 |---|---|---|---|---|
 | 1 | Long-lived services | EC2 / ECS | Service Fabric guest executables on the Hyper-V cluster | 0005 |
 | 2 | Windows VMs | EC2 Windows | Hyper-V + Failover Clustering, Shielded VMs | 0004 |
@@ -44,7 +44,7 @@ It is **not** a copy of AWS. It is the fourteen capabilities Zaraat Dost uses, b
 | 14 | CI/CD, artefacts, code | CodePipeline / ECR / CodeCommit | GitHub Actions self-hosted + Forgejo mirror; signed `.sfpkg` in S3; first-party reconciler | 0024, 0023, 0006 |
 | + | Satellite catalogue & tiles | (none) | Sentinel COG mirror, pgstac, TiTiler, Martin | 0028 |
 | + | Security ops | GuardDuty / Security Hub / Inspector | Sysmon + WEF + Wazuh, Defender ASR, WDAC, Falco-equivalent via Sysmon rules, kube-bench-equivalent via Wazuh SCA/CIS | 0014, 0018 |
-| + | Console | AWS Console | ZD Cloud Console (.NET 10 + Next.js) + Windows Admin Center + Grafana | 0021, 0022 |
+| + | Console | AWS Console | Argus Console (.NET 10 + Next.js) + Windows Admin Center + Grafana | 0021, 0022 |
 
 ## 4. Reference topology
 
@@ -65,8 +65,8 @@ It is **not** a copy of AWS. It is the fourteen capabilities Zaraat Dost uses, b
  │  SITE A — Hyper-V + S2D cluster  hv-01 hv-02 hv-03 (→05)   RDMA 25 GbE    │
  │                                                                            │
  │  Service Fabric cluster (5 nodes = 5 Windows Server Core VMs, 1 per host)  │
- │   ├─ zd-console      (API + Next.js)      ├─ mills-api/web/gateway (×3)   │
- │   ├─ zd-reconciler   (stateful)           ├─ loan-api  · agis-web         │
+ │   ├─ argus-console      (API + Next.js)      ├─ mills-api/web/gateway (×3)   │
+ │   ├─ argus-reconciler   (stateful)           ├─ loan-api  · agis-web         │
  │   ├─ caddy ×2                             ├─ functions-* (Azure Fn host)  │
  │   ├─ nats ×3 · garnet ×2 · openbao ×3     ├─ titiler · martin · ors       │
  │   └─ prometheus · loki · grafana · otel                                    │
@@ -109,7 +109,7 @@ Full detail with exit gates in `06-PHASES-AND-RUNBOOKS.md`.
 | 1 Storage & backups | 7–10 | SeaweedFS both sites, survey pictures + rasters migrated, SQL backups to object-locked S3, first restore drill | Two immutable copies of every backup at two sites; signed drill report; AWS bucket read-only |
 | 2 Mills cutover | 11–16 | Mills API/web/gateway on SF, Garnet, NATS jobs, AD FS web login, legacy API on a VM, secrets rotated (D16), OTel | 99.9 % for 14 days from Site A; EC2 is a warm standby |
 | 3 ML & geo | 15–24 | `gpu-01`, Ray/MLflow/Dagster/JupyterHub, Sentinel mirror + pgstac, TiTiler/Martin, self-hosted ORS, v5 classifier + SegFormer pipelines ported | One season's feature table regenerated on-prem and matching; training faster than current best |
-| 4 Database & apps | 20–30 | SQL Always On to Site B, mobile apps repointed to a ZD DNS name, reporting on the replica, first PostGIS migrations | No client references the AWS IP; AWS SQL box off 30 days without incident |
+| 4 Database & apps | 20–30 | SQL Always On to Site B, mobile apps repointed to an Argus DNS name, reporting on the replica, first PostGIS migrations | No client references the AWS IP; AWS SQL box off 30 days without incident |
 | 5 DR & exit | 28–34 | Site B to full spec, quarterly DR drill, AWS account closed | Signed DR report; AWS invoice $0 |
 | 6 Hardening & audit | 34–40 | WDAC enforced everywhere, external pen test, Wazuh ISO 27001 mapping, console at parity with WAC for daily tasks | Pen-test findings closed; audit evidence pack produced from the platform, not by hand |
 

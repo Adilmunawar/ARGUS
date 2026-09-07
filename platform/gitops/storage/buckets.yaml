@@ -1,39 +1,39 @@
-apiVersion: zdcloud/v1
+apiVersion: argus/v1
 kind: BucketSet
 buckets:
-  - name: zd-survey-pictures
+  - name: argus-survey-pictures
     owner: gmsa-mills-jobs$
     readers: [gmsa-mills$, gmsa-loan$]
     versioning: true
-    backup: { tool: kopia, schedule: daily, target: zd-backups/kopia/pictures }
-  - name: zd-rasters
+    backup: { tool: kopia, schedule: daily, target: argus-backups/kopia/pictures }
+  - name: argus-rasters
     owner: svc-ml
     readers: [gmsa-geo$, gmsa-agis$]
-    backup: { tool: kopia, schedule: monthly, target: zd-backups/kopia/rasters }
-  - name: zd-sentinel
+    backup: { tool: kopia, schedule: monthly, target: argus-backups/kopia/rasters }
+  - name: argus-sentinel
     owner: svc-ml
     readers: [gmsa-geo$]
     lifecycle: { expireDays: 730 }
     backup: none            # re-pullable from Copernicus (documented exception)
-  - name: zd-ml
+  - name: argus-ml
     owner: svc-ml
-    backup: { tool: kopia, schedule: weekly, target: zd-backups/kopia/ml }
-  - name: zd-artifacts
+    backup: { tool: kopia, schedule: weekly, target: argus-backups/kopia/ml }
+  - name: argus-artifacts
     owner: gmsa-ci$
     readers: [gmsa-reconciler$]
     objectLock: { mode: COMPLIANCE, days: 365 }
     replication: { siteB: true }
-  - name: zd-backups
+  - name: argus-backups
     owner: gmsa-backup$      # policy: PutObject only — no Delete, no lock override
     readers: [gmsa-restore$]
     objectLock: { mode: COMPLIANCE, days: 35 }
     replication: { siteB: true, siteBObjectLockDays: 90 }
-  - name: zd-logs
+  - name: argus-logs
     owner: gmsa-loki$
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }
-  - name: zd-sessions
+  - name: argus-sessions
     owner: gmsa-guacamole$      # recorded RDP/SSH sessions (ADR-0032); ~1 GB per RDP hour
-    readers: [gmsa-console$, ZD-Console-Security]
+    readers: [gmsa-console$, Argus-Console-Security]
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }

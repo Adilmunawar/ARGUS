@@ -2,7 +2,7 @@
 #
 # publish.sh — create the GitHub repository, push, release, and protect main.
 #
-#   cd zd-cloud
+#   cd argus
 #   ./publish.sh                    # public  (default)
 #   ./publish.sh --private          # start private, flip later
 #   ./publish.sh --name my-repo     # different repository name
@@ -18,11 +18,11 @@
 
 set -euo pipefail
 
-NAME="zd-cloud"
+NAME="argus"
 VISIBILITY="--public"
 WEBSITE="https://adilmunawar.vercel.app"
 
-DESCRIPTION="Sovereign, Windows-first private cloud replacing AWS on owned hardware. 33 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
+DESCRIPTION="Sovereign, Windows-first private cloud replacing AWS on owned hardware. 34 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
 
 TOPICS="private-cloud,self-hosted,windows-server,hyper-v,service-fabric,active-directory,gitops,infrastructure-as-code,architecture-decision-records,zero-trust,devops,aws-alternative,cloud-migration,disaster-recovery,openbao,seaweedfs,powershell,dotnet,design-system,accessibility"
 
@@ -42,7 +42,7 @@ die() { printf '\n\033[1;31m✗\033[0m %s\n' "$1" >&2; exit 1; }
 # ── Preflight ────────────────────────────────────────────────────────────────
 command -v git >/dev/null || die "git is not installed."
 command -v gh  >/dev/null || die "GitHub CLI is not installed. https://cli.github.com — then run: gh auth login"
-[[ -d .git ]] || die "Run this from inside the zd-cloud repository."
+[[ -d .git ]] || die "Run this from inside the argus repository."
 gh auth status >/dev/null 2>&1 || die "Not signed in. Run: gh auth login"
 
 [[ -z "$(git status --porcelain)" ]] || die "You have uncommitted changes. Commit or stash them first."

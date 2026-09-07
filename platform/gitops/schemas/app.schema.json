@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["apiVersion", "kind", "metadata", "spec"],
   "properties": {
-    "apiVersion": { "const": "zdcloud/v1" },
+    "apiVersion": { "const": "argus/v1" },
     "kind": { "const": "ServiceFabricApp" },
     "metadata": { "type": "object", "required": ["name", "owner", "tier"] },
     "spec": {

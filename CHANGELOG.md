@@ -1,6 +1,23 @@
 # Changelog
 
-All notable changes to the ZD Cloud plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
+All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
+
+## [0.5.0] — 2026-09-08
+
+### Changed
+- **The platform is named Argus, not ZD Cloud** (ADR-0034, owner decision). ZD Cloud was the company's initials wearing a product's clothes: it tied the platform's identity to the agriculture business and made it indistinguishable from any other tool with the same letters. Argus Panoptes is the watchman who never slept, which is what a platform built on *evidence, not assurance* is trying to be.
+- **The identifier prefix is the full word `argus`, never `arg`** — a deliberate three extra characters. ADR-0023 exists to say this platform does not use Flux or Argo; an `arg-` prefix on buckets and clusters would read as Argo to everyone who joins.
+- Relabelled across 87 files: AD forest `zd.local` → `argus.local`; buckets `zd-*` → `argus-*`; `ZdConsole` → `ArgusConsole`; PostgreSQL schemas `zd_geo`/`zd_ml`/`zd_console_events` → `argus_*`; NATS subjects `zd.*` → `argus.*`; clusters `zd-hvc-a/b`, `zd-sf-a` and AG `zd-ag1` → `argus-*`; AD groups `ZD-Console-*`/`ZD-Tier0-Admins` → `Argus-*`; AD CS templates `ZD-Issuing-CA`/`ZD-CodeSigning` → `Argus-*`; GitOps `apiVersion: zdcloud/v1` → `argus/v1`; .NET projects `ZdCloud.*` → `Argus.*`; DSC resources `ZdCloud/*` → `Argus/*`; `C:\ZdCloud\` → `C:\Argus\`; PowerShell module `ZDCloud` → `Argus` with `*-Zd*` cmdlets → `*-Argus*`; CLI `zdc` → `argus`; repositories `zd-cloud` → `argus` and `zd-cloud-gitops` → `argus-gitops`.
+- **The company is unchanged.** Zaraat Dost remains the company and `zaraatdost.pk` the domain; `console.zaraatdost.pk` and `api.zaraatdost.pk` are untouched. The console shell shows the product over the company, which is the correct relationship.
+
+### Added
+- **ADR-0034** — the naming decision, the `argus`-not-`arg` prefix rule and its reason, and the full list of what was relabelled.
+- **Q13** in `08-OPEN-QUESTIONS.md` — trademark and `.pk` domain clearance for the name. An older network-monitoring tool and a commodities-pricing firm both use *Argus*; neither is in this market, but neither has been checked. This must close before the name appears anywhere outside this repository.
+
+### Not changed, deliberately
+- `docs/adr/superseded/` is left exactly as written. It records a plan that was rejected on 7 September; rewriting names inside it would falsify what was actually proposed.
+- Four external names are retained: `zd-daily-db-backups` (an existing AWS bucket), `zdost.aoserv.com` (the current production host), and `adilmunawar/ZD-claude-plugin` with its `zd-deploy` / `zd-ops` / `zd-security` plugins (a separate repository, its own change).
+- The console mark is still a leaf, inherited from the Mills design system. A leaf suited ZD Cloud and does not obviously suit Argus; the mark needs a decision before console stage C1 ships.
 
 ## [0.4.0] — 2026-09-08
 
@@ -31,11 +48,11 @@ All notable changes to the ZD Cloud plan and platform. Dated, with the reason, b
 ## [0.2.0] — 2026-09-08
 
 ### Added
-- `docs/10-CONSOLE-DESIGN.md` — the AWS Console studied as nine repeating patterns, each mapped to a ZD Cloud screen; nine console sections specified screen by screen; interaction rules; the Mills design system inherited with three console-only components; a six-stage build order where each stage retires a named existing tool.
-- **ADR-0032** — browser RDP/SSH/VM-console via Apache Guacamole. Credential-less (OpenBao issues a one-time, session-scoped credential the operator never sees), time-boxed, fully recorded to the object-locked `zd-sessions` bucket, clipboard and file transfer gated by role.
+- `docs/10-CONSOLE-DESIGN.md` — the AWS Console studied as nine repeating patterns, each mapped to a Argus screen; nine console sections specified screen by screen; interaction rules; the Mills design system inherited with three console-only components; a six-stage build order where each stage retires a named existing tool.
+- **ADR-0032** — browser RDP/SSH/VM-console via Apache Guacamole. Credential-less (OpenBao issues a one-time, session-scoped credential the operator never sees), time-boxed, fully recorded to the object-locked `argus-sessions` bucket, clipboard and file transfer gated by role.
 - **ADR-0033** — the console is the primary surface; Windows Admin Center becomes bootstrap and break-glass only, retired at console stage C6. Grafana explicitly stays.
 - `platform/console/prototype/index.html` — a static, clickable prototype of six screens using the Mills tokens, so the design can be argued with before any C# is written.
-- `zd-sessions` bucket and `gmsa-guacamole$` added to the GitOps inventory; risk **A11** (Guacamole recording + AD auth + OpenBao credentials on Server 2025) added to the register and to the day-one lab.
+- `argus-sessions` bucket and `gmsa-guacamole$` added to the GitOps inventory; risk **A11** (Guacamole recording + AD auth + OpenBao credentials on Server 2025) added to the register and to the day-one lab.
 
 ### Changed
 - **ADR-0003 amended in place**: three Linux exceptions, not two — `gpu-01`, `siem-01`, and now `guac-01`.
@@ -64,9 +81,9 @@ All notable changes to the ZD Cloud plan and platform. Dated, with the reason, b
 - **Application–infrastructure map** — every host, VM, Service Fabric application and business application (Mills, loan app, AGIS, ML pipelines, Zaraat Dost AI, the console) traced to identity, port, data store, bucket, secret path, backup, SLO and alert.
 - **Security architecture** — threat model, hardware root of trust, tiered AD, WDAC/Authenticode, IPsec east–west, data protection, detection and paging rules, evidence pack, delivery-pipeline security.
 - **Network and sites** — eleven zones, addressing, edge, RDMA storage fabric, egress proxy, Site B bandwidth, power sequencing.
-- **Control plane** — GitOps repo layout, first-party reconciler design, console screens/roles/API, `ZDCloud` PowerShell module, end-to-end change flow.
+- **Control plane** — GitOps repo layout, first-party reconciler design, console screens/roles/API, `Argus` PowerShell module, end-to-end change flow.
 - **Phases and runbooks**, **hardware and licensing**, **open questions** (Q1–Q12).
-- Platform skeletons: Mills app spec and alerts, bucket set, gMSA inventory, environment pins, app schema rejecting inline secrets, console API `Program.cs`, `ZDCloud` module, IPsec identity rules, `sql-01` OpenTofu module, SF-node DSC.
+- Platform skeletons: Mills app spec and alerts, bucket set, gMSA inventory, environment pins, app schema rejecting inline secrets, console API `Program.cs`, `Argus` module, IPsec identity rules, `sql-01` OpenTofu module, SF-node DSC.
 
 ### Changed
 - **Platform base: Linux/Cozystack → Windows Server** (ADR-0002, owner decision). The 7 September Linux plan is preserved under `docs/adr/superseded/`.
