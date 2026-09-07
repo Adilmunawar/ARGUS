@@ -551,7 +551,7 @@
   A.screen('identity', {
     title: 'Identity & secrets',
     crumb: 'Identity & secrets',
-    render: function (mount) {
+    render: function (mount, ctx) {
       mount.appendChild(ui.pageHeader(
         'Identity & secrets',
         'Who can reach what, for how long, and on whose approval.',
@@ -567,7 +567,7 @@
         { id: 'gmsas', label: 'Service accounts', render: gmsaTab },
         { id: 'grants', label: 'Access grants', render: grantsTab },
         { id: 'secrets', label: 'Secrets', render: secretsTab }
-      ], { label: 'Identity and secrets' }));
+      ], { label: 'Identity sections', initial: (ctx && ctx.rest && ctx.rest[0]) || null }));
     }
   });
 })();

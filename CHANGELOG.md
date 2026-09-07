@@ -2,6 +2,29 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.6.1] - 2026-09-08
+
+An adversarial audit was run against the console by an agent that did not write it, with every finding verified by executing the page rather than reading it. It found ten defects that the 153-assertion suite had passed over, including one critical. All are fixed, and each has a regression in the new **GUARD** suite.
+
+### Fixed
+- **Critical: the type-to-confirm on destructive actions did nothing.** `ui.btn` expressed disabled with `aria-disabled` and a class but never the native property, and `confirmDestructive` guarded on that never-set property. Confirm fired with the name field empty, on all twelve callers: rollback, bucket delete, host quarantine, grant revoke, AG failover. Disabled is still `aria-disabled` rather than the native attribute, because an operator needs to read *why* a control is unavailable and a natively disabled button tells them nothing, but the guard now consults a live flag and the click handler is always attached.
+- **The skip link destroyed the page.** `href="#main"` set a hash, the router read it as a route named `main`, found no screen, and painted "that screen does not exist". The first focusable element on every page was a trap for exactly the keyboard and screen-reader users it exists for. The router now ignores any hash that is not a route.
+- **Runbook transcripts outlived their screen.** Timers were cleared only on a subsequent run, so navigating away left a chain appending to a detached node and flashing its result over whatever you had moved to. Screens can now register teardown through `A.onLeave`.
+- **The elevation countdown mixed two clocks.** Expiry was derived from the fixed demonstration clock while the tick counted against wall time, so a two-hour grant displayed as twelve hours. An already-expired grant also installed an interval whose stale closure fired for ever; three "elevation released" messages arrived in 3.2 seconds.
+- **Three deep links opened the wrong tab.** `ui.tabs` always selected the first tab, so `#/identity/grants` showed People while the title and breadcrumb said grants. Tabs now take an initial selection. The security screen had worked around the same gap by reordering its tablist, which silently moved the tabs about depending on how you arrived; it selects instead.
+- **Every table announced its sort on first paint.** Thirty-one tables shouting at a screen reader on every route change, each announcement racing and dropping the one before it. Only an operator-initiated sort announces now.
+- **The query editor did not enforce the read-only claim it made.** `SELECT * INTO staff_copy FROM staff` writes a table, and `SELECT pg_terminate_backend(1)` kills a session; both were accepted because both begin with SELECT. Meanwhile a row containing the word "update" in a string literal was rejected. Comments and literals are now stripped before the keyword scan, and `SELECT ... INTO` and writing routines are refused.
+- **Focus was lost between chained dialogs.** A dialog opened from inside another captured `<body>` as its opener, so closing it dropped focus to the document. Openers are now a stack.
+- The runbook screen claimed a second person had to approve a run, then ran after the step-up alone. The copy now says what the prototype actually does and that the gate is specified rather than built.
+- Graph node kinds carrying spaces or a comma produced junk class tokens, and eleven `gnode-*` classes had no rule at all. Kinds are sanitised, and pipeline freshness now carries a stroke treatment as well as a fill, because colour alone is not a signal a colour-blind operator can read.
+
+### Added
+- The **GUARD** suite: ten regressions, one per finding.
+- A check that **every class used in the markup is defined in a stylesheet**, which caught the undefined graph node kinds on its first run.
+
+### Note
+- Four categories came back genuinely clean, which is worth recording: no `innerHTML`, `insertAdjacentHTML`, `document.write`, `eval` or string-built DOM anywhere, and no data path reaching `href`, `src` or `formaction`; no secret value rendered; rendering is deterministic apart from dialog ids; and button names are resource-qualified throughout.
+
 ## [0.6.0] - 2026-09-08
 
 ### Added

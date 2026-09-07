@@ -13,6 +13,7 @@
  *   CMD    the command palette: search, arrow keys, activation, escape
  *   TBL    every table has a caption, sortable headers carry aria-sort
  *   STATE  empty, no-match and error states are distinguishable
+ *   GUARD  regressions for every defect an adversarial audit found
  *   CON    contrast computed from rendered pixels, gradients included
  *   TXT    nothing below 11px, nothing clipped
  *   RESP   no horizontal overflow at six widths
@@ -347,6 +348,160 @@ async function axeOn(page, label) {
       });
       return bad.length === 0;
     }));
+
+  /* --------------------------------------------------------------- GUARD */
+
+  // Every assertion here corresponds to a defect an adversarial audit found
+  // that this suite had passed over. They are the expensive kind: the interface
+  // looked correct and behaved wrongly.
+
+  await goto(page, 'overview');
+  rec('GUARD', 'a disabled button does not run its action',
+    await page.evaluate(() => {
+      let fired = false;
+      const b = window.ARGUS.ui.btn('X', { disabled: true, onClick: () => { fired = true; } });
+      document.body.appendChild(b);
+      b.click();
+      const first = fired;
+      b.setDisabled(false);
+      b.click();
+      b.remove();
+      return first === false && fired === true;
+    }));
+
+  rec('GUARD', 'the destructive confirm refuses an empty name field',
+    await page.evaluate(() => {
+      let fired = false;
+      window.ARGUS.confirmDestructive({
+        title: 'T', detail: 'd', match: 'sql-01', onConfirm: () => { fired = true; }
+      });
+      const go = Array.from(document.querySelectorAll('.dialog-foot .btn')).pop();
+      go.click();
+      return fired === false;
+    }));
+  rec('GUARD', 'the destructive confirm proceeds once the name matches',
+    await page.evaluate(() => {
+      const input = document.getElementById('confirm-name');
+      input.value = 'sql-01';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      const go = Array.from(document.querySelectorAll('.dialog-foot .btn')).pop();
+      return go.getAttribute('aria-disabled') === 'false';
+    }));
+  await page.keyboard.press('Escape');
+
+  // An in-page anchor is not a route.
+  await goto(page, 'overview');
+  await page.evaluate(() => document.querySelector('.skip').click());
+  await page.waitForTimeout(150);
+  rec('GUARD', 'the skip link does not blank the page',
+    await page.evaluate(() => !/does not exist/i.test(document.getElementById('main').textContent)),
+    await page.evaluate(() => document.title));
+
+  // A screen's timers must not outlive it.
+  await goto(page, 'ops/runbook/sql-01-restore-drill');
+  const ranTranscript = await page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll('#main button')).find(x => /^Run /.test(x.textContent));
+    if (!b) return false;
+    b.click();
+    const go = Array.from(document.querySelectorAll('.dialog-foot .btn')).pop();
+    if (go) go.click();
+    return true;
+  });
+  await goto(page, 'overview');
+  await page.evaluate(() => { document.getElementById('flashes').textContent = ''; });
+  await page.waitForTimeout(2600);
+  rec('GUARD', 'leaving a screen stops the work it started',
+    ranTranscript && await page.evaluate(() => document.getElementById('flashes').children.length === 0),
+    await page.evaluate(() => document.getElementById('flashes').textContent.slice(0, 60)));
+
+  // The countdown reads the same clock it counts against.
+  rec('GUARD', 'the elevation countdown matches the granted duration',
+    await page.evaluate(() => {
+      window.ARGUS.data.me.elevation = {
+        group: 'G', reason: 'r', expires: new Date(Date.now() + 2 * 3600000)
+      };
+      window.ARGUS.paintElevation();
+      const txt = document.querySelector('.elev-time').textContent;
+      window.ARGUS.data.me.elevation = null;
+      window.ARGUS.paintElevation();
+      return /^(1 h 5[0-9] min|2 h)/.test(txt);
+    }));
+  rec('GUARD', 'an already-expired grant does not leave a timer running',
+    await page.evaluate(async () => {
+      let count = 0;
+      const host = document.getElementById('flashes');
+      const obs = new MutationObserver(() => { count++; });
+      obs.observe(host, { childList: true });
+      window.ARGUS.data.me.elevation = { group: 'G', reason: 'r', expires: new Date(Date.now() - 1000) };
+      window.ARGUS.paintElevation();
+      await new Promise(r => setTimeout(r, 2400));
+      obs.disconnect();
+      host.textContent = '';
+      return count <= 2;
+    }));
+
+  // A deep link opens the tab it names.
+  await goto(page, 'identity/grants');
+  rec('GUARD', 'a deep link opens the tab it names',
+    await page.evaluate(() => {
+      const sel = document.querySelector('#main .tab[aria-selected="true"]');
+      return !!sel && /grants/i.test(sel.textContent);
+    }),
+    await page.evaluate(() => {
+      const s = document.querySelector('#main .tab[aria-selected="true"]');
+      return s ? s.textContent : 'none';
+    }));
+
+  // The query editor's read-only claim has to be what it enforces.
+  await goto(page, 'data/database/umairv3_db');
+  const sqlCases = [
+    ['SELECT * INTO staff_copy FROM staff', true],
+    ['SELECT pg_terminate_backend(1)', true],
+    ['SELECT 1; DROP TABLE x', true],
+    ['DELETE FROM staff', true],
+    ['SELECT name FROM t WHERE note = \'please update me\'', false],
+    ['WITH c AS (SELECT 1) SELECT * FROM c', false]
+  ];
+  let sqlBad = [];
+  for (const [sql, shouldReject] of sqlCases) {
+    const rejected = await page.evaluate((q) => {
+      const area = document.querySelector('#main textarea');
+      if (!area) return null;
+      area.value = q;
+      document.getElementById('flashes').textContent = '';
+      const run = Array.from(document.querySelectorAll('#main button')).find(x => /^Run/.test(x.textContent.trim()));
+      if (!run) return null;
+      run.click();
+      const bad = !!document.querySelector('.flash.bad');
+      document.getElementById('flashes').textContent = '';
+      return bad;
+    }, sql);
+    if (rejected !== shouldReject) sqlBad.push((shouldReject ? 'allowed ' : 'refused ') + sql.slice(0, 34));
+  }
+  rec('GUARD', 'the query editor enforces the read-only claim it makes',
+    sqlBad.length === 0, sqlBad.join(' | '));
+
+  // A class in the markup that no stylesheet defines is either a typo or a
+  // rule someone deleted.
+  const cssText = ['assets/app.css', 'assets/components.css']
+    .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+  const definedClasses = new Set((cssText.match(/\.[A-Za-z][A-Za-z0-9_-]*/g) || []).map(s => s.slice(1)));
+  let undefinedClasses = new Set();
+  for (const r of ROUTES.concat(DEEP.slice(0, 6))) {
+    await goto(page, r);
+    const used = await page.evaluate(() => {
+      const out = [];
+      document.querySelectorAll('#main *').forEach(n => {
+        const cn = n.className;
+        const s = typeof cn === 'string' ? cn : (cn && cn.baseVal) || '';
+        s.split(/\s+/).filter(Boolean).forEach(c => { if (out.indexOf(c) === -1) out.push(c); });
+      });
+      return out;
+    });
+    used.forEach(c => { if (!definedClasses.has(c)) undefinedClasses.add(r.split('/')[0] + ':' + c); });
+  }
+  rec('GUARD', 'every class used in the markup is defined in a stylesheet',
+    undefinedClasses.size === 0, Array.from(undefinedClasses).slice(0, 8).join(' '));
 
   /* ----------------------------------------------------------------- CON */
 

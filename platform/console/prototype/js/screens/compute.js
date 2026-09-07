@@ -13,7 +13,8 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
-  /* index.html loads the screen files before app.js, so A.screen does not exist
+  /* app.js is parsed before the screens and defers its own boot, so A.screen
+     exists by now. The queue below stays as a guard against that regressing
    * yet when this file is evaluated. Queue the registration and flush it the
    * moment app.js installs the real registry. */
   function registerScreen(id, def) {

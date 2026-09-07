@@ -139,20 +139,39 @@
     return p;
   }
 
+  /**
+   * A button.
+   *
+   * Disabled is expressed with aria-disabled rather than the native property,
+   * so the control keeps its place in the tab order and its title stays
+   * discoverable: an operator needs to read *why* Approve is unavailable, and
+   * a natively disabled button tells them nothing. That only works if the
+   * guard is real, so the click handler is always attached and always consults
+   * the live flag. An earlier version captured opts.disabled and checked a
+   * native property that was never set, which made the type-to-confirm step of
+   * every destructive dialog a no-op.
+   */
   function btn(label, opts) {
     opts = opts || {};
+    var disabled = !!opts.disabled;
     var b = el('button.btn' + (opts.variant ? '.' + opts.variant : ''), {
       type: 'button',
-      'aria-disabled': opts.disabled ? 'true' : null,
+      'aria-disabled': disabled ? 'true' : null,
       title: opts.title || null,
-      on: opts.onClick ? {
+      on: {
         click: function (e) {
-          if (opts.disabled) { e.preventDefault(); return; }
-          opts.onClick(e);
+          if (disabled) { e.preventDefault(); e.stopPropagation(); return; }
+          if (opts.onClick) opts.onClick(e);
         }
-      } : null
+      }
     }, label);
-    if (opts.disabled) b.classList.add('is-disabled');
+    if (disabled) b.classList.add('is-disabled');
+    b.setDisabled = function (v) {
+      disabled = !!v;
+      b.classList.toggle('is-disabled', disabled);
+      b.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+    };
+    b.isDisabled = function () { return disabled; };
     return b;
   }
 
@@ -203,6 +222,7 @@
   function table(cols, rows, opts) {
     opts = opts || {};
     var state = { key: opts.sortKey || null, dir: opts.sortDir || 'asc' };
+    var announceNext = false;
 
     var wrap = el('div.tablewrap', { tabindex: '0', role: 'region', 'aria-label': opts.caption });
     var t = el('table');
@@ -254,8 +274,11 @@
         }
         tbody.appendChild(tr);
       });
-      // Sorting changes what is on screen, so it has to be announced.
-      if (state.key) {
+      // Only a sort the operator asked for is worth announcing. Announcing the
+      // first paint of all 31 tables races the route-change announcement and
+      // silently drops it.
+      if (announceNext && state.key) {
+        announceNext = false;
         var col2 = cols.filter(function (c) { return c.key === state.key; })[0];
         if (col2) A.announce('Sorted by ' + col2.label + ', ' + (state.dir === 'asc' ? 'ascending' : 'descending') + ', ' + list.length + ' rows');
       }
@@ -273,6 +296,7 @@
             click: function () {
               if (state.key === c.key) state.dir = state.dir === 'asc' ? 'desc' : 'asc';
               else { state.key = c.key; state.dir = 'asc'; }
+              announceNext = true;
               cols.forEach(function (other) {
                 var oth = headRow.querySelector('[data-col="' + other.key + '"]');
                 if (oth) oth.setAttribute('aria-sort', other.key === state.key ? (state.dir === 'asc' ? 'ascending' : 'descending') : 'none');
@@ -330,6 +354,13 @@
   function tabs(items, opts) {
     opts = opts || {};
     var listId = 'tabs-' + Math.random().toString(36).slice(2, 8);
+    // opts.initial may be a tab id or an index, so #/identity/grants can open
+    // the tab the URL names instead of always landing on the first one.
+    var start = 0;
+    if (opts.initial !== undefined && opts.initial !== null) {
+      items.forEach(function (it, i) { if (it.id === opts.initial) start = i; });
+      if (typeof opts.initial === 'number' && opts.initial >= 0 && opts.initial < items.length) start = opts.initial;
+    }
     var panel = el('div.tabpanels');
     var list = el('div.tablist', { role: 'tablist', 'aria-label': opts.label || 'Sections' });
     var buttons = [];
@@ -369,7 +400,7 @@
 
     panel.setAttribute('role', 'tabpanel');
     panel.tabIndex = 0;
-    select(0);
+    select(start);
     return el('div.tabs', [list, panel]);
   }
 
@@ -456,7 +487,8 @@
 
     nodes.forEach(function (n) {
       var p = pos[n.id];
-      var grp = svg('g', { class: 'gnode gnode-' + (n.kind || 'app') });
+      var kind = String(n.kind || 'app').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      var grp = svg('g', { class: 'gnode gnode-' + (kind || 'app') });
       grp.appendChild(svg('rect', { x: p.x, y: p.y, width: boxW, height: boxH, rx: 9 }));
       grp.appendChild(svg('text', { x: p.x + 11, y: p.y + 16, class: 'gnode-label' }, n.label));
       grp.appendChild(svg('text', { x: p.x + 11, y: p.y + 29, class: 'gnode-kind' }, n.kind || ''));

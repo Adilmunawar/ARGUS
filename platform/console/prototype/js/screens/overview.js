@@ -271,7 +271,8 @@
     }
   };
 
-  // index.html loads the screens before app.js, so A.screen may not exist yet.
+  // app.js is parsed first and defers its boot, so A.screen exists by now. The
+  // queued path stays as a guard against the load order regressing.
   // Screen files are parsed first, so this listener is queued ahead of the
   // shell's own DOMContentLoaded boot and the route is registered before the
   // first render.

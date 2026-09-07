@@ -134,6 +134,7 @@
   color: var(--muted); font-weight: 700; padding: 0; border-bottom: 1px solid rgba(22, 48, 38, .1);
   background: var(--paper); white-space: nowrap; }
 .tablewrap th.num, .tablewrap td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.num { font-variant-numeric: tabular-nums; }
 .th-sort { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 34px; padding: 8px 12px;
   background: none; border: none; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
   cursor: pointer; text-align: left; }
@@ -192,9 +193,18 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .gnode rect { fill: var(--paper); stroke: rgba(22, 48, 38, .18); }
 .gnode-label { font: 600 11.5px var(--sans); fill: var(--ink); }
 .gnode-kind { font: 500 10.5px var(--sans); fill: var(--muted); }
-.gnode-database rect { fill: #eef5f1; }
+/* Node kinds. Freshness carries a stroke treatment as well as a fill, because
+   colour on its own is not a signal a colour-blind operator can read. */
+.gnode-database rect, .gnode-primary-site-a rect, .gnode-async-secondary-site-b rect { fill: #eef5f1; }
 .gnode-bucket rect { fill: #f7f2e6; }
+.gnode-cache rect { fill: #f2f0fa; }
+.gnode-queue rect { fill: #eef3f8; }
+.gnode-app rect, .gnode-application rect { fill: var(--paper); stroke-width: 1.6; }
+.gnode-dependent rect { fill: #fbfaf4; }
 .gnode-external rect { stroke-dasharray: 4 3; }
+.gnode-fresh rect { fill: #e3f3ec; stroke: #7fc4a6; }
+.gnode-stale rect { fill: #fdf1dd; stroke: #d9a441; stroke-dasharray: 5 3; }
+.gnode-failed rect { fill: #fdeaea; stroke: #c86464; stroke-width: 2.2; }
 
 .heatgrid { border-collapse: separate; border-spacing: 3px; font-size: 11.5px; }
 .heatgrid th { padding: 5px 7px; font-size: 11px; color: var(--muted); text-align: left; white-space: nowrap; }
@@ -228,6 +238,7 @@ textarea.field { min-height: 92px; resize: vertical; font-family: ui-monospace, 
 .pf-tokens { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
 .pf-token { display: inline-flex; align-items: center; gap: 4px; background: var(--cream);
   border: 1px solid rgba(22, 48, 38, .16); border-radius: 999px; padding: 3px 4px 3px 11px; font-size: 11.5px; }
+.pf-token-text { font-weight: 600; }
 .pf-token-x { min-width: 24px; min-height: 24px; border-radius: 50%; border: none; background: none;
   cursor: pointer; font-size: 14px; line-height: 1; color: var(--muted); }
 .pf-token-x:hover { background: rgba(22, 48, 38, .1); color: var(--ink); }

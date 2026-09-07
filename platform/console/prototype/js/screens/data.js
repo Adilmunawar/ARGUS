@@ -433,8 +433,24 @@
 
   /* ----------------------------------------------------- query editor --- */
 
-  var WRITE_GRAMMAR = /\b(delete|update|drop|insert|alter|truncate|create|merge|exec|execute|grant|revoke)\b/i;
-  var LEADING_SELECT = /^\s*select\b/i;
+  // Comments and string literals are stripped before the keyword scan, so a row
+  // whose text contains the word "update" is not mistaken for an UPDATE. SELECT
+  // ... INTO writes a table in T-SQL, and several routines write through a call
+  // that begins with SELECT, so both are refused: the editor is for reading and
+  // the check has to mean it.
+  var WRITE_GRAMMAR = /\b(delete|update|drop|insert|alter|truncate|create|merge|exec|execute|grant|revoke|call|copy|vacuum|reindex|lock)\b/i;
+  var SELECT_INTO = /\bselect\b[\s\S]*?\binto\b/i;
+  var WRITE_ROUTINE = /\b(pg_terminate_backend|pg_cancel_backend|pg_read_file|pg_write_file|pg_sleep|xp_cmdshell|sp_executesql|openrowset|openquery)\b/i;
+  var LEADING_SELECT = /^\s*(?:with\b[\s\S]*?)?select\b/i;
+
+  /** Remove comments and string literals so they cannot hide a keyword. */
+  function stripLiterals(sql) {
+    return String(sql)
+      .replace(/--[^\n]*/g, ' ')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/'(?:[^']|'')*'/g, "''")
+      .replace(/\[[^\]]*\]/g, '[]');
+  }
   var ROW_CAP = 100;
 
   function sampleQuery(db) {
@@ -467,15 +483,16 @@
 
     function run() {
       var text = area.value;
+      var probe = stripLiterals(text);
 
-      if (!LEADING_SELECT.test(text)) {
+      if (!LEADING_SELECT.test(probe)) {
         A.flash('bad', 'Statement rejected on ' + db.name,
           'Only a statement beginning with SELECT is accepted. This grammar is not available to the Operator role, and the console query editor is a read-only investigation tool, not a replacement for SSMS or psql.');
         return;
       }
-      if (WRITE_GRAMMAR.test(text)) {
+      if (WRITE_GRAMMAR.test(probe) || SELECT_INTO.test(probe) || WRITE_ROUTINE.test(probe)) {
         A.flash('bad', 'Statement rejected on ' + db.name,
-          'DELETE, UPDATE, DROP, INSERT, ALTER and TRUNCATE are not accepted grammar for non-Admin roles. Change data through a runbook with an approval, not through this box: the console query editor is a read-only investigation tool, not a replacement for SSMS or psql.');
+          'Write grammar is not accepted for non-Admin roles. That covers DELETE, UPDATE, DROP, INSERT, ALTER and TRUNCATE, and also SELECT ... INTO and routines that write or interrupt a session, both of which begin with SELECT. Change data through a runbook with an approval, not through this box: the query editor is a read-only investigation tool, not a replacement for SSMS or psql.');
         return;
       }
 

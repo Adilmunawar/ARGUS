@@ -95,15 +95,23 @@
    * opts: {title, body(close), actions(close) -> [nodes], describedBy, wide}
    * Focus is trapped, Escape closes, and focus returns to whatever opened it.
    */
+  var openerStack = [];
   A.dialog = function (opts) {
-    var opener = document.activeElement;
+    // A dialog opened from inside another dialog would otherwise capture <body>
+    // as its opener, because the first dialog has already returned focus.
+    var opener = openerStack.length
+      ? openerStack[openerStack.length - 1]
+      : document.activeElement;
+    if (opener === document.body && openerStack.length === 0) opener = null;
+    openerStack.push(opener);
     var titleId = 'dlg-title-' + Math.random().toString(36).slice(2, 8);
 
     function close() {
       untrap();
       scrim.remove();
-      document.body.classList.remove('has-dialog');
-      if (opener && opener.focus) opener.focus();
+      openerStack.pop();
+      if (!openerStack.length) document.body.classList.remove('has-dialog');
+      if (opener && opener.focus && document.contains(opener)) opener.focus();
     }
 
     var panel = el('div.dialog' + (opts.wide ? '.wide' : ''), {
@@ -134,21 +142,24 @@
    * by a revert commit.
    */
   A.confirmDestructive = function (opts) {
+    var go = ui.btn(opts.confirmLabel || 'Confirm', {
+      variant: 'danger',
+      disabled: true,
+      title: 'Type ' + opts.match + ' to enable this',
+      onClick: function () { if (close) { close(); } opts.onConfirm(); }
+    });
+    var close = null;
+
     A.dialog({
       title: opts.title,
       body: function () {
         var input = el('input.field', {
           type: 'text', id: 'confirm-name', autocomplete: 'off', spellcheck: 'false',
-          'aria-describedby': 'confirm-help'
+          'aria-describedby': 'confirm-help',
+          on: {
+            input: function () { go.setDisabled(input.value.trim() !== opts.match); }
+          }
         });
-        var go = ui.btn(opts.confirmLabel || 'Confirm', { variant: 'danger', disabled: true });
-        input.addEventListener('input', function () {
-          var ok = input.value.trim() === opts.match;
-          go.disabled = !ok;
-          go.classList.toggle('is-disabled', !ok);
-          go.setAttribute('aria-disabled', ok ? 'false' : 'true');
-        });
-        opts._input = input; opts._go = go;
         return [
           el('p', { text: opts.detail }),
           el('div.callout.bad', [
@@ -160,14 +171,9 @@
           el('p.hint', { id: 'confirm-help', text: 'This cannot be undone from the console.' })
         ];
       },
-      actions: function (close) {
-        var go = opts._go;
-        go.addEventListener('click', function () {
-          if (go.disabled) return;
-          close();
-          opts.onConfirm();
-        });
-        return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), go];
+      actions: function (closeFn) {
+        close = closeFn;
+        return [ui.btn('Cancel', { variant: 'ghost', onClick: closeFn }), go];
       }
     });
   };
@@ -207,6 +213,20 @@
   A.screen = function (id, def) { screens[id] = def; };
   A.screens = screens;
 
+  // Anything a screen starts that outlives a single paint (a timer, an
+  // interval, a listener on document) is registered here and torn down on the
+  // next navigation. Without it a runbook transcript kept appending to a
+  // detached node and flashed its result over whatever screen you had moved to.
+  var leaveHooks = [];
+  A.onLeave = function (fn) { if (typeof fn === 'function') leaveHooks.push(fn); };
+  function runLeaveHooks() {
+    var hooks = leaveHooks;
+    leaveHooks = [];
+    hooks.forEach(function (fn) {
+      try { fn(); } catch (e) { if (window.console) window.console.warn('leave hook failed', e); }
+    });
+  }
+
   function parseHash() {
     var h = (window.location.hash || '#/overview').replace(/^#\/?/, '');
     var qi = h.indexOf('?');
@@ -238,6 +258,11 @@
   var mount, crumbHost, titleHost;
 
   function render() {
+    // An in-page anchor such as the skip link sets a hash that is not a route.
+    // Treating it as one used to blank the page and announce "that screen does
+    // not exist" to exactly the keyboard users the skip link exists for.
+    if (window.location.hash && !/^#\//.test(window.location.hash)) return;
+    runLeaveHooks();
     var r = parseHash();
     A.state.route = r.route; A.state.rest = r.rest; A.state.params = r.params;
     var def = screens[r.route];
@@ -442,7 +467,9 @@
     A.stepUp('Elevating to ' + group + ' needs a second factor.', function () {
       A.data.me.elevation = {
         group: group, reason: reason,
-        expires: new Date(A.data.now.getTime() + hours * 3600000)
+        // Wall clock, not the fixed demo clock: tick() counts against the real
+        // time, and mixing the two displayed a two-hour grant as twelve hours.
+        expires: new Date(Date.now() + hours * 3600000)
       };
       paintElevation();
       A.flash('warn', 'Elevated to ' + group,
@@ -475,9 +502,13 @@
     host.appendChild(el('span', [el('strong', { text: e.group }), ' · ', e.reason]));
     host.appendChild(el('span.elev-time', { text: '' }));
     host.appendChild(ui.btn('Release now', { variant: 'ghost', onClick: A.dropElevation }));
+
+    if (elevationTimer) { clearInterval(elevationTimer); elevationTimer = null; }
     tick();
-    if (elevationTimer) clearInterval(elevationTimer);
-    elevationTimer = window.setInterval(tick, 1000);
+    // tick() may have dropped the elevation already, in which case there is
+    // nothing left to count down and installing an interval would leave a
+    // stale closure firing forever.
+    if (A.data.me.elevation) elevationTimer = window.setInterval(tick, 1000);
   }
   A.paintElevation = paintElevation;
 

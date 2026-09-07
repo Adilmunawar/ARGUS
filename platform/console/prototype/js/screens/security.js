@@ -801,16 +801,16 @@
         { id: 'evidence', label: 'Evidence', render: evidenceTab }
       ];
 
-      // #/security/alerts is what the bell in the top bar links to, so alerts
-      // has to be the tab that opens, not the tab you then have to find.
-      if (ctx.rest[0] === 'alerts') {
-        items = items.filter(function (t) { return t.id === 'alerts'; })
-          .concat(items.filter(function (t) { return t.id !== 'alerts'; }));
-      }
 
       mount.appendChild(ui.pageHeader('Security',
         'Baseline drift, alerts, vulnerabilities and every recorded session, with the evidence pack that ties them together.'));
-      mount.appendChild(ui.tabs(items, { label: 'Security sections' }));
+      // The bell links to #/security/alerts, so that tab opens. Selecting it is
+      // not the same as reordering the tablist, which would move the tabs about
+      // depending on how you arrived.
+      mount.appendChild(ui.tabs(items, {
+        label: 'Security sections',
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+      }));
     }
   });
 })();

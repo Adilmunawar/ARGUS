@@ -720,6 +720,66 @@
     "detail": ""
   },
   {
+    "suite": "GUARD",
+    "id": "a disabled button does not run its action",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the destructive confirm refuses an empty name field",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the destructive confirm proceeds once the name matches",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the skip link does not blank the page",
+    "pass": true,
+    "detail": "Overview - Argus Console"
+  },
+  {
+    "suite": "GUARD",
+    "id": "leaving a screen stops the work it started",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the elevation countdown matches the granted duration",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "an already-expired grant does not leave a timer running",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "a deep link opens the tab it names",
+    "pass": true,
+    "detail": "Access grants"
+  },
+  {
+    "suite": "GUARD",
+    "id": "the query editor enforces the read-only claim it makes",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "every class used in the markup is defined in a stylesheet",
+    "pass": true,
+    "detail": ""
+  },
+  {
     "suite": "CON",
     "id": "all text meets WCAG AA contrast",
     "pass": true,

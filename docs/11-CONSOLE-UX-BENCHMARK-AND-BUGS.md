@@ -53,7 +53,7 @@ The components that matter for us, and the verdict on each:
 
 ## Part 2: The test suite
 
-`platform/console/prototype/tests/run-tests.js`, run in headless Chromium against the real rendered DOM. 18 suites, 153 assertions. Exit code is the failure count, so CI can gate on it.
+`platform/console/prototype/tests/run-tests.js`, run in headless Chromium against the real rendered DOM. 19 suites, 163 assertions. Exit code is the failure count, so CI can gate on it.
 
 | Suite | What it asserts |
 |---|---|
@@ -65,6 +65,7 @@ The components that matter for us, and the verdict on each:
 | **TBL** | Every table has a caption; sortable headers carry `aria-sort`; sorting reorders the rows |
 | **STATE** | A filter that excludes everything says "no match", which is a different sentence from "empty" |
 | **LAYOUT** | No table row is taller than 220px, no screen runs past 4200px, nothing marked `hidden` is visible, and no icon has fallen back to the default SVG size |
+| **GUARD** | A regression for every defect the adversarial audit found: a disabled button refuses activation, the destructive confirm refuses an empty field, the skip link does not blank the page, leaving a screen stops the work it started, the elevation countdown matches the grant, a deep link opens the tab it names, the query editor enforces its read-only claim, and every class in the markup is defined in a stylesheet |
 | **CON** | Contrast computed from rendered colours, gradients included, not from the token table |
 | **TXT** | No text below 11px; no clipped or overflowing text |
 | **RESP** | No horizontal overflow at 1440 / 1366 / 1280 / 1024 / 768 / 390 px |
@@ -86,6 +87,7 @@ $ node tests/run-tests.js
   TBL        3 passed     0 failed
   STATE      1 passed     0 failed
   LAYOUT     4 passed     0 failed
+  GUARD     10 passed     0 failed
   CON        1 passed     0 failed
   TXT        2 passed     0 failed
   RESP       6 passed     0 failed
@@ -96,7 +98,7 @@ $ node tests/run-tests.js
   SEC        7 passed     0 failed
   DET        1 passed     0 failed
   CONS       2 passed     0 failed
-  All checks passed.  153/153
+  All checks passed.  163/163
 ```
 
 ---

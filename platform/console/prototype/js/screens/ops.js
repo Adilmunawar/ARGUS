@@ -248,6 +248,12 @@
     var runOpts;
     var runBtn;
     var timers = [];
+    // A transcript that outlives its screen keeps appending to a detached node
+    // and flashes its result over whatever you navigated to.
+    A.onLeave(function () {
+      timers.forEach(function (h) { window.clearTimeout(h); });
+      timers = [];
+    });
 
     function announceResult() {
       A.announce(lastLine
@@ -304,8 +310,9 @@
             : 'A second person has to approve this run'
         }),
         el('p', {
-          text: 'You cannot approve your own run. The console records who asked and who agreed, and both names '
-            + 'go in the audit next to the transcript.'
+          text: 'A real deployment holds the run until a second person agrees, and records both names in the '
+            + 'audit next to the transcript. This prototype has no second party, so it runs after the step-up '
+            + 'alone. The gate is specified, not built.'
         })
       ]) : null,
       form,
