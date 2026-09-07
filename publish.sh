@@ -93,17 +93,19 @@ if [[ -n "$LATEST" ]] && ! gh release view "$LATEST" >/dev/null 2>&1; then
 fi
 
 # ── Protect ──────────────────────────────────────────────────────────────────
-say "Protecting main: pull request required, validate check required, signed commits"
+# Signed commits are deliberately not required here. Turning that on without a
+# signing key configured locks the owner out of their own repository. Configure
+# signing first, then enable it in Settings -> Branches. ADR-0023 has the
+# reconciler verify signatures regardless of what GitHub enforces.
+say "Protecting main: pull request required, validate check required"
 gh api -X PUT "repos/$OWNER/$NAME/branches/main/protection" \
   -H "Accept: application/vnd.github+json" \
   -f 'required_status_checks[strict]=true' \
-  -f 'required_status_checks[contexts][]=gitops' \
-  -f 'required_status_checks[contexts][]=console' \
+  -f 'required_status_checks[contexts][]=GitOps schema and secret scan' \
+  -f 'required_status_checks[contexts][]=Console prototype tests' \
   -f 'enforce_admins=false' \
   -f 'required_pull_request_reviews[required_approving_review_count]=1' \
   -f 'restrictions=' 2>/dev/null \
-  && gh api -X POST "repos/$OWNER/$NAME/branches/main/protection/required_signatures" \
-       -H "Accept: application/vnd.github+json" >/dev/null 2>&1 \
   && echo "  protected" \
   || echo "  Skipped: branch protection needs a paid plan on private repos. Set it in Settings → Branches."
 

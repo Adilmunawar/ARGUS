@@ -78,9 +78,11 @@ Use a credential manager or SSH rather than pasting a token into the URL: a toke
 
 ## After the first push
 
-**Protect `main`.** Settings → Branches → Add rule for `main`: require a pull request, require the `validate` check to pass, and require signed commits. That last one matters because `ADR-0023` has the reconciler refusing unsigned commits: the repository should hold itself to the rule it specifies for the platform.
+**Protect `main`.** Settings → Branches → Add rule for `main`: require the `validate` check to pass, and block force pushes and deletions.
 
-**Turn on secret scanning and push protection.** Settings → Code security. Free for public repositories, and it would have caught the token.
+Signed commits are the rule this repository specifies for the platform (ADR-0023 has the reconciler refuse unsigned commits), so it should eventually hold itself to that rule. Configure signing locally first: `git config user.signingkey`, `git config commit.gpgsign true`, and add the public key under Settings → SSH and GPG keys. Requiring signatures before that is set up locks you out of your own repository.
+
+**Turn on secret scanning and push protection.** Settings → Code security. Free for public repositories, and it catches a credential before it ever reaches a commit.
 
 **Check the CI badge goes green.** The `validate` workflow runs the GitOps schema check, a credential scan, and the 65-assertion console suite in headless Chromium. If it's red on the first run, it's almost certainly the Playwright browser install step on the runner.
 
