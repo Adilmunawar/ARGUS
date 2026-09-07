@@ -1,23 +1,49 @@
 # Console prototype
 
-`index.html`: a static, clickable prototype of the Argus Console. Open it in any browser; no build, no server, no data, no network.
+A working prototype of the Argus Console. Open `index.html` in any browser. No build, no server, no network.
+
+```
+index.html            the shell: navigation, top bar, session drawer
+assets/app.css        design tokens and the shell chrome
+assets/components.css every component the screens are built from
+js/data.js            the demonstration dataset
+js/ui.js              the component library
+js/app.js             routing, command palette, dialogs, focus, elevation
+js/screens/*.js       one file per section
+tests/run-tests.js    the automated suite
+```
+
+Classic scripts, not modules, because ES modules are blocked by CORS on `file://` and the console has to open from a memory stick during a site failure. Everything is ES5, so it runs in whatever browser is on the machine you can reach.
 
 ## Running the tests
 
 ```bash
-node tests/run-tests.js          # exit code = number of failures
-SHOTS=/tmp/shots node tests/run-tests.js
+npm ci
+npx playwright install chromium
+node platform/console/prototype/tests/run-tests.js
 ```
 
-Ten suites, 65 assertions, in headless Chromium against the real rendered DOM: axe-core WCAG 2.1 A/AA on every screen, real `Tab` traversal for focus indicators, contrast computed from rendered colours (gradients included), responsive checks at six widths, a density suite for small laptops, touch-target sizes, reduced-motion, and console errors. Screenshots are written for each width.
+The exit code is the number of failures, so CI can gate on it.
 
-Current: **65/65 passing**. Findings and the fix plan are in `docs/11-CONSOLE-UX-BENCHMARK-AND-BUGS.md`.
+Seventeen suites in headless Chromium against the real rendered DOM: the shell boots and every screen registers; every route and deep link resolves; axe-core WCAG 2.1 A/AA on every screen and on every overlay; real `Tab` traversal with focus-ring, focus-trap and focus-restoration checks; the command palette; table captions and `aria-sort`; the empty, no-match and error states; contrast computed from rendered pixels; a text-size floor; six viewport widths; laptop density; WCAG 1.4.10 reflow at 200% and 400% zoom; touch targets; reduced motion; a security pass over the source; determinism; and console errors.
 
-## What it shows
+The security suite reads the source rather than the DOM, because the property that matters is that `innerHTML` appears nowhere at all, not that a particular render happened to be safe.
 
-Nine screens: Overview, Applications (Mills, with the generated dependency graph), Deployments (reconciler plan diff and blast radius), Compute → sql-01 → recorded desktop session, Data, Security → recorded sessions, Identity, Operations, Audit.
+## What it demonstrates
 
-Patterns are borrowed deliberately: app layout and flashbar and property filter from AWS Cloudscape, the collapsible rail from Google Cloud, breadcrumbs from Azure. Tokens, type and components come from the Mills dashboard `DESIGN.md`, with one recorded deviation: the minimum font size is 11px, not 10px, because this is an operations console read under pressure.
+Ten sections, and the interaction rules from `docs/10-CONSOLE-DESIGN.md`:
+
+- **Every write is a pull request.** Buttons say *Propose*, and the response shows the reconciler's plan and the blast radius before anything is applied. The two exceptions that run live, quarantine and revoke, both page security.
+- **Recorded, credential-less browser RDP.** The Connect tab requests elevation, states that OpenBao issues a one-time credential the operator never sees, and opens a session in a drawer that survives navigation.
+- **Just-in-time elevation** with a reason, an approver, a maximum of four hours, and a countdown in the shell that you cannot miss.
+- **A command palette** (`Ctrl`/`Cmd` + `K`) over every resource, screen and action, plus `g`-then-letter jumps and `/` to filter.
+- **Compound audit filtering.** CloudTrail allows one attribute at a time; this allows several at once, which is the most-complained-about limitation in the product it replaces.
+
+## What it is not
+
+Static. There is no API, no authentication, no reconciler, no Guacamole, no database. Every number is invented, though the shape of the data follows `docs/02-APPLICATION-INFRASTRUCTURE-MAP.md` so the screens stay honest when a real API replaces the fixture.
+
+These tests prove the interface is sound. They prove nothing about the platform, which remains as `docs/09-VALIDATION-STATUS.md` describes it.
 
 ## What to judge it on
 

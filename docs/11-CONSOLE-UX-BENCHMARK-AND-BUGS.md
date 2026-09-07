@@ -53,34 +53,50 @@ The components that matter for us, and the verdict on each:
 
 ## Part 2: The test suite
 
-`platform/console/prototype/tests/run-tests.js`, run in headless Chromium 141 against the real rendered DOM. Ten suites, 65 assertions. Exit code is the failure count, so CI can gate on it.
+`platform/console/prototype/tests/run-tests.js`, run in headless Chromium against the real rendered DOM. 18 suites, 153 assertions. Exit code is the failure count, so CI can gate on it.
 
 | Suite | What it asserts |
 |---|---|
-| **NAV** | Every nav target resolves to a page; exactly one page visible at a time; breadcrumb tracks the screen |
-| **A11Y** | axe-core, WCAG 2.1 A **and** AA, run separately on all nine screens |
-| **KBD** | Real `Tab` traversal: every tab stop has a visible focus indicator; no click handler on a non-focusable element |
-| **CON** | Contrast computed from rendered colours (including gradient backgrounds), not from the token table |
+| **BOOT** | The shell loads, the namespace and dataset exist, and all ten screens register |
+| **NAV** | Every route and deep link resolves; the breadcrumb, document title and current nav item track the screen; an unknown route says so |
+| **A11Y** | axe-core, WCAG 2.1 A **and** AA, on every screen and on every overlay: the palette, dialogs, the flash bar |
+| **KBD** | Real `Tab` traversal; every stop has a visible focus ring; dialogs trap focus and give it back to whatever opened them; `g`-then-letter jumps work |
+| **CMD** | The command palette opens on `Ctrl`+`K`, searches, moves with the arrow keys, and closes on `Escape` |
+| **TBL** | Every table has a caption; sortable headers carry `aria-sort`; sorting reorders the rows |
+| **STATE** | A filter that excludes everything says "no match", which is a different sentence from "empty" |
+| **LAYOUT** | No table row is taller than 220px, no screen runs past 4200px, nothing marked `hidden` is visible, and no icon has fallen back to the default SVG size |
+| **CON** | Contrast computed from rendered colours, gradients included, not from the token table |
 | **TXT** | No text below 11px; no clipped or overflowing text |
 | **RESP** | No horizontal overflow at 1440 / 1366 / 1280 / 1024 / 768 / 390 px |
 | **DENS** | On a 1366×768, 1280×800 and 1024×768 laptop: the first card clears the fold, every stat tile is above it, chrome plus header stays under 55% of the screen, and Overview stays under two screens tall |
+| **ZOOM** | WCAG 1.4.10 reflow at 200% and 400% browser zoom |
 | **TAP** | Touch targets ≥ 24px (WCAG 2.5.8) at tablet and phone |
-| **MOTION** | `prefers-reduced-motion` stops every animation |
+| **MOTION** | `prefers-reduced-motion` stops every animation and transition |
+| **SEC** | A CSP is declared, it actually blocks an injected inline script, no external origin is referenced, `innerHTML` and inline handlers appear nowhere in the source, and no secret value is rendered |
+| **DET** | Every route renders identically on a second visit |
 | **CONS** | No console errors, no failed requests |
 
 ```
 $ node tests/run-tests.js
-  NAV      27 passed     0 failed
-  A11Y      9 passed     0 failed
-  KBD       3 passed     0 failed
-  CON       1 passed     0 failed
-  TXT       2 passed     0 failed
-  MOTION    1 passed     0 failed
-  RESP      6 passed     0 failed
-  DENS     12 passed     0 failed
-  TAP       2 passed     0 failed
-  CONS      2 passed     0 failed
-  All checks passed.  65/65
+  BOOT      11 passed     0 failed
+  NAV       71 passed     0 failed
+  A11Y      19 passed     0 failed
+  KBD        6 passed     0 failed
+  CMD        5 passed     0 failed
+  TBL        3 passed     0 failed
+  STATE      1 passed     0 failed
+  LAYOUT     4 passed     0 failed
+  CON        1 passed     0 failed
+  TXT        2 passed     0 failed
+  RESP       6 passed     0 failed
+  DENS       9 passed     0 failed
+  TAP        2 passed     0 failed
+  ZOOM       2 passed     0 failed
+  MOTION     1 passed     0 failed
+  SEC        7 passed     0 failed
+  DET        1 passed     0 failed
+  CONS       2 passed     0 failed
+  All checks passed.  153/153
 ```
 
 ---

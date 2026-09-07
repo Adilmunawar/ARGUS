@@ -2,6 +2,34 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.6.0] - 2026-09-08
+
+### Added
+- **The console prototype is now a working application**, not six static screens. Ten sections from `docs/10-CONSOLE-DESIGN.md`, built as a routed single-page application that still opens from `file://` with no build step, no server and no network.
+  - **Hash routing** with real links, so every resource has a URL that can be pasted into an alert or a runbook. Two levels at most, list then detail with tabs; Azure's blade stacking is the anti-pattern.
+  - **A command palette** on `Ctrl`/`Cmd`+`K` over every application, host, VM, bucket, database, runbook, screen and action, with subsequence matching, arrow-key selection and `aria-activedescendant`. Plus `g`-then-letter jumps, `/` to focus the filter, and `?` for the shortcut list.
+  - **Token-based property filtering** on the tables that need it, several predicates at once combined with AND. CloudTrail allows one attribute at a time, which is the most-complained-about limitation in the thing it replaces.
+  - **Recorded browser RDP and SSH** in a drawer that is mounted once and survives navigation, so an operator mid-restore can check a dashboard without dropping the shell. Connecting states in order what happens: role and tier checked, elevation requested if absent, a one-time OpenBao credential the operator never sees, recording to `argus-sessions`, clipboard and file transfer gated by role, credential revoked at expiry.
+  - **Just-in-time elevation** with a reason, an approver, a four-hour ceiling and a live countdown in the shell. Approving your own request is refused, and so is approving your own deployment: the four-eyes rule is enforced in the interface, not just written down.
+  - **The reconciler's plan and blast radius** shown before a deployment is approved, including which services are touched, what depends on them, and how many people are signed in right now.
+  - **Step-up authentication** before every sensitive action and a typed-name confirmation for anything irreversible, following the delete ladder rather than putting destructive items next to harmless ones in a menu.
+- **A component library** (`js/ui.js`) that builds DOM rather than HTML strings. `el()` escapes by construction and throws if handed an `html` key, because this console renders alert rules, commit messages, log lines and file names, and one `innerHTML` on that path is a stored XSS in the highest-value target on the platform.
+- **A Content-Security-Policy** on the page itself: `default-src 'none'`, `script-src 'self'`, `connect-src 'self'`, `object-src 'none'`, `base-uri 'none'`. The suite proves it is enforced by trying to inject an inline script and asserting the injection fails.
+
+### Changed
+- **The test suite went from 65 assertions in 10 suites to 153 in 18.** New coverage: the shell boots and every screen registers; deep links resolve; axe runs on overlays as well as screens; focus is trapped in dialogs and restored on close; the command palette works from the keyboard; every table has a caption and working `aria-sort`; the no-match state is worded differently from the empty state; WCAG 1.4.10 reflow at 200% and 400% zoom; layout sanity; a security pass that reads the source; and determinism across repeat visits.
+- The prototype is now several files rather than one, so the stylesheet, the component library, the shell and each screen can be reviewed and changed independently. Classic scripts, not ES modules, because modules are blocked by CORS on `file://` and this has to open from a memory stick during a site failure.
+
+### Fixed
+- **A stylesheet rule leaked into content.** `.col` was both the shell's full-height layout column and the utility used to stack two lines inside a table cell, so `min-height: 100vh` applied to every audit row. The audit screen was 9,659px tall and the applications screen 6,676px. Found by looking at a screenshot, not by a test, which is why the **LAYOUT** suite now asserts that no table row exceeds 220px and no screen runs past 4,200px.
+- **`[hidden]` was being overridden.** A class that sets `display` beats the user-agent rule for the `hidden` attribute, so the session drawer and the empty elevation bar were both on screen while marked hidden. The suite now checks that nothing marked hidden has a bounding box.
+- **Icons fell back to the default SVG size.** Inline SVG with no intrinsic dimensions renders at 300×150; the search, collapse and burger icons were doing exactly that. Now constrained, and asserted.
+- `connect-src 'none'` in the first draft of the CSP would have broken the real console, whose API is same-origin. It is `'self'`.
+- The screen scripts loaded before `app.js`, which defines the function they register with, so nothing rendered. `app.js` now loads first and defers its own boot to `DOMContentLoaded`.
+
+### Note
+- Everything above is interface. There is still no API, no authentication, no reconciler, no Guacamole and no database, and every number on screen is invented, though the shape of the data follows `docs/02-APPLICATION-INFRASTRUCTURE-MAP.md`. `docs/09-VALIDATION-STATUS.md` is unchanged and still governs what is actually proven.
+
 ## [0.5.0] - 2026-09-08
 
 ### Changed

@@ -1,0 +1,130 @@
+/* ── Tokens: Mills DESIGN.md, verbatim. Never hardcode a hex outside this block. ──
+   Fonts are a local-first stack on purpose: the console runs inside an
+   egress-restricted network and must never fetch from the internet (ADR-0027).
+   Geist and Lora ship as self-hosted WOFF2 in the real build.               */
+:root{
+  --ink:#163026; --muted:#55665d; --pine:#0c2b1f; --cane:#113a2b; --brand:#1e6f4a;
+  --leaf:#c8e36f; --cream:#f5f3e9; --paper:#fffefa;
+  --c1:#247a52; --c2:#b07f23; --c3:#3f6fa8; --c4:#b25746; --c5:#7757b8; --grid:#e4e1d3;
+  --ok:#046c4e; --warn:#92400e; --bad:#991b1b; --info:#075985;
+  --card:20px; --field:12px;
+  --sh-card:0 1px 2px rgba(22,48,38,.06), 0 4px 12px rgba(22,48,38,.05);
+  --sh-float:0 4px 16px rgba(22,48,38,.10), 0 12px 32px rgba(22,48,38,.07);
+  --sh-pop:0 8px 24px rgba(22,48,38,.14), 0 24px 56px rgba(22,48,38,.10);
+  --sans:"Geist","Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --display:"Lora",Georgia,"Times New Roman",serif;
+  --rail:236px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); background:var(--cream);
+  background-image:radial-gradient(120% 60% at 50% -10%, rgba(200,227,111,.16), transparent 60%);
+  background-repeat:no-repeat; background-attachment:fixed; min-height:100vh;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+::selection{background:var(--leaf);color:var(--pine)}
+h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:-.01em}
+:focus-visible{outline:3px solid rgba(30,111,74,.5);outline-offset:2px;border-radius:6px}
+.skip{position:absolute;left:-9999px;top:8px;z-index:200;background:var(--paper);border:1px solid var(--brand);
+  border-radius:var(--field);padding:10px 15px;font-weight:600;color:var(--brand);text-decoration:none}
+.skip:focus{left:12px}
+.sr{position:absolute;left:0;top:0;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ── App layout: collapsible rail (Cloudscape app-layout / GCP nav) ── */
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:100vh}
+body.railed{--rail:66px}
+.side{background:var(--paper);border-right:1px solid rgba(22,48,38,.08);padding:14px 10px;
+  position:sticky;top:0;height:100vh;overflow:auto;overscroll-behavior:contain;z-index:60}
+.mark{display:flex;align-items:center;gap:9px;padding:2px 6px 16px}
+.leafmark{width:28px;height:28px;border-radius:9px;background:linear-gradient(140deg,var(--brand),var(--cane));display:grid;place-items:center;flex:none}
+.leafmark svg{width:16px;height:16px}
+.mark .txt b{font-family:var(--display);font-size:15px;font-weight:600;display:block;line-height:1.2}
+.mark .txt span{font-size:11px;color:var(--muted)}
+.navgroup{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:14px 8px 5px;font-weight:600}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;color:var(--ink);cursor:pointer;
+  border:none;background:none;width:100%;text-align:left;font:inherit;font-size:13px;min-height:40px}
+.nav:hover{background:rgba(200,227,111,.26)}
+.nav[aria-current="page"]{background:linear-gradient(120deg,var(--cane),var(--pine));color:#fff;font-weight:600}
+.nav .badge{margin-left:auto;background:var(--bad);color:#fff;border-radius:999px;font-size:11px;
+  min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
+.nav svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+body.railed .nav .lbl,body.railed .nav .badge,body.railed .navgroup,body.railed .mark .txt,body.railed .railbtn .lbl{display:none}
+body.railed .nav{justify-content:center;padding:9px 0}
+.railbtn{width:100%;margin-top:16px;border:1px solid rgba(22,48,38,.14);background:var(--cream);border-radius:10px;
+  padding:8px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:12px;min-height:38px}
+.railbtn:hover{background:rgba(200,227,111,.26)}
+
+/* ── Top bar ── */
+.top{display:flex;align-items:center;gap:11px;padding:10px 22px;min-height:58px;
+  border-bottom:1px solid rgba(22,48,38,.07);background:rgba(255,254,250,.9);backdrop-filter:blur(10px);position:sticky;top:0;z-index:50}
+.burger{display:none;border:1px solid rgba(22,48,38,.14);background:var(--paper);border-radius:10px;
+  width:44px;height:44px;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);flex:none}
+.crumbs{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
+.crumbs button{background:none;border:none;font:inherit;color:var(--muted);cursor:pointer;padding:5px 6px;margin:-5px -6px;border-radius:6px;min-height:26px}
+.crumbs button:hover{color:var(--brand);text-decoration:underline}
+.crumbs b{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crumbs .sep{color:rgba(22,48,38,.35)}
+.kbar{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--cream);border:1px solid rgba(22,48,38,.14);
+  border-radius:var(--field);padding:8px 12px;color:var(--muted);cursor:pointer;min-width:236px;font:inherit;font-size:12px;min-height:40px}
+.kbar:hover{border-color:rgba(30,111,74,.45);color:var(--ink)}
+.kbar kbd{margin-left:auto;font:inherit;font-size:11px;background:var(--paper);border:1px solid rgba(22,48,38,.16);border-radius:5px;padding:2px 6px}
+.envpill{display:flex;align-items:center;gap:7px;background:linear-gradient(120deg,var(--cane),var(--pine));color:#fff;
+  border:none;border-radius:999px;padding:9px 15px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;min-height:40px;white-space:nowrap;flex:none}
+.envpill i{width:7px;height:7px;border-radius:50%;background:var(--leaf);display:block;flex:none}
+.iconbtn{border:1px solid rgba(22,48,38,.14);background:var(--paper);border-radius:10px;width:40px;height:40px;
+  display:grid;place-items:center;cursor:pointer;color:var(--ink);position:relative;flex:none}
+.iconbtn:hover{background:rgba(200,227,111,.26)}
+.iconbtn .n{position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border-radius:999px;font-size:11px;
+  min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
+.who{display:flex;align-items:center;gap:8px;font-size:12px;background:none;border:none;cursor:pointer;font:inherit;
+  padding:4px 7px 4px 4px;border-radius:999px;min-height:40px;flex:none}
+.who:hover{background:rgba(200,227,111,.26)}
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(140deg,var(--leaf),var(--brand));
+  display:grid;place-items:center;color:var(--pine);font-weight:700;font-size:12px;flex:none}
+
+
+/* ------------------------------------------------------------------------
+   Responsive: the rail collapses to icons at 1200px, and becomes an
+   off-canvas drawer at 900px. Below 620px the top bar wraps rather than
+   letting the content column overflow, which was bug B1.
+   ------------------------------------------------------------------------ */
+
+@media (max-width: 1200px) {
+  :root { --rail: 66px; }
+  .nav .lbl, .nav .badge, .navgroup, .mark .txt, .railbtn .lbl { display: none; }
+  .nav { justify-content: center; padding: 9px 0; }
+}
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .side { position: fixed; left: 0; top: 0; width: 272px; transform: translateX(-100%);
+    transition: transform .2s; box-shadow: var(--sh-pop); z-index: 95; }
+  body.navopen .side { transform: none; }
+  body.navopen .nav .lbl, body.navopen .nav .badge, body.navopen .navgroup, body.navopen .mark .txt { display: revert; }
+  body.navopen .nav { justify-content: flex-start; padding: 9px 10px; }
+  .railbtn { display: none; }
+  .burger { display: flex; }
+  .kbar { min-width: 0; flex: 1; }
+  .top { padding: 8px 14px; gap: 9px; }
+  .main { padding: 16px 14px 48px; }
+  .flashes { padding: 0 14px; }
+  .elevation { margin: 12px 14px 0; }
+}
+
+@media (max-width: 620px) {
+  .top { flex-wrap: wrap; row-gap: 8px; }
+  .crumbs { order: 1; flex: 1 1 auto; }
+  .kbar { order: 3; flex: 1 1 100%; margin-left: 0; }
+  .envpill, .iconbtn, .whopill { order: 2; }
+}
+
+@media (max-width: 420px) {
+  .main { padding: 14px 12px 44px; }
+  .flashes { padding: 0 12px; }
+  .elevation { margin: 12px 12px 0; }
+  .top { padding: 8px 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+@media (prefers-contrast: more) { :root { --muted: #3a4a41; } }

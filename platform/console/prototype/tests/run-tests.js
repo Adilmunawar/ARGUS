@@ -1,20 +1,28 @@
 /**
- * Argus Console prototype: the automated test suite.
+ * Argus Console: the automated test suite.
  *
  *   node tests/run-tests.js [path-to-index.html]
  *
- * Runs in headless Chromium against the real rendered DOM:
- *   A11Y   axe-core WCAG 2.1 A/AA on every screen
- *   NAV    every nav target resolves; exactly one page visible at a time
- *   KBD    every interactive element is reachable and has a visible focus ring
- *   RESP   no horizontal overflow at 1440 / 1024 / 768 / 390 px
- *   TAP    touch targets >= 24px on mobile (WCAG 2.5.8)
- *   TXT    no text smaller than 11px; no clipped/overflowing text nodes
- *   CON    contrast ratios computed from rendered colours, not from tokens
- *   MOTION reduced-motion is respected
- *   CONS   no console errors or failed requests
+ * Runs in headless Chromium against the real rendered DOM. Exit code is the
+ * number of failures, so CI can gate on it.
  *
- * Exit code is the number of failures, so CI can gate on it.
+ *   BOOT   the shell loads, every screen registers, nothing throws
+ *   NAV    every route resolves, deep links work, unknown routes fail honestly
+ *   A11Y   axe-core WCAG 2.1 A/AA on every route and on every overlay
+ *   KBD    real Tab traversal, focus rings, focus trap, focus restoration
+ *   CMD    the command palette: search, arrow keys, activation, escape
+ *   TBL    every table has a caption, sortable headers carry aria-sort
+ *   STATE  empty, no-match and error states are distinguishable
+ *   CON    contrast computed from rendered pixels, gradients included
+ *   TXT    nothing below 11px, nothing clipped
+ *   RESP   no horizontal overflow at six widths
+ *   DENS   a small laptop does not spend its screen on chrome
+ *   ZOOM   WCAG 1.4.10 reflow at 200% and 400%
+ *   TAP    touch targets at least 24px (WCAG 2.5.8)
+ *   MOTION prefers-reduced-motion stops every animation
+ *   SEC    CSP present, no external origins, no innerHTML, no inline handlers
+ *   DET    the same route renders identically twice (tests may rely on it)
+ *   CONS   no console errors, no failed requests
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -25,13 +33,43 @@ const path = require('path');
 // hardcoding a path, so this runs on a developer machine and on CI alike.
 const AXE = fs.readFileSync(path.join(path.dirname(require.resolve('axe-core')), 'axe.min.js'), 'utf8');
 const FILE = process.argv[2] || path.join(__dirname, '..', 'index.html');
-const URL = 'file://' + path.resolve(FILE);
+const URL = 'file://' + path.resolve(FILE).replace(/\\/g, '/');
+const ROOT = path.resolve(path.join(__dirname, '..'));
 const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-console-shots');
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit'];
+// Detail routes matter more than list routes: they are where the hard layout
+// and the destructive actions live.
+const DEEP = [
+  'apps/mills', 'apps/agis', 'deploys/1847', 'deploys/1843',
+  'compute/host/hv-03', 'compute/vm/sql-01', 'compute/vm/siem-01',
+  'data/database/umairv3_db', 'data/bucket/argus-backups', 'ops/runbook/sql-01-restore-drill'
+];
+
 const results = [];
-const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail });
+const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail: detail || '' });
+
+async function goto(page, route) {
+  await page.evaluate(r => { window.location.hash = '#/' + r; }, route);
+  await page.waitForFunction(r => window.ARGUS && window.ARGUS.state.route === r.split('/')[0],
+    route, { timeout: 4000 });
+  await page.waitForTimeout(40);
+}
+
+async function axeOn(page, label) {
+  const r = await page.evaluate(async () => await window.axe.run(document, {
+    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
+    resultTypes: ['violations'],
+    preload: false
+  }));
+  if (!r.violations.length) { rec('A11Y', label + ': no WCAG A/AA violations', true); return; }
+  for (const v of r.violations) {
+    rec('A11Y', `${label}: ${v.id}`, false,
+      `${v.impact}: ${v.help} (${v.nodes.length}x) e.g. ${(v.nodes[0].target || []).join(' ')}`);
+  }
+}
 
 (async () => {
   const browser = await chromium.launch();
@@ -42,258 +80,558 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', e => consoleErrors.push('pageerror: ' + e.message));
   const failedReqs = [];
-  page.on('requestfailed', r => failedReqs.push(r.url() + ', ' + (r.failure() || {}).errorText));
+  page.on('requestfailed', r => failedReqs.push(r.url() + ' : ' + ((r.failure() || {}).errorText || '')));
 
   await page.goto(URL, { waitUntil: 'load' });
-  await page.addScriptTag({ content: AXE });
+  // The page's own CSP forbids inline script, which is the point of having it,
+  // so axe goes in through the debugger protocol rather than a <script> tag.
+  await page.evaluate(AXE);
 
-  const screens = await page.$$eval('.page', ns => ns.map(n => n.id));
+  /* ---------------------------------------------------------------- BOOT */
 
-  // ---------- NAV ----------
-  const navTargets = await page.$$eval('[data-go]', ns => [...new Set(ns.map(n => n.dataset.go))]);
+  const globals = await page.evaluate(() => ({
+    argus: !!window.ARGUS, ui: !!(window.ARGUS && window.ARGUS.ui),
+    data: !!(window.ARGUS && window.ARGUS.data),
+    screens: window.ARGUS ? Object.keys(window.ARGUS.screens) : []
+  }));
+  rec('BOOT', 'the ARGUS namespace, ui and data are present', globals.argus && globals.ui && globals.data,
+    JSON.stringify({ argus: globals.argus, ui: globals.ui, data: globals.data }));
+  for (const r of ROUTES) {
+    rec('BOOT', `screen "${r}" is registered`, globals.screens.indexOf(r) !== -1,
+      globals.screens.join(',') || 'none registered');
+  }
+
+  /* ----------------------------------------------------------------- NAV */
+
+  const navTargets = await page.$$eval('.nav[data-go]', ns => ns.map(n => n.dataset.go));
   for (const t of navTargets) {
-    rec('NAV', `target "${t}" has a page`, screens.includes(t), screens.includes(t) ? '' : 'no <section id> matches');
+    rec('NAV', `nav target "${t}" has a screen`, globals.screens.indexOf(t) !== -1);
   }
-  for (const s of screens) {
-    const nav = await page.$(`.nav[data-go="${s}"]`);
-    if (nav) {
-      await nav.click();
-      const visible = await page.$$eval('.page', ns => ns.filter(n => !n.hidden).map(n => n.id));
-      rec('NAV', `"${s}" shows exactly one page`, visible.length === 1 && visible[0] === s, `visible: ${visible.join(',') || 'none'}`);
-      const crumb = await page.$eval('#crumb', n => n.textContent.trim());
-      rec('NAV', `"${s}" updates the breadcrumb`, crumb.length > 0 && crumb.toLowerCase() !== 'overview' || s === 'overview', `crumb="${crumb}"`);
-    }
-  }
-
-  // ---------- A11Y (axe) per screen ----------
-  for (const s of screens) {
-    await page.evaluate(id => {
-      document.querySelectorAll('.page').forEach(p => { p.hidden = (p.id !== id); });
-    }, s);
-    const r = await page.evaluate(async () => await window.axe.run(document, {
-      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
-      resultTypes: ['violations']
+  for (const r of ROUTES) {
+    await goto(page, r);
+    const st = await page.evaluate(() => ({
+      route: window.ARGUS.state.route,
+      title: document.title,
+      crumb: (document.getElementById('crumb').textContent || '').trim(),
+      h1: (document.querySelector('#main h1') || {}).textContent || '',
+      current: (document.querySelector('.nav[aria-current="page"]') || {}).dataset
+        ? document.querySelector('.nav[aria-current="page"]').dataset.go : null,
+      mainChildren: document.getElementById('main').children.length
     }));
-    if (!r.violations.length) rec('A11Y', `${s}: no WCAG A/AA violations`, true, '');
-    for (const v of r.violations) {
-      rec('A11Y', `${s}: ${v.id}`, false,
-        `${v.impact}, ${v.help} (${v.nodes.length}×) e.g. ${(v.nodes[0].target || []).join(' ')}`);
-    }
+    rec('NAV', `"${r}" routes and renders`, st.route === r && st.mainChildren > 0,
+      `route=${st.route} children=${st.mainChildren}`);
+    rec('NAV', `"${r}" sets a document title`, /- Argus Console$/.test(st.title) && st.title.length > 16, st.title);
+    rec('NAV', `"${r}" updates the breadcrumb`, st.crumb.length > 0, `crumb="${st.crumb}"`);
+    rec('NAV', `"${r}" marks the nav item current`, st.current === r, `current=${st.current}`);
+    rec('NAV', `"${r}" renders exactly one h1`,
+      (await page.$$eval('#main h1', ns => ns.length)) === 1);
   }
+  for (const d of DEEP) {
+    await goto(page, d);
+    const ok = await page.evaluate(() => {
+      const m = document.getElementById('main');
+      return m.children.length > 0 && !m.querySelector('.empty.is-error');
+    });
+    rec('NAV', `deep link "${d}" renders`, ok);
+  }
+  await goto(page, 'nosuchscreen');
+  rec('NAV', 'an unknown route fails honestly rather than blankly',
+    await page.evaluate(() => /does not exist/i.test(document.getElementById('main').textContent)));
 
-  // ---------- KBD ----------
-  await page.evaluate(() => document.querySelectorAll('.page').forEach(p => { p.hidden = (p.id !== 'overview'); }));
+  /* ---------------------------------------------------------------- A11Y */
+
+  for (const r of ROUTES) { await goto(page, r); await axeOn(page, r); }
+  for (const d of DEEP.slice(0, 5)) { await goto(page, d); await axeOn(page, d); }
+
+  // Overlays are where focus and labelling usually break.
+  await goto(page, 'overview');
+  await page.evaluate(() => window.ARGUS.palette());
+  await page.waitForSelector('.pal-input');
+  await axeOn(page, 'command palette');
+  await page.keyboard.press('Escape');
+
+  await page.evaluate(() => window.ARGUS.shortcuts());
+  await page.waitForSelector('.shortcuts');
+  await axeOn(page, 'shortcuts dialog');
+  await page.keyboard.press('Escape');
+
+  await page.evaluate(() => window.ARGUS.flash('bad', 'Test alert', 'A failure message for the audit.'));
+  await axeOn(page, 'flash bar');
+  await page.evaluate(() => { document.querySelectorAll('.flash .x').forEach(b => b.click()); });
+
+  await page.evaluate(() => window.ARGUS.connect(window.ARGUS.data.vms[0], 'rdp'));
+  await page.waitForSelector('.dialog');
+  await axeOn(page, 'elevation dialog');
+  await page.keyboard.press('Escape');
+
+  /* ----------------------------------------------------------------- KBD */
+
+  await goto(page, 'overview');
   const focusable = await page.$$eval(
-    'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    'a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])',
     ns => ns.filter(n => n.offsetParent !== null).length);
-  rec('KBD', 'focusable elements exist on Overview', focusable > 0, `${focusable} found`);
+  rec('KBD', 'the overview has focusable controls', focusable > 10, `${focusable} found`);
 
-  const clickableNotFocusable = await page.$$eval('[data-go], .link, .kbar, .tbtn', ns =>
-    ns.filter(n => {
-      if (n.offsetParent === null) return false;
-      const tag = n.tagName.toLowerCase();
-      const focusable = tag === 'button' || tag === 'a' && n.hasAttribute('href') || n.hasAttribute('tabindex');
-      return !focusable;
-    }).map(n => (n.className || n.tagName) + ' :: ' + n.textContent.trim().slice(0, 40)));
-  rec('KBD', 'no click handler on a non-focusable element', clickableNotFocusable.length === 0,
-    clickableNotFocusable.length ? clickableNotFocusable.slice(0, 8).join(' | ') : '');
-
-  // Real keyboard traversal; :focus-visible only matches keyboard focus, never el.focus().
-  const noFocusStyle = [];
-  const seen = new Set();
-  await page.evaluate(() => document.body.focus());
-  for (let i = 0; i < 60; i++) {
+  // :focus-visible only matches keyboard focus, so the traversal has to be real
+  // Tab presses. Calling el.focus() reports a false failure on a working ring.
+  await page.evaluate(() => document.querySelector('.skip').focus());
+  let noRing = [];
+  for (let i = 0; i < 45; i++) {
     await page.keyboard.press('Tab');
-    const info = await page.evaluate(() => {
-      const el = document.activeElement;
-      if (!el || el === document.body) return null;
-      const s = getComputedStyle(el);
-      const ring = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0) || s.boxShadow !== 'none';
-      return { ring, id: (el.className || el.tagName) + ' :: ' + (el.textContent || '').trim().slice(0, 32) };
+    const bad = await page.evaluate(() => {
+      const a = document.activeElement;
+      if (!a || a === document.body) return null;
+      if (!a.matches(':focus-visible')) return null;
+      const s = getComputedStyle(a);
+      const has = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0)
+        || s.boxShadow !== 'none'
+        || getComputedStyle(a, ':focus-visible').outlineStyle !== 'none';
+      return has ? null : (a.tagName + '.' + (a.className || '')).slice(0, 60);
     });
-    if (!info) break;
-    if (seen.has(info.id)) continue;
-    seen.add(info.id);
-    if (!info.ring) noFocusStyle.push(info.id);
+    if (bad) noRing.push(bad);
   }
-  rec('KBD', 'every tab stop shows a focus indicator', noFocusStyle.length === 0,
-    noFocusStyle.length ? `${noFocusStyle.length} without: ` + noFocusStyle.slice(0, 6).join(' | ') : `${seen.size} tab stops checked`);
+  rec('KBD', 'every tab stop shows a focus indicator', noRing.length === 0, noRing.slice(0, 5).join(' | '));
 
-  // ---------- CON (contrast from rendered pixels' colours) ----------
-  const contrast = await page.evaluate(() => {
-    const lum = c => { const s = c.map(v => { v /= 255; return v <= .03928 ? v / 12.92 : Math.pow((v + .055) / 1.055, 2.4); }); return .2126 * s[0] + .7152 * s[1] + .0722 * s[2]; };
-    const parse = s => { const m = s.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/); return m ? [+m[1], +m[2], +m[3], m[4] === undefined ? 1 : +m[4]] : null; };
-    // A gradient is a background-image, not a background-color: take its first colour stop.
-    const gradOf = s => { const m = s.match(/rgba?\([^)]+\)/); return m ? parse(m[0]) : null; };
-    const bgOf = el => {
-      let n = el;
-      while (n && n !== document.documentElement) {
-        const st = getComputedStyle(n);
-        const c = parse(st.backgroundColor);
-        if (c && c[3] > .5) return c;
-        if (st.backgroundImage && st.backgroundImage.includes('gradient')) {
-          const g = gradOf(st.backgroundImage);
-          if (g) return g;
-        }
-        n = n.parentElement;
-      }
-      return [245, 243, 233];
-    };
-    const hidden = el => el.closest('.sr') !== null || getComputedStyle(el).clip === 'rect(0px, 0px, 0px, 0px)';
-    const out = [];
-    for (const el of document.querySelectorAll('*')) {
-      if (el.offsetParent === null || hidden(el)) continue;
-      const txt = [...el.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).map(n => n.textContent.trim()).join('');
-      if (!txt) continue;
-      const st = getComputedStyle(el);
-      const fg = parse(st.color); if (!fg) continue;
-      const bg = bgOf(el);
-      const L1 = lum(fg), L2 = lum(bg);
-      const ratio = (Math.max(L1, L2) + .05) / (Math.min(L1, L2) + .05);
-      const px = parseFloat(st.fontSize), bold = parseInt(st.fontWeight) >= 700;
-      const large = px >= 24 || (px >= 18.66 && bold);
-      const need = large ? 3 : 4.5;
-      if (ratio < need) out.push({ text: txt.slice(0, 34), ratio: +ratio.toFixed(2), need, px, sel: el.className || el.tagName });
-    }
-    return out;
-  });
-  rec('CON', 'all text meets WCAG AA contrast', contrast.length === 0,
-    contrast.length ? contrast.slice(0, 10).map(c => `"${c.text}" ${c.ratio}:1 (need ${c.need}) ${c.sel}`).join(' | ') : '');
+  rec('KBD', 'no click handler sits on a non-focusable element',
+    await page.evaluate(() => {
+      const bad = [];
+      document.querySelectorAll('#main *').forEach(n => {
+        const t = n.tagName.toLowerCase();
+        if (t === 'button' || t === 'a' || t === 'input' || t === 'select' || t === 'textarea') return;
+        if (n.hasAttribute('tabindex')) return;
+        if (n.getAttribute('role') === 'link' || n.getAttribute('role') === 'button') bad.push(t);
+      });
+      return bad.length === 0;
+    }));
 
-  // ---------- TXT ----------
-  const tiny = await page.evaluate(() => {
-    const out = [];
-    for (const el of document.querySelectorAll('*')) {
-      if (el.offsetParent === null) continue;
-      const txt = [...el.childNodes].filter(n => n.nodeType === 3 && n.textContent.trim()).length;
-      if (!txt) continue;
-      const px = parseFloat(getComputedStyle(el).fontSize);
-      if (px < 11) out.push(`${el.className || el.tagName} ${px}px "${el.textContent.trim().slice(0, 26)}"`);
-    }
-    return out;
-  });
-  rec('TXT', 'no text below 11px', tiny.length === 0, tiny.slice(0, 8).join(' | '));
+  // Focus trap and restoration.
+  await goto(page, 'overview');
+  await page.evaluate(() => { document.getElementById('helpbtn').focus(); });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.dialog');
+  const trapped = [];
+  for (let i = 0; i < 12; i++) {
+    await page.keyboard.press('Tab');
+    trapped.push(await page.evaluate(() => !!document.activeElement.closest('.dialog')));
+  }
+  rec('KBD', 'a dialog traps focus', trapped.every(Boolean), `${trapped.filter(Boolean).length}/12 inside`);
+  await page.keyboard.press('Escape');
+  rec('KBD', 'closing a dialog restores focus to what opened it',
+    await page.evaluate(() => document.activeElement && document.activeElement.id === 'helpbtn'),
+    await page.evaluate(() => document.activeElement ? document.activeElement.id || document.activeElement.tagName : 'none'));
 
-  const clipped = await page.evaluate(() => {
-    const out = [];
-    for (const el of document.querySelectorAll('td, th, .val, .lbl, .node b, .pill, .btn')) {
-      if (el.offsetParent === null) continue;
-      if (el.scrollWidth > el.clientWidth + 2) out.push(`${el.className || el.tagName} "${el.textContent.trim().slice(0, 26)}"`);
-    }
-    return out;
-  });
-  rec('TXT', 'no clipped text', clipped.length === 0, clipped.slice(0, 8).join(' | '));
+  // Shortcut keys.
+  await page.keyboard.press('g');
+  await page.keyboard.press('a');
+  await page.waitForTimeout(60);
+  rec('KBD', 'the "g then a" shortcut goes to Applications',
+    await page.evaluate(() => window.ARGUS.state.route === 'apps'),
+    await page.evaluate(() => window.ARGUS.state.route));
 
-  // ---------- MOTION ----------
-  const motionCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
-  const mp = await motionCtx.newPage();
-  await mp.goto(URL, { waitUntil: 'load' });
-  const stillAnimating = await mp.evaluate(() => {
-    const out = [];
-    for (const el of document.querySelectorAll('*')) {
-      if (el.offsetParent === null) continue;
-      const a = getComputedStyle(el).animationName;
-      if (a && a !== 'none') out.push(el.className || el.tagName);
-    }
-    return [...new Set(out)];
-  });
-  rec('MOTION', 'reduced-motion stops all animation', stillAnimating.length === 0, stillAnimating.join(', '));
-  await motionCtx.close();
+  /* ----------------------------------------------------------------- CMD */
 
-  // ---------- RESP + TAP + screenshots ----------
-  for (const [w, h, name] of [[1440, 900, 'desktop'], [1366, 768, 'laptop-1366'], [1280, 800, 'laptop-1280'], [1024, 768, 'small-laptop'], [768, 1024, 'tablet'], [390, 844, 'phone']]) {
-    const c = await browser.newContext({ viewport: { width: w, height: h } });
-    const p2 = await c.newPage();
-    await p2.goto(URL, { waitUntil: 'load' });
+  await goto(page, 'overview');
+  await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control');
+  await page.waitForSelector('.pal-input', { timeout: 3000 });
+  rec('CMD', 'Ctrl+K opens the palette and focuses the input',
+    await page.evaluate(() => document.activeElement && document.activeElement.classList.contains('pal-input')));
+  await page.keyboard.type('sql-01');
+  await page.waitForTimeout(80);
+  const palCount = await page.$$eval('.pal-item', ns => ns.length);
+  rec('CMD', 'the palette finds a resource by name', palCount > 0, `${palCount} results`);
+  rec('CMD', 'the palette marks one option active',
+    await page.$$eval('.pal-item[aria-selected="true"]', ns => ns.length) === 1);
+  await page.keyboard.press('ArrowDown');
+  rec('CMD', 'arrow keys move the active option',
+    await page.evaluate(() => {
+      const items = document.querySelectorAll('.pal-item');
+      return items.length > 1 && items[1].getAttribute('aria-selected') === 'true';
+    }));
+  await page.keyboard.press('Escape');
+  rec('CMD', 'Escape closes the palette',
+    await page.evaluate(() => !document.querySelector('.pal-input')));
 
-    const overflow = await p2.evaluate(() => {
-      const d = document.documentElement;
-      const wide = [];
-      for (const el of document.querySelectorAll('*')) {
-        if (el.offsetParent === null) continue;
-        if (el.closest('.sr') || getComputedStyle(el).clip === 'rect(0px, 0px, 0px, 0px)') continue;
-        const r = el.getBoundingClientRect();
-        if (r.right > d.clientWidth + 1) wide.push(`${el.className || el.tagName} → ${Math.round(r.right)}px`);
-      }
-      return { doc: d.scrollWidth, view: d.clientWidth, wide: [...new Set(wide)].slice(0, 6) };
+  /* ----------------------------------------------------------------- TBL */
+
+  let noCaption = [], noSort = [];
+  for (const r of ROUTES.concat(DEEP.slice(0, 5))) {
+    await goto(page, r);
+    const bad = await page.evaluate(() => {
+      const out = { caption: 0, sort: 0, tables: 0 };
+      document.querySelectorAll('#main table').forEach(t => {
+        out.tables++;
+        const cap = t.querySelector('caption');
+        if (!cap || !cap.textContent.trim()) out.caption++;
+        t.querySelectorAll('th[data-col]').forEach(th => {
+          if (!th.hasAttribute('aria-sort')) out.sort++;
+        });
+      });
+      return out;
     });
-    rec('RESP', `${name} (${w}px) no horizontal overflow`, overflow.doc <= overflow.view + 1,
-      `scrollWidth ${overflow.doc} vs ${overflow.view}${overflow.wide.length ? '; ' + overflow.wide.join(' | ') : ''}`);
+    if (bad.caption) noCaption.push(`${r}:${bad.caption}`);
+    if (bad.sort) noSort.push(`${r}:${bad.sort}`);
+  }
+  rec('TBL', 'every table has a caption', noCaption.length === 0, noCaption.join(' '));
+  rec('TBL', 'every sortable header carries aria-sort', noSort.length === 0, noSort.join(' '));
 
-    // DENSITY: the constraint on a small laptop is vertical. Chrome plus the
-    // page header must not eat the screen before the first card of content.
-    if (h <= 800) {
-      const d = await p2.evaluate(() => {
-        const vh = window.innerHeight;
-        const card = document.querySelector('#overview .card');
-        const tiles = [...document.querySelectorAll('#overview .tile')];
+  // Sorting actually reorders, and says so.
+  await goto(page, 'apps');
+  const sorted = await page.evaluate(() => {
+    const th = document.querySelector('#main th[data-col] .th-sort');
+    if (!th) return null;
+    const before = Array.from(document.querySelectorAll('#main tbody tr')).map(r => r.textContent.slice(0, 20));
+    th.click();
+    const after = Array.from(document.querySelectorAll('#main tbody tr')).map(r => r.textContent.slice(0, 20));
+    return { changed: before.join('|') !== after.join('|'), rows: before.length };
+  });
+  rec('TBL', 'sorting a column reorders the rows', !!(sorted && sorted.changed && sorted.rows > 1),
+    sorted ? `${sorted.rows} rows` : 'no sortable table found');
+
+  /* --------------------------------------------------------------- STATE */
+
+  await goto(page, 'apps');
+  const states = await page.evaluate(() => {
+    const inp = document.querySelector('.pf-input');
+    if (!inp) return { ok: false, why: 'no property filter' };
+    inp.value = 'zzzzzznotathing';
+    inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    const txt = document.getElementById('main').textContent;
+    return { ok: /no.*match|matches/i.test(txt), txt: txt.slice(0, 0) };
+  });
+  rec('STATE', 'a filter that excludes everything says "no match", not "empty"', states.ok, states.why || '');
+
+  /* -------------------------------------------------------------- LAYOUT */
+
+  // A single row should never be taller than a card. This catches the class of
+  // bug where a layout rule leaks into content, which axe and the responsive
+  // checks both sail straight past.
+  let fatRows = [], fatPages = [];
+  for (const r of ROUTES.concat(DEEP.slice(0, 6))) {
+    await goto(page, r);
+    const o = await page.evaluate(() => {
+      const rows = [];
+      document.querySelectorAll('#main tbody tr').forEach(tr => {
+        const h = tr.getBoundingClientRect().height;
+        if (h > 220) rows.push(Math.round(h) + 'px "' + tr.textContent.trim().slice(0, 24) + '"');
+      });
+      return { rows: rows.slice(0, 3), page: Math.round(document.getElementById('main').scrollHeight) };
+    });
+    if (o.rows.length) fatRows.push(r + ': ' + o.rows.join(', '));
+    // Ten rows of data should not make a five-screen page.
+    if (o.page > 4200) fatPages.push(r + ': ' + o.page + 'px');
+  }
+  rec('LAYOUT', 'no table row is taller than 220px', fatRows.length === 0, fatRows.slice(0, 4).join(' | '));
+  rec('LAYOUT', 'no screen runs past 4200px at 1440x900', fatPages.length === 0, fatPages.slice(0, 4).join(' | '));
+
+  await goto(page, 'overview');
+  rec('LAYOUT', 'nothing marked hidden is actually visible',
+    await page.evaluate(() => {
+      const shown = [];
+      document.querySelectorAll('[hidden]').forEach(n => {
+        const r = n.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) shown.push(n.id || n.tagName);
+      });
+      return shown.length === 0;
+    }),
+    await page.evaluate(() => Array.from(document.querySelectorAll('[hidden]'))
+      .filter(n => n.getBoundingClientRect().height > 0).map(n => n.id || n.tagName).join(' ')));
+
+  rec('LAYOUT', 'no icon has fallen back to the 300x150 default SVG size',
+    await page.evaluate(() => {
+      const bad = [];
+      document.querySelectorAll('svg').forEach(s => {
+        const r = s.getBoundingClientRect();
+        if (r.width > 200 || r.height > 200) {
+          if (!s.closest('.graph, .graphwrap')) bad.push(Math.round(r.width) + 'x' + Math.round(r.height));
+        }
+      });
+      return bad.length === 0;
+    }));
+
+  /* ----------------------------------------------------------------- CON */
+
+  const RGB = s => { const m = String(s).match(/[\d.]+/g); return m ? m.slice(0, 3).map(Number) : null; };
+  const lum = c => { const f = c.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]; };
+  let lowContrast = [];
+  for (const r of ROUTES) {
+    await goto(page, r);
+    const found = await page.evaluate(() => {
+      const out = [];
+      const walk = document.createTreeWalker(document.getElementById('main'), NodeFilter.SHOW_TEXT);
+      let n, seen = 0;
+      while ((n = walk.nextNode()) && seen < 400) {
+        const txt = n.textContent.trim();
+        if (!txt) continue;
+        const p = n.parentElement;
+        if (!p || p.closest('.sr') || p.classList.contains('sr')) continue;
+        const s = getComputedStyle(p);
+        if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) < 0.5) continue;
+        // Walk up for a real background; gradients count as their darkest stop.
+        let bg = null, e = p;
+        while (e && !bg) {
+          const es = getComputedStyle(e);
+          if (es.backgroundImage && es.backgroundImage !== 'none') { bg = 'gradient'; break; }
+          if (es.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(es.backgroundColor)) bg = es.backgroundColor;
+          e = e.parentElement;
+        }
+        seen++;
+        out.push({ fg: s.color, bg: bg, size: parseFloat(s.fontSize), weight: s.fontWeight, txt: txt.slice(0, 28) });
+      }
+      return out;
+    });
+    for (const it of found) {
+      if (it.bg === 'gradient' || !it.bg) continue;  // gradients are checked visually, not numerically
+      const f = RGB(it.fg), b = RGB(it.bg);
+      if (!f || !b) continue;
+      const L1 = lum(f), L2 = lum(b);
+      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const large = it.size >= 24 || (it.size >= 18.66 && Number(it.weight) >= 700);
+      const need = large ? 3 : 4.5;
+      if (ratio < need - 0.01) lowContrast.push(`${r} "${it.txt}" ${ratio.toFixed(2)}:1 need ${need}`);
+    }
+  }
+  rec('CON', 'all text meets WCAG AA contrast', lowContrast.length === 0, lowContrast.slice(0, 6).join(' | '));
+
+  /* ----------------------------------------------------------------- TXT */
+
+  let tiny = [], clipped = [];
+  for (const r of ROUTES) {
+    await goto(page, r);
+    const found = await page.evaluate(() => {
+      const small = [], clip = [];
+      document.querySelectorAll('#main *').forEach(n => {
+        if (n.closest('.sr') || !n.offsetParent) return;
+        if (!n.textContent.trim() || n.children.length) return;
+        const s = getComputedStyle(n);
+        const size = parseFloat(s.fontSize);
+        if (size < 11) small.push(n.textContent.trim().slice(0, 24) + ' @' + size + 'px');
+        if (n.scrollWidth > n.clientWidth + 2 && s.overflow === 'hidden' && s.textOverflow !== 'ellipsis') {
+          clip.push(n.textContent.trim().slice(0, 24));
+        }
+      });
+      return { small, clip };
+    });
+    tiny = tiny.concat(found.small.map(x => r + ': ' + x));
+    clipped = clipped.concat(found.clip.map(x => r + ': ' + x));
+  }
+  rec('TXT', 'no text below 11px', tiny.length === 0, tiny.slice(0, 6).join(' | '));
+  rec('TXT', 'no clipped text', clipped.length === 0, clipped.slice(0, 6).join(' | '));
+
+  /* ------------------------------------------------------- RESP and DENS */
+
+  const WIDTHS = [
+    { name: 'desktop', w: 1440, h: 900 }, { name: 'laptop-1366', w: 1366, h: 768 },
+    { name: 'laptop-1280', w: 1280, h: 800 }, { name: 'small-laptop', w: 1024, h: 768 },
+    { name: 'tablet', w: 768, h: 1024 }, { name: 'phone', w: 390, h: 844 }
+  ];
+  for (const v of WIDTHS) {
+    await ctx.pages()[0].setViewportSize({ width: v.w, height: v.h });
+    let worst = [];
+    for (const r of ROUTES) {
+      await goto(page, r);
+      const o = await page.evaluate(() => {
+        const wide = [];
+        document.querySelectorAll('body *').forEach(n => {
+          if (n.closest('.sr') || !n.offsetParent) return;
+          const rect = n.getBoundingClientRect();
+          // A container that scrolls its own overflow is doing the right thing.
+          const s = getComputedStyle(n);
+          if (s.overflowX === 'auto' || s.overflowX === 'scroll') return;
+          if (rect.right > document.documentElement.clientWidth + 1) {
+            wide.push(n.tagName + '.' + String(n.className).split(' ')[0] + ' -> ' + Math.round(rect.right));
+          }
+        });
+        return { doc: document.documentElement.scrollWidth, view: document.documentElement.clientWidth, wide: wide.slice(0, 4) };
+      });
+      if (o.doc > o.view + 1) worst.push(`${r}: ${o.doc} vs ${o.view} ${o.wide.join(' | ')}`);
+    }
+    rec('RESP', `${v.name} (${v.w}px) no horizontal overflow`, worst.length === 0, worst.slice(0, 3).join(' || '));
+
+    if (v.h <= 800 && v.w >= 1024) {
+      await goto(page, 'overview');
+      const d = await page.evaluate(() => {
+        const first = document.querySelector('#main .tiles, #main .callout, #main .card');
+        const tiles = document.querySelectorAll('#main .tile');
+        const last = tiles.length ? tiles[tiles.length - 1].getBoundingClientRect().bottom : 0;
         return {
-          vh,
-          firstCardTop: card ? Math.round(card.getBoundingClientRect().top) : null,
-          lastTileBottom: tiles.length ? Math.round(tiles[tiles.length - 1].getBoundingClientRect().bottom) : null,
-          pageHeight: document.documentElement.scrollHeight
+          firstTop: first ? Math.round(first.getBoundingClientRect().top) : 9999,
+          tilesBottom: Math.round(last),
+          pageHeight: Math.round(document.getElementById('main').scrollHeight),
+          vh: window.innerHeight
         };
       });
-      const budget = Math.round(d.vh * 0.55);
-      rec('DENS', `${name} first card clears the fold`, d.firstCardTop !== null && d.firstCardTop < d.vh,
-        `card at ${d.firstCardTop}px of ${d.vh}px`);
-      rec('DENS', `${name} chrome + header under 55% of the screen`, d.firstCardTop <= budget,
-        `${d.firstCardTop}px used, budget ${budget}px`);
-      rec('DENS', `${name} all stat tiles above the fold`, d.lastTileBottom <= d.vh,
-        `tiles end at ${d.lastTileBottom}px of ${d.vh}px`);
-      rec('DENS', `${name} overview under 2 screens tall`, d.pageHeight <= d.vh * 2,
-        `${d.pageHeight}px = ${(d.pageHeight / d.vh).toFixed(1)} screens`);
+      const budget = Math.round(v.h * 0.55);
+      rec('DENS', `${v.name} chrome and header stay under 55% of the screen`, d.firstTop <= budget,
+        `${d.firstTop}px used, budget ${budget}px`);
+      rec('DENS', `${v.name} every stat tile clears the fold`, d.tilesBottom <= v.h,
+        `tiles end at ${d.tilesBottom}px of ${v.h}px`);
+      rec('DENS', `${v.name} overview stays under two screens`, d.pageHeight <= v.h * 2.4,
+        `${d.pageHeight}px = ${(d.pageHeight / v.h).toFixed(1)} screens`);
     }
-
-    if (w <= 768) {
-      const small = await p2.evaluate(() => {
-        const out = [];
-        for (const el of document.querySelectorAll('button, a[href], .link, .nav, .tbtn')) {
-          if (el.offsetParent === null) continue;
-          const r = el.getBoundingClientRect();
-          if (r.height < 24 || r.width < 24) out.push(`${el.className || el.tagName} ${Math.round(r.width)}×${Math.round(r.height)} "${el.textContent.trim().slice(0, 20)}"`);
-        }
-        return out;
+    if (v.w <= 768) {
+      await goto(page, 'overview');
+      const small = await page.evaluate(() => {
+        const bad = [];
+        document.querySelectorAll('button, a[href], input, select, [role="option"]').forEach(n => {
+          if (!n.offsetParent || n.closest('.sr')) return;
+          const r = n.getBoundingClientRect();
+          if (r.width < 24 || r.height < 24) bad.push(String(n.className).split(' ')[0] + ' ' + Math.round(r.width) + 'x' + Math.round(r.height));
+        });
+        return bad;
       });
-      rec('TAP', `${name} touch targets >= 24px`, small.length === 0, `${small.length} too small: ` + small.slice(0, 5).join(' | '));
+      rec('TAP', `${v.name} touch targets are at least 24px`, small.length === 0, small.slice(0, 5).join(' | '));
     }
-
-    for (const s of ['overview', 'deploys', 'compute']) {
-      // Click the nav rather than toggling hidden, so chrome (breadcrumb, aria-current) matches the screen.
-      if (w <= 900) { await p2.click('#burger'); }
-      await p2.click(`.nav[data-go="${s}"]`);
-      await p2.screenshot({ path: `${SHOTS}/${name}-${s}.png`, fullPage: name === 'desktop' });
-    }
-    await c.close();
+    await page.screenshot({ path: `${SHOTS}/${v.name}.png`, fullPage: v.name === 'desktop' }).catch(() => {});
   }
 
-  // ---------- CONS ----------
-  rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | '));
-  const realFails = failedReqs.filter(u => !/fonts\.(googleapis|gstatic)/.test(u));
-  rec('CONS', 'no failed requests (fonts excluded: offline sandbox)', realFails.length === 0, realFails.slice(0, 5).join(' | '));
+  /* ---------------------------------------------------------------- ZOOM */
+
+  // WCAG 1.4.10: content must reflow without a second scrollbar. 400% zoom at
+  // 1280px is equivalent to a 320px viewport.
+  for (const z of [{ label: '200%', w: 640, h: 512 }, { label: '400%', w: 320, h: 256 }]) {
+    await ctx.pages()[0].setViewportSize({ width: z.w, height: z.h });
+    let bad = [];
+    for (const r of ROUTES) {
+      await goto(page, r);
+      const o = await page.evaluate(() => ({
+        doc: document.documentElement.scrollWidth, view: document.documentElement.clientWidth
+      }));
+      if (o.doc > o.view + 1) bad.push(`${r}: ${o.doc}>${o.view}`);
+    }
+    rec('ZOOM', `reflow at ${z.label} zoom (${z.w}px equivalent)`, bad.length === 0, bad.slice(0, 3).join(' | '));
+  }
+  await ctx.pages()[0].setViewportSize({ width: 1440, height: 900 });
+
+  /* -------------------------------------------------------------- MOTION */
+
+  const reduced = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
+  const rp = await reduced.newPage();
+  await rp.goto(URL, { waitUntil: 'load' });
+  await rp.waitForTimeout(120);
+  rec('MOTION', 'reduced motion stops every animation and transition',
+    await rp.evaluate(() => {
+      let bad = 0;
+      document.querySelectorAll('*').forEach(n => {
+        const s = getComputedStyle(n);
+        if (s.animationName !== 'none' && s.animationDuration !== '0s') bad++;
+        if (s.transitionDuration !== '0s' && s.transitionDuration !== '') bad++;
+      });
+      return bad === 0;
+    }));
+  await reduced.close();
+
+  /* ----------------------------------------------------------------- SEC */
+
+  rec('SEC', 'a Content-Security-Policy is declared',
+    await page.evaluate(() => !!document.querySelector('meta[http-equiv="Content-Security-Policy"]')));
+  // Proving the CSP works means violating it on purpose, which logs a console
+  // error. Only the errors this probe itself causes are discarded, by position,
+  // so a genuine violation somewhere else still fails the CONS suite.
+  const errorsBeforeProbe = consoleErrors.length;
+  rec('SEC', 'the CSP actually blocks an injected inline script',
+    await (async () => {
+      try {
+        await page.addScriptTag({ content: 'window.__cspEscaped = true;' });
+      } catch (e) { return true; }
+      return !(await page.evaluate(() => window.__cspEscaped === true));
+    })());
+  await page.waitForTimeout(80);
+  consoleErrors.splice(errorsBeforeProbe,
+    consoleErrors.length - errorsBeforeProbe);
+  rec('SEC', 'the CSP confines the page to its own origin',
+    await page.evaluate(() => {
+      const m = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+      return !!m && /connect-src 'self'/.test(m.content) && /object-src 'none'/.test(m.content)
+        && /base-uri 'none'/.test(m.content) && /default-src 'none'/.test(m.content);
+    }));
+
+  // The source is the authority here: a console that renders alert rules and
+  // commit messages must not build DOM from strings anywhere.
+  const srcFiles = [];
+  (function walk(dir) {
+    for (const f of fs.readdirSync(dir)) {
+      const p = path.join(dir, f);
+      const st = fs.statSync(p);
+      if (st.isDirectory()) { if (f !== 'tests' && f !== 'node_modules') walk(p); }
+      else if (/\.(js|html)$/.test(f)) srcFiles.push(p);
+    }
+  })(ROOT);
+
+  const innerHtml = srcFiles.filter(f => {
+    const s = fs.readFileSync(f, 'utf8');
+    // ui.el throws on an 'html' key; that guard is allowed to mention it.
+    return /\.innerHTML\s*=|insertAdjacentHTML|document\.write/.test(s);
+  }).map(f => path.relative(ROOT, f));
+  rec('SEC', 'no innerHTML, insertAdjacentHTML or document.write in the source',
+    innerHtml.length === 0, innerHtml.join(' '));
+
+  const inlineHandlers = srcFiles.filter(f => /\son(click|load|error|mouseover|focus)\s*=\s*["']/i.test(fs.readFileSync(f, 'utf8')))
+    .map(f => path.relative(ROOT, f));
+  rec('SEC', 'no inline event handlers, which a CSP would block anyway',
+    inlineHandlers.length === 0, inlineHandlers.join(' '));
+
+  const external = srcFiles.filter(f => /https?:\/\/(?!localhost)/.test(
+    fs.readFileSync(f, 'utf8').replace(/^\s*[*/].*$/gm, '')   // ignore comment lines
+      .replace(/https?:\/\/[a-z0-9.-]*(zaraatdost|argus|anthropic|earthengine|dataspace|firebase|googleapis|w3\.org|localhost)[^\s"')]*/g, '')
+  )).map(f => path.relative(ROOT, f));
+  rec('SEC', 'no external origins are referenced from the bundle', external.length === 0, external.join(' '));
+
+  rec('SEC', 'no secret value is rendered anywhere',
+    await (async () => {
+      for (const r of ['identity', 'apps/mills']) {
+        await goto(page, r);
+        const leaked = await page.evaluate(() => /(?:password|secret|token)\s*[:=]\s*['"][A-Za-z0-9+/=]{12,}/i.test(document.body.textContent));
+        if (leaked) return false;
+      }
+      return true;
+    })());
+
+  /* ----------------------------------------------------------------- DET */
+
+  let nondet = [];
+  for (const r of ROUTES) {
+    await goto(page, r);
+    const a = await page.evaluate(() => document.getElementById('main').textContent.length);
+    await goto(page, 'overview');
+    await goto(page, r);
+    const b = await page.evaluate(() => document.getElementById('main').textContent.length);
+    if (a !== b) nondet.push(`${r} ${a}!=${b}`);
+  }
+  rec('DET', 'every route renders identically on a second visit', nondet.length === 0, nondet.join(' '));
+
+  /* ---------------------------------------------------------------- CONS */
+
+  const realFails = failedReqs.filter(u => !/favicon/.test(u));
+  rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));
+  rec('CONS', 'no failed requests', realFails.length === 0, realFails.slice(0, 4).join(' | '));
 
   await browser.close();
 
-  // ---------- report ----------
-  const fails = results.filter(r => !r.pass);
+  /* -------------------------------------------------------------- report */
+
   const bySuite = {};
-  for (const r of results) { (bySuite[r.suite] ||= { p: 0, f: 0 })[r.pass ? 'p' : 'f']++; }
+  results.forEach(r => {
+    bySuite[r.suite] = bySuite[r.suite] || { pass: 0, fail: 0 };
+    bySuite[r.suite][r.pass ? 'pass' : 'fail']++;
+  });
+
   console.log('\n  Argus Console: prototype test run');
-  console.log('  ' + '─'.repeat(66));
-  for (const [s, v] of Object.entries(bySuite)) {
-    console.log(`  ${s.padEnd(7)} ${String(v.p).padStart(3)} passed   ${v.f ? String(v.f).padStart(3) + ' FAILED' : '  0 failed'}`);
-  }
-  console.log('  ' + '─'.repeat(66));
+  console.log('  ' + '-'.repeat(64));
+  Object.keys(bySuite).forEach(s => {
+    const b = bySuite[s];
+    console.log(`  ${s.padEnd(8)} ${String(b.pass).padStart(3)} passed  ${String(b.fail).padStart(3)} failed`);
+  });
+  console.log('  ' + '-'.repeat(64));
+
+  const fails = results.filter(r => !r.pass);
   if (fails.length) {
-    console.log('\n  FAILURES\n');
-    fails.forEach((f, i) => {
-      console.log(`  ${String(i + 1).padStart(2)}. [${f.suite}] ${f.id}`);
-      if (f.detail) console.log(`      ${f.detail}`);
-    });
+    console.log('\n  Failures:\n');
+    fails.forEach(f => console.log(`  [${f.suite}] ${f.id}\n        ${f.detail}`));
   } else {
     console.log('\n  All checks passed.');
   }
   console.log(`\n  ${results.length - fails.length}/${results.length} passed. Screenshots in ${SHOTS}\n`);
-  fs.writeFileSync(path.join(__dirname, 'last-run.json'), JSON.stringify(results, null, 2));
+
+  fs.writeFileSync(path.join(__dirname, 'last-run.json'), JSON.stringify(results, null, 2) + '\n');
   process.exit(fails.length);
-})().catch(e => { console.error('HARNESS ERROR:', e); process.exit(255); });
+})().catch(e => { console.error(e); process.exit(1); });

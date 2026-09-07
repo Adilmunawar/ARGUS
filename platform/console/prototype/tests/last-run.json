@@ -1,63 +1,141 @@
 [
   {
+    "suite": "BOOT",
+    "id": "the ARGUS namespace, ui and data are present",
+    "pass": true,
+    "detail": "{\"argus\":true,\"ui\":true,\"data\":true}"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"overview\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"apps\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"deploys\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"compute\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"data\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"identity\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"security\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"ml\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"ops\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"audit\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+  },
+  {
     "suite": "NAV",
-    "id": "target \"overview\" has a page",
+    "id": "nav target \"overview\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"apps\" has a page",
+    "id": "nav target \"apps\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"deploys\" has a page",
+    "id": "nav target \"deploys\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"compute\" has a page",
+    "id": "nav target \"compute\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"data\" has a page",
+    "id": "nav target \"data\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"identity\" has a page",
+    "id": "nav target \"ml\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"security\" has a page",
+    "id": "nav target \"identity\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"ops\" has a page",
+    "id": "nav target \"security\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "target \"audit\" has a page",
+    "id": "nav target \"ops\" has a screen",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "\"overview\" shows exactly one page",
+    "id": "nav target \"audit\" has a screen",
     "pass": true,
-    "detail": "visible: overview"
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"overview\" routes and renders",
+    "pass": true,
+    "detail": "route=overview children=5"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"overview\" sets a document title",
+    "pass": true,
+    "detail": "Overview - Argus Console"
   },
   {
     "suite": "NAV",
@@ -67,9 +145,27 @@
   },
   {
     "suite": "NAV",
-    "id": "\"apps\" shows exactly one page",
+    "id": "\"overview\" marks the nav item current",
     "pass": true,
-    "detail": "visible: apps"
+    "detail": "current=overview"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"overview\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"apps\" routes and renders",
+    "pass": true,
+    "detail": "route=apps children=3"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"apps\" sets a document title",
+    "pass": true,
+    "detail": "Applications - Argus Console"
   },
   {
     "suite": "NAV",
@@ -79,9 +175,27 @@
   },
   {
     "suite": "NAV",
-    "id": "\"deploys\" shows exactly one page",
+    "id": "\"apps\" marks the nav item current",
     "pass": true,
-    "detail": "visible: deploys"
+    "detail": "current=apps"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"apps\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"deploys\" routes and renders",
+    "pass": true,
+    "detail": "route=deploys children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"deploys\" sets a document title",
+    "pass": true,
+    "detail": "Deployments - Argus Console"
   },
   {
     "suite": "NAV",
@@ -91,9 +205,27 @@
   },
   {
     "suite": "NAV",
-    "id": "\"compute\" shows exactly one page",
+    "id": "\"deploys\" marks the nav item current",
     "pass": true,
-    "detail": "visible: compute"
+    "detail": "current=deploys"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"deploys\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"compute\" routes and renders",
+    "pass": true,
+    "detail": "route=compute children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"compute\" sets a document title",
+    "pass": true,
+    "detail": "Compute - Argus Console"
   },
   {
     "suite": "NAV",
@@ -103,9 +235,27 @@
   },
   {
     "suite": "NAV",
-    "id": "\"data\" shows exactly one page",
+    "id": "\"compute\" marks the nav item current",
     "pass": true,
-    "detail": "visible: data"
+    "detail": "current=compute"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"compute\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"data\" routes and renders",
+    "pass": true,
+    "detail": "route=data children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"data\" sets a document title",
+    "pass": true,
+    "detail": "Data - Argus Console"
   },
   {
     "suite": "NAV",
@@ -115,21 +265,27 @@
   },
   {
     "suite": "NAV",
-    "id": "\"security\" shows exactly one page",
+    "id": "\"data\" marks the nav item current",
     "pass": true,
-    "detail": "visible: security"
+    "detail": "current=data"
   },
   {
     "suite": "NAV",
-    "id": "\"security\" updates the breadcrumb",
+    "id": "\"data\" renders exactly one h1",
     "pass": true,
-    "detail": "crumb=\"Security\""
+    "detail": ""
   },
   {
     "suite": "NAV",
-    "id": "\"identity\" shows exactly one page",
+    "id": "\"identity\" routes and renders",
     "pass": true,
-    "detail": "visible: identity"
+    "detail": "route=identity children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"identity\" sets a document title",
+    "pass": true,
+    "detail": "Identity & secrets - Argus Console"
   },
   {
     "suite": "NAV",
@@ -139,9 +295,87 @@
   },
   {
     "suite": "NAV",
-    "id": "\"ops\" shows exactly one page",
+    "id": "\"identity\" marks the nav item current",
     "pass": true,
-    "detail": "visible: ops"
+    "detail": "current=identity"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"identity\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"security\" routes and renders",
+    "pass": true,
+    "detail": "route=security children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"security\" sets a document title",
+    "pass": true,
+    "detail": "Security - Argus Console"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"security\" updates the breadcrumb",
+    "pass": true,
+    "detail": "crumb=\"Security\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"security\" marks the nav item current",
+    "pass": true,
+    "detail": "current=security"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"security\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ml\" routes and renders",
+    "pass": true,
+    "detail": "route=ml children=3"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ml\" sets a document title",
+    "pass": true,
+    "detail": "ML & geospatial - Argus Console"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ml\" updates the breadcrumb",
+    "pass": true,
+    "detail": "crumb=\"ML & geospatial\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ml\" marks the nav item current",
+    "pass": true,
+    "detail": "current=ml"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ml\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ops\" routes and renders",
+    "pass": true,
+    "detail": "route=ops children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ops\" sets a document title",
+    "pass": true,
+    "detail": "Operations - Argus Console"
   },
   {
     "suite": "NAV",
@@ -151,15 +385,111 @@
   },
   {
     "suite": "NAV",
-    "id": "\"audit\" shows exactly one page",
+    "id": "\"ops\" marks the nav item current",
     "pass": true,
-    "detail": "visible: audit"
+    "detail": "current=ops"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"ops\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"audit\" routes and renders",
+    "pass": true,
+    "detail": "route=audit children=5"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"audit\" sets a document title",
+    "pass": true,
+    "detail": "Audit - Argus Console"
   },
   {
     "suite": "NAV",
     "id": "\"audit\" updates the breadcrumb",
     "pass": true,
     "detail": "crumb=\"Audit\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"audit\" marks the nav item current",
+    "pass": true,
+    "detail": "current=audit"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"audit\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"apps/mills\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"apps/agis\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"deploys/1847\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"deploys/1843\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"compute/host/hv-03\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"compute/vm/sql-01\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"compute/vm/siem-01\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"data/database/umairv3_db\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"data/bucket/argus-backups\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "deep link \"ops/runbook/sql-01-restore-drill\" renders",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "an unknown route fails honestly rather than blankly",
+    "pass": true,
+    "detail": ""
   },
   {
     "suite": "A11Y",
@@ -193,13 +523,19 @@
   },
   {
     "suite": "A11Y",
+    "id": "identity: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
     "id": "security: no WCAG A/AA violations",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "A11Y",
-    "id": "identity: no WCAG A/AA violations",
+    "id": "ml: no WCAG A/AA violations",
     "pass": true,
     "detail": ""
   },
@@ -216,22 +552,172 @@
     "detail": ""
   },
   {
-    "suite": "KBD",
-    "id": "focusable elements exist on Overview",
+    "suite": "A11Y",
+    "id": "apps/mills: no WCAG A/AA violations",
     "pass": true,
-    "detail": "25 found"
+    "detail": ""
   },
   {
-    "suite": "KBD",
-    "id": "no click handler on a non-focusable element",
+    "suite": "A11Y",
+    "id": "apps/agis: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "deploys/1847: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "deploys/1843: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "compute/host/hv-03: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "command palette: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "shortcuts dialog: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "flash bar: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "elevation dialog: no WCAG A/AA violations",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "KBD",
+    "id": "the overview has focusable controls",
+    "pass": true,
+    "detail": "29 found"
+  },
+  {
+    "suite": "KBD",
     "id": "every tab stop shows a focus indicator",
     "pass": true,
-    "detail": "25 tab stops checked"
+    "detail": ""
+  },
+  {
+    "suite": "KBD",
+    "id": "no click handler sits on a non-focusable element",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "KBD",
+    "id": "a dialog traps focus",
+    "pass": true,
+    "detail": "12/12 inside"
+  },
+  {
+    "suite": "KBD",
+    "id": "closing a dialog restores focus to what opened it",
+    "pass": true,
+    "detail": "helpbtn"
+  },
+  {
+    "suite": "KBD",
+    "id": "the \"g then a\" shortcut goes to Applications",
+    "pass": true,
+    "detail": "apps"
+  },
+  {
+    "suite": "CMD",
+    "id": "Ctrl+K opens the palette and focuses the input",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "CMD",
+    "id": "the palette finds a resource by name",
+    "pass": true,
+    "detail": "3 results"
+  },
+  {
+    "suite": "CMD",
+    "id": "the palette marks one option active",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "CMD",
+    "id": "arrow keys move the active option",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "CMD",
+    "id": "Escape closes the palette",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "TBL",
+    "id": "every table has a caption",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "TBL",
+    "id": "every sortable header carries aria-sort",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "TBL",
+    "id": "sorting a column reorders the rows",
+    "pass": true,
+    "detail": "7 rows"
+  },
+  {
+    "suite": "STATE",
+    "id": "a filter that excludes everything says \"no match\", not \"empty\"",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "LAYOUT",
+    "id": "no table row is taller than 220px",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "LAYOUT",
+    "id": "no screen runs past 4200px at 1440x900",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "LAYOUT",
+    "id": "nothing marked hidden is actually visible",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "LAYOUT",
+    "id": "no icon has fallen back to the 300x150 default SVG size",
+    "pass": true,
+    "detail": ""
   },
   {
     "suite": "CON",
@@ -252,130 +738,172 @@
     "detail": ""
   },
   {
-    "suite": "MOTION",
-    "id": "reduced-motion stops all animation",
+    "suite": "RESP",
+    "id": "desktop (1440px) no horizontal overflow",
     "pass": true,
     "detail": ""
   },
   {
     "suite": "RESP",
-    "id": "desktop (1440px) no horizontal overflow",
-    "pass": true,
-    "detail": "scrollWidth 1440 vs 1440"
-  },
-  {
-    "suite": "RESP",
     "id": "laptop-1366 (1366px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 1366 vs 1366"
+    "detail": ""
   },
   {
     "suite": "DENS",
-    "id": "laptop-1366 first card clears the fold",
+    "id": "laptop-1366 chrome and header stay under 55% of the screen",
     "pass": true,
-    "detail": "card at 384px of 768px"
+    "detail": "134px used, budget 422px"
   },
   {
     "suite": "DENS",
-    "id": "laptop-1366 chrome + header under 55% of the screen",
+    "id": "laptop-1366 every stat tile clears the fold",
     "pass": true,
-    "detail": "384px used, budget 422px"
+    "detail": "tiles end at 341px of 768px"
   },
   {
     "suite": "DENS",
-    "id": "laptop-1366 all stat tiles above the fold",
+    "id": "laptop-1366 overview stays under two screens",
     "pass": true,
-    "detail": "tiles end at 370px of 768px"
-  },
-  {
-    "suite": "DENS",
-    "id": "laptop-1366 overview under 2 screens tall",
-    "pass": true,
-    "detail": "1004px = 1.3 screens"
+    "detail": "1325px = 1.7 screens"
   },
   {
     "suite": "RESP",
     "id": "laptop-1280 (1280px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 1280 vs 1280; TABLE → 1305px | TBODY → 1305px | TR → 1305px | st → 1305px | pill ok → 1291px"
+    "detail": ""
   },
   {
     "suite": "DENS",
-    "id": "laptop-1280 first card clears the fold",
+    "id": "laptop-1280 chrome and header stay under 55% of the screen",
     "pass": true,
-    "detail": "card at 384px of 800px"
+    "detail": "134px used, budget 440px"
   },
   {
     "suite": "DENS",
-    "id": "laptop-1280 chrome + header under 55% of the screen",
+    "id": "laptop-1280 every stat tile clears the fold",
     "pass": true,
-    "detail": "384px used, budget 440px"
+    "detail": "tiles end at 341px of 800px"
   },
   {
     "suite": "DENS",
-    "id": "laptop-1280 all stat tiles above the fold",
+    "id": "laptop-1280 overview stays under two screens",
     "pass": true,
-    "detail": "tiles end at 370px of 800px"
-  },
-  {
-    "suite": "DENS",
-    "id": "laptop-1280 overview under 2 screens tall",
-    "pass": true,
-    "detail": "1004px = 1.3 screens"
+    "detail": "1325px = 1.7 screens"
   },
   {
     "suite": "RESP",
     "id": "small-laptop (1024px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 1024 vs 1024; TABLE → 1092px | TBODY → 1092px | TR → 1092px | st → 1092px | pill ok → 1078px | pill ok → 1042px"
+    "detail": ""
   },
   {
     "suite": "DENS",
-    "id": "small-laptop first card clears the fold",
+    "id": "small-laptop chrome and header stay under 55% of the screen",
     "pass": true,
-    "detail": "card at 384px of 768px"
+    "detail": "134px used, budget 422px"
   },
   {
     "suite": "DENS",
-    "id": "small-laptop chrome + header under 55% of the screen",
+    "id": "small-laptop every stat tile clears the fold",
     "pass": true,
-    "detail": "384px used, budget 422px"
+    "detail": "tiles end at 437px of 768px"
   },
   {
     "suite": "DENS",
-    "id": "small-laptop all stat tiles above the fold",
+    "id": "small-laptop overview stays under two screens",
     "pass": true,
-    "detail": "tiles end at 370px of 768px"
-  },
-  {
-    "suite": "DENS",
-    "id": "small-laptop overview under 2 screens tall",
-    "pass": true,
-    "detail": "1004px = 1.3 screens"
+    "detail": "1421px = 1.9 screens"
   },
   {
     "suite": "RESP",
     "id": "tablet (768px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 768 vs 768"
+    "detail": ""
   },
   {
     "suite": "TAP",
-    "id": "tablet touch targets >= 24px",
+    "id": "tablet touch targets are at least 24px",
     "pass": true,
-    "detail": "0 too small: "
+    "detail": ""
   },
   {
     "suite": "RESP",
     "id": "phone (390px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 390 vs 390; TABLE → 561px | TBODY → 561px | TR → 561px | TD → 481px | st → 561px | link → 545px"
+    "detail": ""
   },
   {
     "suite": "TAP",
-    "id": "phone touch targets >= 24px",
+    "id": "phone touch targets are at least 24px",
     "pass": true,
-    "detail": "0 too small: "
+    "detail": ""
+  },
+  {
+    "suite": "ZOOM",
+    "id": "reflow at 200% zoom (640px equivalent)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ZOOM",
+    "id": "reflow at 400% zoom (320px equivalent)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "MOTION",
+    "id": "reduced motion stops every animation and transition",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "a Content-Security-Policy is declared",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "the CSP actually blocks an injected inline script",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "the CSP confines the page to its own origin",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "no innerHTML, insertAdjacentHTML or document.write in the source",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "no inline event handlers, which a CSP would block anyway",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "no external origins are referenced from the bundle",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "SEC",
+    "id": "no secret value is rendered anywhere",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "DET",
+    "id": "every route renders identically on a second visit",
+    "pass": true,
+    "detail": ""
   },
   {
     "suite": "CONS",
@@ -385,7 +913,7 @@
   },
   {
     "suite": "CONS",
-    "id": "no failed requests (fonts excluded: offline sandbox)",
+    "id": "no failed requests",
     "pass": true,
     "detail": ""
   }
