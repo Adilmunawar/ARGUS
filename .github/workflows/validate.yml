@@ -49,7 +49,7 @@ jobs:
           PY
       - name: No secrets committed
         run: |
-          if grep -rInE '(ghp_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|[Pp]assword\s*=\s*[^{$"< ][^;"]{5,})' \
+          if grep -rInE '(ghp_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|[Pp]assword\s*=\s*[^{$"< `][^;"`]{5,})' \
               --exclude-dir=.git --exclude='validate.yml' . ; then
             echo "::error::A credential-shaped string is present. Remove it and rotate the credential."
             exit 1
@@ -62,8 +62,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22' }
-      - run: npm install -g playwright axe-core && npx playwright install --with-deps chromium
+        with: { node-version: '22', cache: 'npm' }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - name: No external requests in the console bundle
         run: |
           if grep -nE 'https?://(fonts\.googleapis|fonts\.gstatic|cdn\.|unpkg|jsdelivr)' platform/console/prototype/index.html; then

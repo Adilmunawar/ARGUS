@@ -297,61 +297,61 @@
     "suite": "RESP",
     "id": "laptop-1280 (1280px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 1280 vs 1280 — TABLE → 1305px | TBODY → 1305px | TR → 1305px | st → 1305px | pill ok → 1291px"
+    "detail": "scrollWidth 1280 vs 1280; TABLE → 1305px | TBODY → 1305px | TR → 1305px | st → 1305px | pill ok → 1291px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 first card clears the fold",
     "pass": true,
-    "detail": "card at 402px of 800px"
+    "detail": "card at 384px of 800px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 chrome + header under 55% of the screen",
     "pass": true,
-    "detail": "402px used, budget 440px"
+    "detail": "384px used, budget 440px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 all stat tiles above the fold",
     "pass": true,
-    "detail": "tiles end at 388px of 800px"
+    "detail": "tiles end at 370px of 800px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 overview under 2 screens tall",
     "pass": true,
-    "detail": "1022px = 1.3 screens"
+    "detail": "1004px = 1.3 screens"
   },
   {
     "suite": "RESP",
     "id": "small-laptop (1024px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 1024 vs 1024 — TABLE → 1092px | TBODY → 1092px | TR → 1092px | st → 1092px | pill ok → 1078px | pill ok → 1033px"
+    "detail": "scrollWidth 1024 vs 1024; TABLE → 1092px | TBODY → 1092px | TR → 1092px | st → 1092px | pill ok → 1078px | pill ok → 1042px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop first card clears the fold",
     "pass": true,
-    "detail": "card at 402px of 768px"
+    "detail": "card at 384px of 768px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop chrome + header under 55% of the screen",
     "pass": true,
-    "detail": "402px used, budget 422px"
+    "detail": "384px used, budget 422px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop all stat tiles above the fold",
     "pass": true,
-    "detail": "tiles end at 388px of 768px"
+    "detail": "tiles end at 370px of 768px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop overview under 2 screens tall",
     "pass": true,
-    "detail": "1022px = 1.3 screens"
+    "detail": "1004px = 1.3 screens"
   },
   {
     "suite": "RESP",
@@ -369,7 +369,7 @@
     "suite": "RESP",
     "id": "phone (390px) no horizontal overflow",
     "pass": true,
-    "detail": "scrollWidth 390 vs 390 — TABLE → 561px | TBODY → 561px | TR → 561px | TD → 473px | st → 561px | link → 544px"
+    "detail": "scrollWidth 390 vs 390; TABLE → 561px | TBODY → 561px | TR → 561px | TD → 481px | st → 561px | link → 545px"
   },
   {
     "suite": "TAP",
@@ -385,7 +385,7 @@
   },
   {
     "suite": "CONS",
-    "id": "no failed requests (fonts excluded — offline sandbox)",
+    "id": "no failed requests (fonts excluded: offline sandbox)",
     "pass": true,
     "detail": ""
   }

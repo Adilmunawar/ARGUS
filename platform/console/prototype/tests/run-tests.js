@@ -1,5 +1,5 @@
 /**
- * Argus Console prototype — automated test suite.
+ * Argus Console prototype: the automated test suite.
  *
  *   node tests/run-tests.js [path-to-index.html]
  *
@@ -16,21 +16,25 @@
  *
  * Exit code is the number of failures, so CI can gate on it.
  */
-const { chromium } = require('/home/claude/.npm-global/lib/node_modules/playwright');
+const { chromium } = require('playwright');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
-const CHROME = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
-const AXE = fs.readFileSync('/home/claude/.npm-global/lib/node_modules/axe-core/axe.min.js', 'utf8');
+// axe-core ships its bundle next to its entry point; resolve it rather than
+// hardcoding a path, so this runs on a developer machine and on CI alike.
+const AXE = fs.readFileSync(path.join(path.dirname(require.resolve('axe-core')), 'axe.min.js'), 'utf8');
 const FILE = process.argv[2] || path.join(__dirname, '..', 'index.html');
 const URL = 'file://' + path.resolve(FILE);
-const SHOTS = process.env.SHOTS || '/home/claude/shots';
+const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-console-shots');
+
+fs.mkdirSync(SHOTS, { recursive: true });
 
 const results = [];
 const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail });
 
 (async () => {
-  const browser = await chromium.launch({ executablePath: CHROME });
+  const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
 
@@ -38,7 +42,7 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
   page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', e => consoleErrors.push('pageerror: ' + e.message));
   const failedReqs = [];
-  page.on('requestfailed', r => failedReqs.push(r.url() + ' — ' + (r.failure() || {}).errorText));
+  page.on('requestfailed', r => failedReqs.push(r.url() + ', ' + (r.failure() || {}).errorText));
 
   await page.goto(URL, { waitUntil: 'load' });
   await page.addScriptTag({ content: AXE });
@@ -73,7 +77,7 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
     if (!r.violations.length) rec('A11Y', `${s}: no WCAG A/AA violations`, true, '');
     for (const v of r.violations) {
       rec('A11Y', `${s}: ${v.id}`, false,
-        `${v.impact} — ${v.help} (${v.nodes.length}×) e.g. ${(v.nodes[0].target || []).join(' ')}`);
+        `${v.impact}, ${v.help} (${v.nodes.length}×) e.g. ${(v.nodes[0].target || []).join(' ')}`);
     }
   }
 
@@ -94,7 +98,7 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
   rec('KBD', 'no click handler on a non-focusable element', clickableNotFocusable.length === 0,
     clickableNotFocusable.length ? clickableNotFocusable.slice(0, 8).join(' | ') : '');
 
-  // Real keyboard traversal — :focus-visible only matches keyboard focus, never el.focus().
+  // Real keyboard traversal; :focus-visible only matches keyboard focus, never el.focus().
   const noFocusStyle = [];
   const seen = new Set();
   await page.evaluate(() => document.body.focus());
@@ -214,9 +218,9 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
       return { doc: d.scrollWidth, view: d.clientWidth, wide: [...new Set(wide)].slice(0, 6) };
     });
     rec('RESP', `${name} (${w}px) no horizontal overflow`, overflow.doc <= overflow.view + 1,
-      `scrollWidth ${overflow.doc} vs ${overflow.view}${overflow.wide.length ? ' — ' + overflow.wide.join(' | ') : ''}`);
+      `scrollWidth ${overflow.doc} vs ${overflow.view}${overflow.wide.length ? '; ' + overflow.wide.join(' | ') : ''}`);
 
-    // DENSITY — the constraint on a small laptop is vertical. Chrome plus the
+    // DENSITY: the constraint on a small laptop is vertical. Chrome plus the
     // page header must not eat the screen before the first card of content.
     if (h <= 800) {
       const d = await p2.evaluate(() => {
@@ -266,7 +270,7 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
   // ---------- CONS ----------
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 5).join(' | '));
   const realFails = failedReqs.filter(u => !/fonts\.(googleapis|gstatic)/.test(u));
-  rec('CONS', 'no failed requests (fonts excluded — offline sandbox)', realFails.length === 0, realFails.slice(0, 5).join(' | '));
+  rec('CONS', 'no failed requests (fonts excluded: offline sandbox)', realFails.length === 0, realFails.slice(0, 5).join(' | '));
 
   await browser.close();
 
@@ -274,7 +278,7 @@ const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail 
   const fails = results.filter(r => !r.pass);
   const bySuite = {};
   for (const r of results) { (bySuite[r.suite] ||= { p: 0, f: 0 })[r.pass ? 'p' : 'f']++; }
-  console.log('\n  Argus Console — prototype test run');
+  console.log('\n  Argus Console: prototype test run');
   console.log('  ' + '─'.repeat(66));
   for (const [s, v] of Object.entries(bySuite)) {
     console.log(`  ${s.padEnd(7)} ${String(v.p).padStart(3)} passed   ${v.f ? String(v.f).padStart(3) + ' FAILED' : '  0 failed'}`);

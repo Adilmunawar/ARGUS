@@ -1,0 +1,14 @@
+{
+  "name": "argus",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Argus: a sovereign, Windows-first private cloud. This manifest exists only to pin the console prototype's test dependencies.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node platform/console/prototype/tests/run-tests.js"
+  },
+  "devDependencies": {
+    "axe-core": "^4.10.2",
+    "playwright": "^1.49.1"
+  }
+}
