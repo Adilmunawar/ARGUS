@@ -1,4 +1,4 @@
-# DSC v3 configuration — Service Fabric node (Server Core, Shielded VM)
+# DSC v3 configuration: Service Fabric node (Server Core, Shielded VM)
 $schema: https://aka.ms/dsc/schemas/v3/bundled/config/document.json
 resources:
   - name: features

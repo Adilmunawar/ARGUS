@@ -1,4 +1,4 @@
-// Argus Console API — skeleton (Phase 0). Same posture as the Mills API:
+// Argus Console API: the Phase 0 skeleton. Same posture as the Mills API:
 // refuses to boot without required config, prints an integration roll call,
 // env vars always win, no secrets on disk.
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -7,7 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddEnvironmentVariables();
 
 string Require(string key) =>
-    builder.Configuration[key] ?? throw new InvalidOperationException($"{key} is required — refusing to boot.");
+    builder.Configuration[key] ?? throw new InvalidOperationException($"{key} is required, refusing to boot.");
 
 var adfsAuthority = Require("Auth:Authority");      // https://adfs.argus.local/adfs
 var gitopsRepo    = Require("GitOps:RepoUrl");      // https://forgejo.argus.local/ZaraatDost/argus-gitops

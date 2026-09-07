@@ -1,4 +1,4 @@
-# ADR-0007 — SeaweedFS for object storage; MinIO retired
+# ADR-0007: SeaweedFS for object storage; MinIO retired
 
 **Context.** The earlier compose prototype used MinIO. MinIO's community edition was archived in February 2026: no security patches, no prebuilt binaries, and commercial use without an AIStor licence carries legal risk. The workload is 1.16 M survey pictures (many small objects), multi-GB rasters (few large), ~3.2 TB of retained backups.
 

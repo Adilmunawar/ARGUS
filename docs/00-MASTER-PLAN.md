@@ -1,14 +1,14 @@
-# Argus — Master Plan (Windows-first)
+# Argus: Master Plan (Windows-first)
 
 **Version 0.1.0 · 8 September 2026 · supersedes the Linux/Cozystack plan of 7 September (kept in `docs/adr/superseded/`).**
 
 ## 1. What we are building
 
-A private cloud, owned and operated by Zaraat Dost, on Windows Server 2025 at two sites in Pakistan, that provides every capability the company currently rents from AWS and several it cannot afford to rent — most importantly GPUs and locally served satellite imagery — with a security posture rooted in hardware and evidenced continuously.
+A private cloud, owned and operated by Zaraat Dost, on Windows Server 2025 at two sites in Pakistan, that provides every capability the company currently rents from AWS and several it cannot afford to rent, most importantly GPUs and locally served satellite imagery, with a security posture rooted in hardware and evidenced continuously.
 
 It is **not** a copy of AWS. It is the fourteen capabilities Zaraat Dost uses, built well, on one operating system the team already runs, designed so the fifteenth is a pull request.
 
-## 2. Targets — what "robust", "advanced", "fast" mean here
+## 2. Targets: what "robust", "advanced", "fast" mean here
 
 | Property | Target | Measured by |
 |---|---|---|
@@ -62,7 +62,7 @@ It is **not** a copy of AWS. It is the fourteen capabilities Zaraat Dost uses, b
              └──────────────────────┬──────────────────────┘
                  IPsec-isolated PLATFORM VLAN 30
  ┌───────────────────────────────────┴────────────────────────────────────────┐
- │  SITE A — Hyper-V + S2D cluster  hv-01 hv-02 hv-03 (→05)   RDMA 25 GbE    │
+ │  SITE A: Hyper-V + S2D cluster  hv-01 hv-02 hv-03 (→05)   RDMA 25 GbE    │
  │                                                                            │
  │  Service Fabric cluster (5 nodes = 5 Windows Server Core VMs, 1 per host)  │
  │   ├─ argus-console      (API + Next.js)      ├─ mills-api/web/gateway (×3)   │
@@ -76,11 +76,11 @@ It is **not** a copy of AWS. It is the fourteen capabilities Zaraat Dost uses, b
  │   pg-01 (PostGIS) · legacy-landsurvey-01 · seaweed-master/volume ×3       │
  │   wac-01 · wef-01 · siem-01 (Ubuntu, Wazuh) · runner-01/02 (CI)            │
  │                                                                            │
- │  Bare metal: gpu-01 (Ubuntu, 2× L40S) — Ray · MLflow · Dagster · Jupyter  │
+ │  Bare metal: gpu-01 (Ubuntu, 2× L40S); Ray · MLflow · Dagster · Jupyter  │
  └───────────────────────────────────┬────────────────────────────────────────┘
                      WireGuard site-to-site (OPNsense ↔ OPNsense)
  ┌───────────────────────────────────┴────────────────────────────────────────┐
- │  SITE B — hv-b01 hv-b02 · dc-03 · sql-02 (AG async secondary, reporting)   │
+ │  SITE B: hv-b01 hv-b02 · dc-03 · sql-02 (AG async secondary, reporting)   │
  │  seaweed replica (object lock 90 d) · Hyper-V Replica target · witness     │
  │  uptime-kuma · OPNsense pair                                               │
  └────────────────────────────────────────────────────────────────────────────┘
@@ -93,25 +93,25 @@ Details: hosts and VMs in `02-APPLICATION-INFRASTRUCTURE-MAP.md`; VLANs, address
 1. **Git is the truth.** Production state is what `platform/gitops/` says. The reconciler is the only writer. Humans open pull requests.
 2. **Nothing unsigned runs.** WDAC enforced; every artefact and every commit signed.
 3. **No long-lived credentials.** Every service identity is a gMSA or an OpenBao lease. Every human is MFA. Nothing is shared.
-4. **Every flow is declared.** IPsec + per-identity firewall rules; default deny east–west.
+4. **Every flow is declared.** IPsec + per-identity firewall rules; default deny east-west.
 5. **Backups are immutable and elsewhere.** Two sites, object lock, a credential that cannot delete, drills that are reported.
-6. **One OS, two exceptions.** Windows everywhere except `gpu-01` and `siem-01`; a third needs an ADR.
+6. **One OS, three exceptions.** Windows everywhere except `gpu-01`, `siem-01` and `guac-01` (ADR-0003, amended by ADR-0032); a fourth needs an ADR.
 7. **Boring is a feature.** Prefer the component with the Windows service installer and ten years of releases over the one with the best benchmark.
 8. **Evidence, not assurance.** Every control has a dashboard or a report that shows it is working; "we have MFA" is a Wazuh query, not a sentence.
 
-## 6. Phases — summary
+## 6. Phases: summary
 
 Full detail with exit gates in `06-PHASES-AND-RUNBOOKS.md`.
 
 | Phase | Weeks | Delivers | Exit gate |
 |---|---|---|---|
-| 0 Foundation | 1–6 | Hardware, AD forest, Hyper-V/S2D cluster, Service Fabric, OpenBao, AD CS, WDAC in audit, Caddy, observability, WAC | Pull a node's power: nothing user-visible happens; `git push` deploys a hello-world SF app in < 10 min |
-| 1 Storage & backups | 7–10 | SeaweedFS both sites, survey pictures + rasters migrated, SQL backups to object-locked S3, first restore drill | Two immutable copies of every backup at two sites; signed drill report; AWS bucket read-only |
-| 2 Mills cutover | 11–16 | Mills API/web/gateway on SF, Garnet, NATS jobs, AD FS web login, legacy API on a VM, secrets rotated (D16), OTel | 99.9 % for 14 days from Site A; EC2 is a warm standby |
-| 3 ML & geo | 15–24 | `gpu-01`, Ray/MLflow/Dagster/JupyterHub, Sentinel mirror + pgstac, TiTiler/Martin, self-hosted ORS, v5 classifier + SegFormer pipelines ported | One season's feature table regenerated on-prem and matching; training faster than current best |
-| 4 Database & apps | 20–30 | SQL Always On to Site B, mobile apps repointed to an Argus DNS name, reporting on the replica, first PostGIS migrations | No client references the AWS IP; AWS SQL box off 30 days without incident |
-| 5 DR & exit | 28–34 | Site B to full spec, quarterly DR drill, AWS account closed | Signed DR report; AWS invoice $0 |
-| 6 Hardening & audit | 34–40 | WDAC enforced everywhere, external pen test, Wazuh ISO 27001 mapping, console at parity with WAC for daily tasks | Pen-test findings closed; audit evidence pack produced from the platform, not by hand |
+| 0 Foundation | 1-6 | Hardware, AD forest, Hyper-V/S2D cluster, Service Fabric, OpenBao, AD CS, WDAC in audit, Caddy, observability, WAC | Pull a node's power: nothing user-visible happens; `git push` deploys a hello-world SF app in < 10 min |
+| 1 Storage & backups | 7-10 | SeaweedFS both sites, survey pictures + rasters migrated, SQL backups to object-locked S3, first restore drill | Two immutable copies of every backup at two sites; signed drill report; AWS bucket read-only |
+| 2 Mills cutover | 11-16 | Mills API/web/gateway on SF, Garnet, NATS jobs, AD FS web login, legacy API on a VM, secrets rotated (D16), OTel | 99.9 % for 14 days from Site A; EC2 is a warm standby |
+| 3 ML & geo | 15-24 | `gpu-01`, Ray/MLflow/Dagster/JupyterHub, Sentinel mirror + pgstac, TiTiler/Martin, self-hosted ORS, v5 classifier + SegFormer pipelines ported | One season's feature table regenerated on-prem and matching; training faster than current best |
+| 4 Database & apps | 20-30 | SQL Always On to Site B, mobile apps repointed to an Argus DNS name, reporting on the replica, first PostGIS migrations | No client references the AWS IP; AWS SQL box off 30 days without incident |
+| 5 DR & exit | 28-34 | Site B to full spec, quarterly DR drill, AWS account closed | Signed DR report; AWS invoice $0 |
+| 6 Hardening & audit | 34-40 | WDAC enforced everywhere, external pen test, Wazuh ISO 27001 mapping, console at parity with WAC for daily tasks | Pen-test findings closed; audit evidence pack produced from the platform, not by hand |
 
 ## 7. What stays external
 
@@ -126,7 +126,7 @@ Full detail with exit gates in `06-PHASES-AND-RUNBOOKS.md`.
 
 | Responsibility | Effort | Owner |
 |---|---|---|
-| Platform engineering | 1 FTE Phases 0–2, 0.5 after | new hire or contractor, then Adil / Zayan |
+| Platform engineering | 1 FTE Phases 0-2, 0.5 after | new hire or contractor, then Adil / Zayan |
 | On-call | rota of 3, weekly | Adil, Zayan, +1 |
 | Security operations (Wazuh triage, WDAC catalogues, patch Tuesday) | 0.25 FTE | rotating; Claude Code with `zd-security` for triage |
 | Backup and DR drills | 1 day/month + 2 days/quarter | platform owner |
@@ -135,7 +135,7 @@ Full detail with exit gates in `06-PHASES-AND-RUNBOOKS.md`.
 
 ## 9. Cost, three years, rough
 
-Hardware ≈ $150 k (both tiers, `07-HARDWARE-AND-LICENSING.md`) · Windows Server Datacenter + SQL Standard + CALs ≈ $35–55 k · one platform FTE locally ≈ $30–45 k/yr · power and connectivity ≈ $10 k/yr. **≈ $330–400 k over three years**, against an AWS estimate of $150–250 k for the *current* footprint plus GPU hours the company is not buying because they are too expensive. The financial case is reasonable; the capability and control case is the reason.
+Hardware ≈ $150 k (both tiers, `07-HARDWARE-AND-LICENSING.md`) · Windows Server Datacenter + SQL Standard + CALs ≈ $35-55 k · one platform FTE locally ≈ $30-45 k/yr · power and connectivity ≈ $10 k/yr. **≈ $330-400 k over three years**, against an AWS estimate of $150-250 k for the *current* footprint plus GPU hours the company is not buying because they are too expensive. The financial case is reasonable; the capability and control case is the reason.
 
 ## 10. The hybrid checkpoint
 

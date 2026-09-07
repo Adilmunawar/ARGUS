@@ -8,6 +8,6 @@ labels: assumption
 
 **What actually happened:**
 
-**How it was tested** — environment, versions, exact steps:
+**How it was tested**, environment, versions, exact steps:
 
-**What this changes** — which ADR, which phase, which cost:
+**What this changes**, which ADR, which phase, which cost:

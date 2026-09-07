@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Overview — Argus Console</title>
+<title>Overview, Argus Console</title>
 <style>
 /* ── Tokens: Mills DESIGN.md, verbatim. Never hardcode a hex outside this block. ──
    Fonts are a local-first stack on purpose: the console runs inside an
@@ -181,7 +181,7 @@ td.st{width:1%;white-space:nowrap}
 .diff .r{background:rgba(153,27,27,.1);color:#6b1414}
 .diff .c{color:var(--muted)}
 
-/* Terminal — the only dark surface in the product */
+/* Terminal: the only dark surface in the product */
 .term{background:var(--pine);border-radius:var(--card);overflow:hidden;box-shadow:var(--sh-float)}
 .recbar{display:flex;align-items:center;gap:10px;padding:11px 15px;background:#a51f1f;color:#fff;font-size:12.5px;font-weight:600;flex-wrap:wrap}
 .recbar .rec{width:9px;height:9px;border-radius:50%;background:#fff;animation:blink 1.8s infinite;flex:none}
@@ -371,7 +371,7 @@ td.st{width:1%;white-space:nowrap}
 <div class="flashbar" id="flashbar" role="region" aria-label="Notifications">
   <div class="flash warn">
     <span class="pill warn"><i aria-hidden="true"></i>Elevated</span>
-    <span>You hold Tier&nbsp;1 for another 1 h 47 m — reason: “September restore drill”.</span>
+    <span>You hold Tier&nbsp;1 for another 1 h 47 m, reason: “September restore drill”.</span>
     <button class="link" style="color:inherit;margin-left:auto" data-act="release">Release now</button>
   </div>
   <div class="flash info">
@@ -422,9 +422,9 @@ td.st{width:1%;white-space:nowrap}
       <header><h3>Sites</h3><p>Replication is current</p></header>
       <div class="body">
         <div class="graph" style="justify-content:space-between">
-          <div class="node hi"><b>Site A — Lahore</b><small>5 hosts · 23 VMs · 2 GPU</small></div>
+          <div class="node hi"><b>Site A: Lahore</b><small>5 hosts · 23 VMs · 2 GPU</small></div>
           <div class="edge" aria-hidden="true"></div>
-          <div class="node"><b>Site B — Karachi</b><small>2 hosts · replica and backups</small></div>
+          <div class="node"><b>Site B: Karachi</b><small>2 hosts · replica and backups</small></div>
         </div>
       </div>
       <div class="body flush grow"><div class="tblwrap"><table>
@@ -447,7 +447,7 @@ td.st{width:1%;white-space:nowrap}
         <tr><td style="width:92px;color:var(--muted)">09:14</td><td>Zayan proposed <b>mills 2026.09.08.1</b> for production</td><td class="st"><span class="pill info"><i aria-hidden="true"></i>Awaiting approval</span></td></tr>
         <tr><td style="color:var(--muted)">08:02</td><td>Reconciler applied <b>mills 2026.09.08.1</b> to staging</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Healthy</span></td></tr>
         <tr><td style="color:var(--muted)">07:30</td><td>Backup <b>umairv3_db</b> log written to argus-backups and verified</td><td class="st"><span class="pill ok"><i aria-hidden="true"></i>Locked 35 d</span></td></tr>
-        <tr><td style="color:var(--muted)">Yesterday</td><td>Adil connected to <b>sql-01</b> by desktop — “restore drill”</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Recorded 41 m</span></td></tr>
+        <tr><td style="color:var(--muted)">Yesterday</td><td>Adil connected to <b>sql-01</b> by desktop; “restore drill”</td><td class="st"><span class="pill mute"><i aria-hidden="true"></i>Recorded 41 m</span></td></tr>
       </tbody></table></div></div>
   </div>
 </section>
@@ -467,7 +467,7 @@ td.st{width:1%;white-space:nowrap}
       <div class="bars" role="img" aria-label="Request rate over the last hour, between 40 and 80 per second" style="margin-top:8px">
         <i style="height:40%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:72%"></i><i style="height:88%"></i><i style="height:64%"></i><i style="height:70%"></i><i style="height:52%"></i><i style="height:61%"></i><i style="height:80%"></i><i style="height:74%"></i><i style="height:58%"></i>
       </div></div>
-    <div class="tile"><p class="lbl">Errors</p><p class="val">0.04%</p><p class="hint">Budget is 1% — well inside</p></div>
+    <div class="tile"><p class="lbl">Errors</p><p class="val">0.04%</p><p class="hint">Budget is 1%, well inside</p></div>
   </div>
 
   <div class="card" style="margin-bottom:14px">
@@ -485,7 +485,7 @@ td.st{width:1%;white-space:nowrap}
         <div class="node"><b>argus-survey-pictures</b><small>1.16 M objects</small></div>
         <div class="node"><b>Anthropic</b><small>via egress proxy</small></div>
       </div>
-      <p class="note" style="margin-top:14px">Four secrets are referenced by name only — the values live in OpenBao and are injected when the service starts. <button class="link" style="color:inherit">See who read them</button></p>
+      <p class="note" style="margin-top:14px">Four secrets are referenced by name only; the values live in OpenBao and are injected when the service starts. <button class="link" style="color:inherit">See who read them</button></p>
     </div>
   </div>
 
@@ -527,7 +527,7 @@ td.st{width:1%;white-space:nowrap}
         <div class="r">- mills: { version: 2026.09.01.4 }</div>
         <div class="a">+ mills: { version: 2026.09.08.1 }</div>
         <div class="c"> </div>
-        <div class="c">reconciler plan — 3 resources</div>
+        <div class="c">reconciler plan, 3 resources</div>
         <div class="a">~ ServiceFabricApp/mills    upgrade 3 domains, health-gated</div>
         <div class="a">~ PrometheusRules/mills     1 threshold changed</div>
         <div class="c">= everything else unchanged</div>
@@ -535,7 +535,7 @@ td.st{width:1%;white-space:nowrap}
 
       <p class="note" style="margin-top:14px">
         <b>Blast radius.</b> Touches <b>MillsApi</b> (3 instances), which <b>MillsWeb</b>, <b>MillsGateway</b> and 2 scheduled jobs depend on.
-        <b>14 mill accounts are signed in right now</b> — the rolling upgrade keeps 2 of 3 instances serving throughout.
+        <b>14 mill accounts are signed in right now</b>: the rolling upgrade keeps 2 of 3 instances serving throughout.
       </p>
     </div>
   </div>
@@ -577,12 +577,12 @@ td.st{width:1%;white-space:nowrap}
 
   <div class="grid split">
     <div class="card">
-      <header><h3>Desktop session</h3><p>Streamed to your browser — no client, no VPN, no password</p></header>
+      <header><h3>Desktop session</h3><p>Streamed to your browser: no client, no VPN, no password</p></header>
       <div class="body flush">
         <div class="term">
-          <p class="recbar"><span class="rec" aria-hidden="true"></span>Recording · sql-01 · reason “September restore drill”<span class="sp">Expires 15:42 — 1 h 47 m left</span></p>
+          <p class="recbar"><span class="rec" aria-hidden="true"></span>Recording · sql-01 · reason “September restore drill”<span class="sp">Expires 15:42, 1 h 47 m left</span></p>
           <div class="screen" role="img" aria-label="Remote desktop of sql-01 showing a RESTORE VERIFYONLY command that completed successfully">
-            <span class="tb">sql-01 — Windows Server 2025 · SQL Server Management Studio</span>
+            <span class="tb">sql-01: Windows Server 2025 · SQL Server Management Studio</span>
 RESTORE VERIFYONLY FROM DISK =
   N'\\argus-backups\sql\umairv3_db\2026-09-08T0730Z.bak'
   WITH CHECKSUM;
@@ -595,7 +595,7 @@ Completion time: 2026-09-08T09:22:41
           <div class="termfoot">
             <button class="tbtn">Ctrl+Alt+Del</button>
             <button class="tbtn">Full screen</button>
-            <button class="tbtn" aria-disabled="true" title="Your role allows clipboard in only">Clipboard out — not allowed</button>
+            <button class="tbtn" aria-disabled="true" title="Your role allows clipboard in only">Clipboard out, not allowed</button>
             <span class="meta">Credential revokes on disconnect</span>
             <button class="tbtn" data-act="disconnect">Disconnect</button>
           </div>
@@ -607,10 +607,10 @@ Completion time: 2026-09-08T09:22:41
       <div class="card">
         <header><h3>How to connect</h3></header>
         <div class="body" style="display:grid;gap:9px">
-          <button class="btn s" style="justify-content:flex-start">Desktop — full Windows, over RDP</button>
-          <button class="btn s" style="justify-content:flex-start">PowerShell — scoped to your role</button>
-          <button class="btn s" style="justify-content:flex-start">Machine console — for a host that will not boot</button>
-          <button class="btn s" style="justify-content:flex-start" data-go="data">Query editor — read-only SQL</button>
+          <button class="btn s" style="justify-content:flex-start">Desktop, full Windows, over RDP</button>
+          <button class="btn s" style="justify-content:flex-start">PowerShell, scoped to your role</button>
+          <button class="btn s" style="justify-content:flex-start">Machine console, for a host that will not boot</button>
+          <button class="btn s" style="justify-content:flex-start" data-go="data">Query editor; read-only SQL</button>
         </div>
       </div>
       <div class="card">
@@ -628,7 +628,7 @@ Completion time: 2026-09-08T09:22:41
 <!-- ═══════════ DATA ═══════════ -->
 <section class="page" id="data" hidden aria-labelledby="h-data">
   <div class="hd"><div><p class="eyebrow">Data</p><h1 id="h-data" tabindex="-1">umairv3_db</h1>
-  <p>The main survey and mill database. Live under the surveyor mobile apps — treat every change as production.</p></div>
+  <p>The main survey and mill database. Live under the surveyor mobile apps: treat every change as production.</p></div>
   <div class="acts"><button class="btn s">Request credential</button><button class="btn p" data-go="ops">Run restore drill</button></div></div>
 
   <div class="grid g4" style="margin-bottom:14px">
@@ -645,7 +645,7 @@ Completion time: 2026-09-08T09:22:41
         <i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c2)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i><i style="background:var(--c1)"></i>
       </div>
       <p class="legend"><span><span class="swatch" style="background:var(--c1)" aria-hidden="true"></span>Full, differential and log complete</span>
-      <span><span class="swatch" style="background:var(--c2)" aria-hidden="true"></span>24 August — one log backup late by 22 minutes</span></p>
+      <span><span class="swatch" style="background:var(--c2)" aria-hidden="true"></span>24 August; one log backup late by 22 minutes</span></p>
     </div>
   </div>
 
@@ -708,7 +708,7 @@ Completion time: 2026-09-08T09:22:41
   <div class="hd"><div><p class="eyebrow">Operations</p><h1 id="h-ops" tabindex="-1">Runbooks</h1>
   <p>Fill in the form and press run. The steps execute with a transcript saved to the audit.</p></div></div>
   <div class="grid g3">
-    <div class="card"><div class="body"><h3 style="font-size:15px">Restore drill — umairv3_db</h3>
+    <div class="card"><div class="body"><h3 style="font-size:15px">Restore drill, umairv3_db</h3>
       <p style="color:var(--muted);margin:7px 0 14px">Restores the latest backup to a throwaway server, checks it, and records how long it took.</p>
       <button class="btn p">Run</button></div></div>
     <div class="card"><div class="body"><h3 style="font-size:15px">Drain a host</h3>
@@ -744,7 +744,7 @@ Completion time: 2026-09-08T09:22:41
   </div>
 </section>
 
-<p class="ftr">Prototype — static, no live data. Specified in <b>docs/10-CONSOLE-DESIGN.md</b>; tokens from the Mills dashboard design system.</p>
+<p class="ftr">Prototype, static, no live data. Specified in <b>docs/10-CONSOLE-DESIGN.md</b>; tokens from the Mills dashboard design system.</p>
 </main>
 </div>
 </div>
@@ -783,7 +783,7 @@ Completion time: 2026-09-08T09:22:41
     var nav = document.querySelector('.nav[data-go="' + id + '"]');
     var name = nav ? nav.querySelector('.lbl').textContent.trim() : id;
     crumb.textContent = name;
-    document.title = name + ' — Argus Console';
+    document.title = name + ', Argus Console';
     live.textContent = name + ' loaded';
     var h = target.querySelector('h1');
     if (h) h.focus({ preventScroll: true });
@@ -823,7 +823,7 @@ Completion time: 2026-09-08T09:22:41
         release: 'Elevation released. Access grants are time-boxed and expire on their own.',
         disconnect: 'Session ended. The recording is written to argus-sessions and the one-time credential is revoked.'
       };
-      var m = msgs[act.dataset.act] || 'Prototype — no action taken.';
+      var m = msgs[act.dataset.act] || 'Prototype, no action taken.';
       live.textContent = m;
       window.alert(m);
       return;
@@ -834,11 +834,11 @@ Completion time: 2026-09-08T09:22:41
   });
 
   document.getElementById('kbar').addEventListener('click', function () {
-    window.alert('Command palette — type a resource, a runbook or a machine name to jump straight to it.');
+    window.alert('Command palette: type a resource, a runbook or a machine name to jump straight to it.');
   });
   ['envbtn', 'bell', 'whobtn'].forEach(function (id) {
     document.getElementById(id).addEventListener('click', function () {
-      window.alert('Prototype — this menu is specified in docs/10-CONSOLE-DESIGN.md.');
+      window.alert('Prototype: this menu is specified in docs/10-CONSOLE-DESIGN.md.');
     });
   });
 })();

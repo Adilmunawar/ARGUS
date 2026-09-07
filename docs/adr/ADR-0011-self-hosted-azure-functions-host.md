@@ -1,4 +1,4 @@
-# ADR-0011 — Self-hosted Azure Functions host
+# ADR-0011: Self-hosted Azure Functions host
 
 **Context.** Scheduled and event-driven jobs (hourly precompute, 15-day feature tables, exports, harvest-drop detection) currently run as cron or inside a request.
 

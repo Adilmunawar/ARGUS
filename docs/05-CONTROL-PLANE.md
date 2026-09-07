@@ -1,4 +1,4 @@
-# Control plane — console, CLI, GitOps
+# Control plane: console, CLI, GitOps
 
 Three surfaces, one truth (ADR-0021). Everything below is `platform/`.
 
@@ -10,16 +10,16 @@ A private repository (`ZaraatDost/argus-gitops`, mirrored on Forgejo). Its `main
 argus-gitops/
   clusters/
     site-a/
-      hosts/hv-01.yaml … hv-05.yaml        # DSC v3 + OpenTofu inputs: roles, WDAC policy id, VLANs
-      vms/sql-01.yaml, pg-01.yaml, …        # Hyper-V VM spec, Shielded, replica target
+      hosts/hv-01.yaml ... hv-05.yaml        # DSC v3 + OpenTofu inputs: roles, WDAC policy id, VLANs
+      vms/sql-01.yaml, pg-01.yaml, ...        # Hyper-V VM spec, Shielded, replica target
       servicefabric/cluster.yaml            # node types, seed nodes, upgrade policy
-    site-b/ …
+    site-b/ ...
   apps/
     mills/
       app.yaml                              # SF application: version, instances, ports, gMSA, health policy
       config/production.env.tmpl            # env vars with {{ openbao:kv/mills/... }} references
       alerts.yaml                           # Prometheus rules scoped to the app
-    loan/ … agis/ … console/ … caddy/ … nats/ … openbao/ … observability/ …
+    loan/ ... agis/ ... console/ ... caddy/ ... nats/ ... openbao/ ... observability/ ...
   storage/
     buckets.yaml                            # every SeaweedFS bucket: lock policy, lifecycle, replication, owners
   identity/
@@ -57,7 +57,7 @@ Break-glass: a Tier 0 human can pause the reconciler from the console (logged, p
 
 ### 3.1 Stack
 
-`Argus.Console.Api` — .NET 10 minimal API, same conventions as the Mills API (bare camelCase records, RFC 9457 problems, `/api/v1/*`, rate limiting, OTel). `Argus.Console.Web` — Next.js 16 standalone, the Mills design system (Geist + display serif, cream/leaf palette, colour-blind-safe status colours). Deployed as one SF application `ArgusConsole`, behind Caddy at `console.zaraatdost.pk`, reachable only over the admin VPN. Login: AD FS OIDC (PKCE). Authorisation: AD groups → roles.
+`Argus.Console.Api`: .NET 10 minimal API, same conventions as the Mills API (bare camelCase records, RFC 9457 problems, `/api/v1/*`, rate limiting, OTel). `Argus.Console.Web`: Next.js 16 standalone, the Mills design system (Geist + display serif, cream/leaf palette, colour-blind-safe status colours). Deployed as one SF application `ArgusConsole`, behind Caddy at `console.zaraatdost.pk`, reachable only over the admin VPN. Login: AD FS OIDC (PKCE). Authorisation: AD groups → roles.
 
 ### 3.2 Roles
 
@@ -69,11 +69,11 @@ Break-glass: a Tier 0 human can pause the reconciler from the console (logged, p
 | Security | `Argus-Console-Security` | see audit, Wazuh, WDAC events; quarantine a host; rotate leases |
 | Admin | `Argus-Console-Admins` (Tier 0, time-boxed) | pause reconciler, edit identity/policies PRs, break-glass |
 
-### 3.3 Screens (v1 — parity with what WAC + Grafana cannot do)
+### 3.3 Screens (v1: parity with what WAC + Grafana cannot do)
 
 | Screen | What it shows | Writes (always via a PR) |
 |---|---|---|
-| **Overview** | site health, SLOs, reconciler state, last deploy, open alerts, backup age, cert expiry, AWS-exit progress | — |
+| **Overview** | site health, SLOs, reconciler state, last deploy, open alerts, backup age, cert expiry, AWS-exit progress | - |
 | **Applications** | per app: version live/staging, instances, health, p95, error rate, logs tail, dependencies graph from the map | deploy version, scale, restart, rollback |
 | **Deployments** | pending PRs with diff, approvals, reconciler plan/apply log | approve, reject |
 | **Storage** | buckets, size, lock status, replication lag, top prefixes | create bucket (form → `storage/buckets.yaml` PR), lifecycle rule |
@@ -84,10 +84,10 @@ Break-glass: a Tier 0 human can pause the reconciler from the console (logged, p
 | **Security** | Wazuh SCA score per host, open alerts, WDAC block events, CrowdSec bans, Suricata top signatures | acknowledge, quarantine, open incident runbook |
 | **ML** | Dagster asset freshness, Ray cluster utilisation, MLflow latest runs, GPU memory | trigger a Dagster job, promote a model |
 | **Runbooks** | every `docs/runbooks/*.md` rendered with parameter forms; executes JEA-scoped PowerShell on the target with a transcript | run |
-| **Audit** | every action by anyone, forever, exportable | — |
+| **Audit** | every action by anyone, forever, exportable | - |
 | **Evidence** | monthly evidence pack generator | generate, sign, download |
 
-Day one (Phase 0–2), before these screens exist: Windows Admin Center for hosts/VMs, Grafana for everything observable, GitHub for PRs. The console's first shipped screens are **Deployments** and **Applications**, because they are what `update.ps1` does today.
+Day one (Phase 0-2), before these screens exist: Windows Admin Center for hosts/VMs, Grafana for everything observable, GitHub for PRs. The console's first shipped screens are **Deployments** and **Applications**, because they are what `update.ps1` does today.
 
 ### 3.4 API surface (excerpt)
 
@@ -114,7 +114,7 @@ Every `POST` records `{actor, role, action, target, before, after, prUrl?}` in `
 
 ## 4. The CLI (`platform/cli`)
 
-`Argus` PowerShell module (signed, in the WDAC policy) and a thin `argus` .NET tool — both are clients of the console API; neither has privileges of its own.
+`Argus` PowerShell module (signed, in the WDAC policy) and a thin `argus` .NET tool: both are clients of the console API; neither has privileges of its own.
 
 ```powershell
 Connect-Argus                                   # AD FS device-code login; token cached in DPAPI
@@ -128,7 +128,7 @@ Invoke-ArgusRunbook sql-01-restore-drill -Param @{ Target = 'sql-drill-01' }
 Get-ArgusAudit -Since (Get-Date).AddDays(-1)
 ```
 
-`argus` mirrors these for the Linux hosts and CI (`argus app deploy mills --version …`). Claude Code's `zd-deploy` and `zd-ops` plugins call `argus`.
+`argus` mirrors these for the Linux hosts and CI (`argus app deploy mills --version ...`). Claude Code's `zd-deploy` and `zd-ops` plugins call `argus`.
 
 ## 5. How a change flows (the whole loop)
 
@@ -137,9 +137,9 @@ Get-ArgusAudit -Since (Get-Date).AddDays(-1)
 2. Self-hosted Windows runner: build · test · scan · sign · package → argus-artifacts/mills/2026.09.08.1.sfpkg (WORM)
 3. Runner opens PR #1842 on argus-gitops: environments/staging.yaml  mills: 2026.09.08.1
 4. Reconciler applies staging within 60 s; SF rolling upgrade; health OK
-5. Adil, from the console Deployments screen (or `Publish-ArgusApp … -Environment production`), promotes: PR #1843 on production.yaml
+5. Adil, from the console Deployments screen (or `Publish-ArgusApp ... -Environment production`), promotes: PR #1843 on production.yaml
 6. Approver (a different Tier 1 person) approves in the console
 7. Reconciler: verify signatures → SF upgrade on production with rollback policy → status green → WhatsApp "mills 2026.09.08.1 live, p95 212 ms"
 ```
 
-Wall clock from step 1 to step 7 with prompt approval: under 10 minutes. Rollback is `Publish-ArgusApp mills -Version <previous>` — a PR like any other.
+Wall clock from step 1 to step 7 with prompt approval: under 10 minutes. Rollback is `Publish-ArgusApp mills -Version <previous>`: a PR like any other.

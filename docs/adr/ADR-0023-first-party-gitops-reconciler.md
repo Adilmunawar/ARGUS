@@ -1,4 +1,4 @@
-# ADR-0023 — First-party GitOps reconciler
+# ADR-0023: First-party GitOps reconciler
 
 **Decision.** `Argus.Reconciler`, a .NET Service Fabric stateful service: polls the GitOps repo, verifies commit signatures, diffs desired vs actual (Service Fabric apps, Hyper-V VMs via WMI, SeaweedFS buckets, OpenBao policies, GPO links via DSC), applies in dependency order, reports status to the console and Grafana.
 

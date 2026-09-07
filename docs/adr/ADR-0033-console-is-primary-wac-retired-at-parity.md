@@ -1,10 +1,10 @@
-# ADR-0033 — The console is the primary surface; Windows Admin Center is retired at parity
+# ADR-0033: The console is the primary surface; Windows Admin Center is retired at parity
 
 **Status:** Accepted (8 September 2026)
 
 ## Context
 
-`05-CONTROL-PLANE.md` positioned Windows Admin Center as a permanent partner to the console for host and VM management. Two surfaces with overlapping powers means two audit trails, two authorisation models, and a route that bypasses the "every write is a pull request" rule — WAC mutates hosts directly.
+`05-CONTROL-PLANE.md` positioned Windows Admin Center as a permanent partner to the console for host and VM management. Two surfaces with overlapping powers means two audit trails, two authorisation models, and a route that bypasses the "every write is a pull request" rule, WAC mutates hosts directly.
 
 ## Decision
 

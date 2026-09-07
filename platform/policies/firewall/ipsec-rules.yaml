@@ -1,4 +1,4 @@
-# East–west: who may talk to whom, by identity (ADR-0015). Applied as Windows Firewall
+# East-west: who may talk to whom, by identity (ADR-0015). Applied as Windows Firewall
 # connection-security + inbound rules via GPO; strongSwan equivalents generated for Linux hosts.
 apiVersion: argus/v1
 kind: IpsecRules

@@ -14,13 +14,13 @@
 | 40 | STORAGE | 10.40.0.0/24 | **non-routed** | S2D RDMA (RoCE v2), Live Migration, cluster heartbeat | hosts only |
 | 50 | ML | 10.50.0.0/24 | via firewall | `gpu-01` | PLATFORM (Ray Serve via Caddy), DATA by identity |
 | 90 | QUARANTINE | 10.90.0.0/24 | none | isolated hosts under investigation | SEC only |
-| 99 | ADMIN VPN | 10.99.0.0/24 | via firewall | WireGuard admin clients (PAWs) | — |
+| 99 | ADMIN VPN | 10.99.0.0/24 | via firewall | WireGuard admin clients (PAWs) | - |
 
 Rules are in `platform/policies/firewall/opnsense-rules.yaml` and are applied by IaC; a rule not in Git is an alert.
 
 ## 2. Addressing and names
 
-DNS zone `argus.local` (AD-integrated, internal) and `zaraatdost.pk` (public, at the registrar; only DMZ names). Public names: `mills.zaraatdost.pk`, `loans.zaraatdost.pk`, `agis.zaraatdost.pk`, `console.zaraatdost.pk` (VPN-only despite public DNS — Caddy checks source), `ml.zaraatdost.pk`, `status.zaraatdost.pk` (Site B). Every internal service has an `A` record and an AD CS certificate; nothing is addressed by IP in configuration.
+DNS zone `argus.local` (AD-integrated, internal) and `zaraatdost.pk` (public, at the registrar; only DMZ names). Public names: `mills.zaraatdost.pk`, `loans.zaraatdost.pk`, `agis.zaraatdost.pk`, `console.zaraatdost.pk` (VPN-only despite public DNS; Caddy checks source), `ml.zaraatdost.pk`, `status.zaraatdost.pk` (Site B). Every internal service has an `A` record and an AD CS certificate; nothing is addressed by IP in configuration.
 
 ## 3. Edge
 
@@ -36,7 +36,7 @@ No default route from PLATFORM, DATA, ML or BUILD. A forward proxy on the DMZ (C
 
 ## 6. Bandwidth plan for Site B
 
-Initial seed of ~5 TB (backups + survey pictures) by physical disk. Steady state: SQL log backups ~2 GB/day, Kopia incrementals ~5–20 GB/day, Hyper-V Replica deltas ~10–50 GB/day, AD replication negligible. A 100 Mbps dedicated link comfortably carries this; a 1 Gbps link makes the DR fail-back fast. Both sites keep a second ISP.
+Initial seed of ~5 TB (backups + survey pictures) by physical disk. Steady state: SQL log backups ~2 GB/day, Kopia incrementals ~5-20 GB/day, Hyper-V Replica deltas ~10-50 GB/day, AD replication negligible. A 100 Mbps dedicated link comfortably carries this; a 1 Gbps link makes the DR fail-back fast. Both sites keep a second ISP.
 
 ## 7. Power
 

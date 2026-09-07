@@ -1,4 +1,4 @@
-# ADR-0015 — IPsec domain isolation instead of a service mesh
+# ADR-0015: IPsec domain isolation instead of a service mesh
 
 **Decision.** Windows Firewall connection-security rules via GPO: all server-to-server traffic inside the platform requires Kerberos (machine) or certificate (AD CS) authentication and AES-GCM encryption; unauthenticated inbound is dropped. Linux exceptions use strongSwan with AD CS certificates. Per-service inbound rules allow only the identities that need to connect (e.g. SQL accepts only the Mills API gMSA and the backup gMSA).
 

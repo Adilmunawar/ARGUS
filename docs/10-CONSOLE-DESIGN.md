@@ -1,4 +1,4 @@
-# Argus Console — design
+# Argus Console: design
 
 **The web interface from which everything is controlled: deployments, servers, RDP sessions, databases, storage, secrets, identity, security, ML, cost.** One browser tab replaces the AWS Console, Remote Desktop Connection, SQL Server Management Studio for routine work, PowerShell for routine work, and the pile of RDP shortcuts on everyone's laptop.
 
@@ -16,15 +16,15 @@ Stripped of the 240 service pages, the AWS Console is nine repeating ideas. Ever
 
 | # | AWS pattern | Where you see it | What it gets right | What it gets wrong |
 |---|---|---|---|---|
-| 1 | **Global shell** — service search, region selector, account menu, notifications, CloudShell drawer | every page | search-first navigation; the shell never changes | region selector is a constant source of "why is my resource missing"; 240 services make search mandatory rather than helpful |
-| 2 | **Console Home** — pinnable widgets, recently visited, favourites, health | landing page | personalisation; recent items are how people actually navigate | widgets are shallow; you still leave to do anything |
-| 3 | **List → detail → action** — a filterable table of resources, click one, tabs on the detail, an Actions dropdown | EC2 instances, S3 buckets, RDS | the single most learnable pattern in the console | the Actions menu hides destructive items next to harmless ones |
-| 4 | **Create wizard** — multi-step form ending in a review page | launch instance, create DB | review-before-create is right | the wizard's output is invisible; you cannot see the API call it will make |
-| 5 | **Change preview** — CloudFormation change sets: "here is what will happen before it happens" | CloudFormation, Terraform-adjacent | the best idea in the console | opt-in and buried; most console actions have no preview at all |
-| 6 | **Browser access to compute** — Session Manager shell, EC2 Instance Connect, Serial Console | EC2 | no bastion, no key files, IAM-controlled, logged to S3 | text only; there is no browser RDP for Windows |
-| 7 | **Observability panes** — CloudWatch metrics, Logs Insights, X-Ray service map | everywhere, inconsistently | co-locating metrics with the resource | three query languages, three UIs, and a separate bill |
-| 8 | **Audit and compliance** — CloudTrail Event History, Config timeline, Security Hub, Trusted Advisor | separate consoles | "who did what, when" is answerable | scattered across four services with four data models |
-| 9 | **Cost** — Cost Explorer, Budgets, cost allocation tags | Billing console | tag-driven attribution | disconnected from the resource pages where decisions get made |
+| 1 | **Global shell**: service search, region selector, account menu, notifications, CloudShell drawer | every page | search-first navigation; the shell never changes | region selector is a constant source of "why is my resource missing"; 240 services make search mandatory rather than helpful |
+| 2 | **Console Home**: pinnable widgets, recently visited, favourites, health | landing page | personalisation; recent items are how people actually navigate | widgets are shallow; you still leave to do anything |
+| 3 | **List → detail → action**: a filterable table of resources, click one, tabs on the detail, an Actions dropdown | EC2 instances, S3 buckets, RDS | the single most learnable pattern in the console | the Actions menu hides destructive items next to harmless ones |
+| 4 | **Create wizard**: multi-step form ending in a review page | launch instance, create DB | review-before-create is right | the wizard's output is invisible; you cannot see the API call it will make |
+| 5 | **Change preview**, CloudFormation change sets: "here is what will happen before it happens" | CloudFormation, Terraform-adjacent | the best idea in the console | opt-in and buried; most console actions have no preview at all |
+| 6 | **Browser access to compute**: Session Manager shell, EC2 Instance Connect, Serial Console | EC2 | no bastion, no key files, IAM-controlled, logged to S3 | text only; there is no browser RDP for Windows |
+| 7 | **Observability panes**: CloudWatch metrics, Logs Insights, X-Ray service map | everywhere, inconsistently | co-locating metrics with the resource | three query languages, three UIs, and a separate bill |
+| 8 | **Audit and compliance**: CloudTrail Event History, Config timeline, Security Hub, Trusted Advisor | separate consoles | "who did what, when" is answerable | scattered across four services with four data models |
+| 9 | **Cost**: Cost Explorer, Budgets, cost allocation tags | Billing console | tag-driven attribution | disconnected from the resource pages where decisions get made |
 
 **The one structural thing AWS gets wrong that we will not copy:** the console mutates production directly. You click *Terminate* and the instance dies. There is no review, no approval, no diff, and the only record is CloudTrail after the fact. Argus's console **opens a pull request** for every write (ADR-0021). The console is a rich, opinionated editor for the GitOps repo, plus a live reader of the running system.
 
@@ -32,7 +32,7 @@ Stripped of the 240 service pages, the AWS Console is nine repeating ideas. Ever
 
 ## 2. Information architecture
 
-Nine sections, ordered by how often an operator touches them. No "services" list, because there are 22 things, not 240 — everything is reachable in two clicks from the sidebar or one keystroke from the command palette.
+Nine sections, ordered by how often an operator touches them. No "services" list, because there are 22 things, not 240: everything is reachable in two clicks from the sidebar or one keystroke from the command palette.
 
 ```
 Argus Console
@@ -97,9 +97,9 @@ The **environment switch** is the honest version of AWS's region selector: it is
 
 ## 3. Screen specifications
 
-Every screen uses the Mills component language — `PageHeader`, `StatTile`, `SectionCard`, `TableShell`, `FilterField`, `EmptyState`, `Skeleton`, `Button` — with the same tokens (`ink`, `muted`, `pine`, `cane`, `brand`, `leaf`, `cream`, `paper`). No new component is invented unless a screen below names it.
+Every screen uses the Mills component language: `PageHeader`, `StatTile`, `SectionCard`, `TableShell`, `FilterField`, `EmptyState`, `Skeleton`, `Button`, with the same tokens (`ink`, `muted`, `pine`, `cane`, `brand`, `leaf`, `cream`, `paper`). No new component is invented unless a screen below names it.
 
-### 3.1 Overview — the morning screen
+### 3.1 Overview: the morning screen
 
 Replaces: AWS Console Home + Personal Health Dashboard.
 
@@ -110,13 +110,13 @@ Replaces: AWS Console Home + Personal Health Dashboard.
 
 ### 3.2 Applications
 
-**List**: TableShell — name · environment · version · health pill · instances · p95 · error rate · last deployed. Filter by owner, tier, health.
+**List**: TableShell; name · environment · version · health pill · instances · p95 · error rate · last deployed. Filter by owner, tier, health.
 
-**Detail** — tabs:
+**Detail** tabs:
 
 | Tab | Content |
 |---|---|
-| Overview | StatTiles (uptime, p95, RPS, error rate, instances); dependency graph rendered from `02-APPLICATION-INFRASTRUCTURE-MAP.md` — this app → its database, buckets, queues, secrets, external calls, each node clickable |
+| Overview | StatTiles (uptime, p95, RPS, error rate, instances); dependency graph rendered from `02-APPLICATION-INFRASTRUCTURE-MAP.md`: this app → its database, buckets, queues, secrets, external calls, each node clickable |
 | Instances | per SF replica: node, PID, uptime, restarts, CPU, memory; actions *Restart* (confirm), *Drain node* |
 | Logs | live tail with a pause; Loki query box with saved queries; severity filter; jump-to-trace on any log line carrying a trace id |
 | Traces | OTel waterfall for slow requests; the gateway → API → SQL spans the Mills app already emits |
@@ -125,27 +125,27 @@ Replaces: AWS Console Home + Personal Health Dashboard.
 
 **Advanced beyond AWS:** the dependency graph is generated from the same YAML the reconciler applies, so it cannot drift from reality. AWS has nothing equivalent outside X-Ray's inferred map.
 
-### 3.3 Deployments — the PR queue
+### 3.3 Deployments: the PR queue
 
 Replaces: CodePipeline + CloudFormation change sets, merged.
 
-Three lanes: **Awaiting approval** · **In flight** · **Recent**. A card per deployment: app, version, environment, author, the CI evidence (tests passed, Trivy clean, SBOM, signature verified), and **the reconciler's plan** — the literal diff of desired vs actual, resource by resource, before anything is applied. Approve/Reject inline (Approver role, and never the same person who opened it). In-flight shows the Service Fabric upgrade domain progress bar and the live health check; a failing health policy shows the automatic rollback happening.
+Three lanes: **Awaiting approval** · **In flight** · **Recent**. A card per deployment: app, version, environment, author, the CI evidence (tests passed, Trivy clean, SBOM, signature verified), and **the reconciler's plan**: the literal diff of desired vs actual, resource by resource, before anything is applied. Approve/Reject inline (Approver role, and never the same person who opened it). In-flight shows the Service Fabric upgrade domain progress bar and the live health check; a failing health policy shows the automatic rollback happening.
 
-**Advanced beyond AWS:** a *blast-radius preview* beside the diff — "this change touches `MillsApi` (3 instances), which is depended on by `MillsWeb`, `MillsGateway` and 2 scheduled functions; 4 mill accounts are currently signed in". Derived from the dependency graph plus live sessions.
+**Advanced beyond AWS:** a *blast-radius preview* beside the diff, "this change touches `MillsApi` (3 instances), which is depended on by `MillsWeb`, `MillsGateway` and 2 scheduled functions; 4 mill accounts are currently signed in". Derived from the dependency graph plus live sessions.
 
-### 3.4 Compute — and the RDP problem, solved
+### 3.4 Compute, and the RDP problem, solved
 
-**Hosts**: `hv-01..05` — cluster role, S2D health (capacity, repair jobs, unhealthy disks), CPU/RAM headroom, patch age, WDAC mode, uptime. Actions: *Drain*, *Patch window*, *Quarantine* (moves the host's VM NICs to VLAN 90, Security role only).
+**Hosts**: `hv-01..05`: cluster role, S2D health (capacity, repair jobs, unhealthy disks), CPU/RAM headroom, patch age, WDAC mode, uptime. Actions: *Drain*, *Patch window*, *Quarantine* (moves the host's VM NICs to VLAN 90, Security role only).
 
-**Virtual machines**: every VM from `02-…-MAP.md` — name, host, state, vCPU/RAM, IP, replica health, checkpoint age. Detail tabs: Overview · Performance · Disks · Network · Replica · **Connect**.
+**Virtual machines**: every VM from `02-...-MAP.md`: name, host, state, vCPU/RAM, IP, replica health, checkpoint age. Detail tabs: Overview · Performance · Disks · Network · Replica · **Connect**.
 
-**The Connect tab** — this is the feature that was missing:
+**The Connect tab**, this is the feature that was missing:
 
 | Mode | Protocol | For |
 |---|---|---|
 | **Desktop** | RDP through Apache Guacamole | `sql-01`, `legacy-landsurvey-01`, `adfs-01`, any Windows VM. Full desktop in the browser tab. |
 | **Shell** | SSH through Guacamole | `gpu-01`, `siem-01` |
-| **VM console** | VNC to the Hyper-V console | a VM that will not boot or has lost networking — the equivalent of standing at the rack |
+| **VM console** | VNC to the Hyper-V console | a VM that will not boot or has lost networking: the equivalent of standing at the rack |
 | **PowerShell** | JEA-scoped web terminal | routine tasks without a desktop; only the cmdlets the role allows |
 
 How a connect actually works, so there is no ambiguity:
@@ -157,49 +157,49 @@ How a connect actually works, so there is no ambiguity:
 5. Every keystroke and the full screen video are recorded to `argus-sessions` (object-locked). Clipboard and file transfer are per-role: Operators get clipboard in only; Admins get both, and every file transfer is logged with a hash.
 6. At expiry the session closes and the credential is revoked automatically.
 
-**Advanced beyond AWS:** AWS has no browser RDP at all — Session Manager is text-only, and Fleet Manager's Remote Desktop is Windows-only, licence-gated and unrecorded by default. Recorded, credential-less, time-boxed RDP in the same UI as the deploy button is genuinely better than what you are leaving behind, and it removes the VPN client and the RDP shortcuts from everyone's laptop.
+**Advanced beyond AWS:** AWS has no browser RDP at all. Session Manager is text-only, and Fleet Manager's Remote Desktop is Windows-only, licence-gated and unrecorded by default. Recorded, credential-less, time-boxed RDP in the same UI as the deploy button is genuinely better than what you are leaving behind, and it removes the VPN client and the RDP shortcuts from everyone's laptop.
 
-**Service Fabric**: cluster map — nodes as tiles, colour by health, applications as chips inside them, upgrade domains marked. Click a node → drain, restart, view its apps.
+**Service Fabric**: cluster map; nodes as tiles, colour by health, applications as chips inside them, upgrade domains marked. Click a node → drain, restart, view its apps.
 
 **GPU**: `gpu-01` utilisation over time, memory per process, the Ray dashboard embedded, "who is using it" (JupyterHub user or Dagster run), and a queue if two things want it.
 
 ### 3.5 Data
 
-**Databases**: AG topology diagram (primary `sql-01` → async `sql-02`), synchronisation state and lag, backup timeline (full/diff/log as a horizontal band per day — a gap is visible instantly), last verified restore with its drill report, top queries from `sql_exporter`, connection count by application. Actions: *Request credential* (OpenBao lease, shown once, copy-to-clipboard, auto-revoked), *Trigger backup*, *Run restore drill*, *Failover* (Approver + confirm typing the database name).
+**Databases**: AG topology diagram (primary `sql-01` → async `sql-02`), synchronisation state and lag, backup timeline (full/diff/log as a horizontal band per day; a gap is visible instantly), last verified restore with its drill report, top queries from `sql_exporter`, connection count by application. Actions: *Request credential* (OpenBao lease, shown once, copy-to-clipboard, auto-revoked), *Trigger backup*, *Run restore drill*, *Failover* (Approver + confirm typing the database name).
 
-**Query editor** — a browser SQL client for read-only investigation: role-scoped (Operators get `SELECT` on non-PII views; Security gets audit tables), every query logged to the audit with its text and row count, a hard row cap, a query timeout, and no `DELETE`/`UPDATE`/`DROP` grammar accepted at all for non-Admin roles. This is deliberately not a replacement for SSMS; it is the 90 % case (someone needs to check a number) without anyone RDP-ing into `sql-01`.
+**Query editor**, a browser SQL client for read-only investigation: role-scoped (Operators get `SELECT` on non-PII views; Security gets audit tables), every query logged to the audit with its text and row count, a hard row cap, a query timeout, and no `DELETE`/`UPDATE`/`DROP` grammar accepted at all for non-Admin roles. This is deliberately not a replacement for SSMS; it is the 90 % case (someone needs to check a number) without anyone RDP-ing into `sql-01`.
 
-**Object storage**: bucket list with size, object count, lock mode and remaining days, replication lag to Site B, lifecycle rules. A **browser** for prefixes and objects with preview (images from `argus-survey-pictures`, GeoTIFF thumbnails from `argus-rasters` via TiTiler, JSON/text inline) — because "find the survey photo for parcel X" should not require an S3 client. Upload/delete follow the bucket's own policy: `argus-backups` shows *Delete* disabled with the reason "object lock, 35 days".
+**Object storage**: bucket list with size, object count, lock mode and remaining days, replication lag to Site B, lifecycle rules. A **browser** for prefixes and objects with preview (images from `argus-survey-pictures`, GeoTIFF thumbnails from `argus-rasters` via TiTiler, JSON/text inline): because "find the survey photo for parcel X" should not require an S3 client. Upload/delete follow the bucket's own policy: `argus-backups` shows *Delete* disabled with the reason "object lock, 35 days".
 
 **Cache**: Garnet memory, hit rate, keyspace by prefix, slow commands. **Queues**: NATS streams, message rate, consumer lag, dead-letter inspector with a *Replay* action.
 
 ### 3.6 Identity & secrets
 
-**People**: AD users — name, tier, MFA method (passkey/FIDO2/TOTP), last sign-in, group membership, current elevations. A *Leaver* action that runs the offboarding runbook.
+**People**: AD users; name, tier, MFA method (passkey/FIDO2/TOTP), last sign-in, group membership, current elevations. A *Leaver* action that runs the offboarding runbook.
 
-**Access grants** — the screen that makes tiered admin usable: *Request* (group, hours, reason) → approver notified on WhatsApp → approve/deny in one tap → the console adds the AD group membership **with a TTL** so it expires on its own. A live list of who is elevated right now, with a *Revoke* button, is on the Overview when non-empty. This is JIT privileged access, which AWS sells as a separate product.
+**Access grants**, the screen that makes tiered admin usable: *Request* (group, hours, reason) → approver notified on WhatsApp → approve/deny in one tap → the console adds the AD group membership **with a TTL** so it expires on its own. A live list of who is elevated right now, with a *Revoke* button, is on the Overview when non-empty. This is JIT privileged access, which AWS sells as a separate product.
 
 **Secrets**: OpenBao paths as a tree, names only, never values. Per path: rotation age (amber past policy), active leases, last 20 reads with actor and time. Actions: *Rotate*, *Revoke all leases*. A *Request value* action exists for Admins, requires a reason, shows the value once, and pages the security channel.
 
 ### 3.7 Security
 
-**Posture**: a heat grid — hosts × control families (CIS sections), coloured by Wazuh SCA score, trending. Click a cell for the failing checks and the runbook that fixes them.
+**Posture**: a heat grid; hosts × control families (CIS sections), coloured by Wazuh SCA score, trending. Click a cell for the failing checks and the runbook that fixes them.
 
 **Alerts**: one inbox for Wazuh, Sysmon-derived rules, CrowdSec, Suricata, WDAC blocks, and OpenBao anomalies. Severity, host, rule, first/last seen, count. Actions: acknowledge with a note, quarantine the host, open the matching runbook, create an incident.
 
-**Sessions**: every recorded RDP/SSH/console session — who, which VM, when, duration, reason, the approver, and a **video player with a keystroke timeline**. Searchable by typed command. This is the control that makes giving people RDP safe.
+**Sessions**: every recorded RDP/SSH/console session; who, which VM, when, duration, reason, the approver, and a **video player with a keystroke timeline**. Searchable by typed command. This is the control that makes giving people RDP safe.
 
 **Vulnerabilities**: by application and by host, with severity, fixed-in version, and waivers that carry an owner and an expiry date (an expired waiver is an alert, not a silent pass).
 
-**Evidence**: the monthly pack — MFA coverage, WDAC state, patch age, backup drill outcomes, restore timings, open vulnerabilities, privileged grants and expiries, firewall changes from Git history — generated, signed, downloadable.
+**Evidence**: the monthly pack; MFA coverage, WDAC state, patch age, backup drill outcomes, restore timings, open vulnerabilities, privileged grants and expiries, firewall changes from Git history; generated, signed, downloadable.
 
 ### 3.8 ML & geospatial
 
-**Pipelines**: the Dagster asset graph rendered natively (not an iframe) — `parcels → s2_periods → s1_periods → phenology → v5_train_table → v5_model → parcel_predictions` — each node coloured by freshness against its SLA, click for the last run, logs, and *Materialise*. **Models**: MLflow runs filtered to the v5 series, metrics side by side, lineage back to the exact feature-table version, *Promote to endpoint*. **Endpoints**: Ray Serve latency, request rate, canary split. **Imagery**: a map of Punjab/Sindh showing Sentinel mirror coverage by date, gaps in amber, a STAC search box, and a tile preview through TiTiler.
+**Pipelines**: the Dagster asset graph rendered natively (not an iframe); `parcels → s2_periods → s1_periods → phenology → v5_train_table → v5_model → parcel_predictions`: each node coloured by freshness against its SLA, click for the last run, logs, and *Materialise*. **Models**: MLflow runs filtered to the v5 series, metrics side by side, lineage back to the exact feature-table version, *Promote to endpoint*. **Endpoints**: Ray Serve latency, request rate, canary split. **Imagery**: a map of Punjab/Sindh showing Sentinel mirror coverage by date, gaps in amber, a STAC search box, and a tile preview through TiTiler.
 
 ### 3.9 Operations
 
-**Runbooks**: each `docs/runbooks/*.md` rendered from its front-matter — description, a form for its parameters, an approval gate if it declares one, then live output as it executes over JEA with a full transcript saved to the audit. This turns tribal knowledge into a button.
+**Runbooks**: each `docs/runbooks/*.md` rendered from its front-matter; description, a form for its parameters, an approval gate if it declares one, then live output as it executes over JEA with a full transcript saved to the audit. This turns tribal knowledge into a button.
 
 **Backups & drills**: a calendar of backups per data store, RPO trend line, drill history with pass/fail and timing, and the next scheduled drill with a countdown. A red state if any drill is overdue.
 
@@ -218,7 +218,7 @@ Every action, forever: actor, role, elevation state, action, target, before/afte
 | **Every write is a PR** | The button says *Propose*, not *Save*, wherever it opens a PR. The response shows the PR and its diff. Two exceptions run live because they are emergencies, and both page security: *Quarantine host* and *Revoke leases*. |
 | **Preview before apply** | Any change shows the reconciler's plan and the blast radius first. |
 | **Destructive actions** | `danger` Button, a confirm dialog that requires typing the resource name, the environment restated, and never in the same dropdown group as a safe action. |
-| **Command palette** | `⌘K` — jump to any resource, run any runbook, connect to any VM, by typing. This is how experienced operators will use the console. |
+| **Command palette** | `⌘K`: jump to any resource, run any runbook, connect to any VM, by typing. This is how experienced operators will use the console. |
 | **Deep links** | Every resource has a stable URL. Alerts, WhatsApp messages and runbooks link straight to the screen. |
 | **Live by default** | Health, logs, sessions and deployments stream over SSE. No refresh button anywhere. |
 | **Honest empty and error states** | The Mills voice: say what happened and what to do. Never fake success. |
@@ -227,13 +227,13 @@ Every action, forever: actor, role, elevation state, action, target, before/afte
 
 ## 5. Design system
 
-Inherited wholesale from the Mills dashboard `DESIGN.md` — same tokens, same eight components, same Geist + Lora pairing, same chart palette in fixed order, same `motion-safe:` behaviour, same `/styleguide` route as the living reference. The console is a Zaraat Dost product and should look like one.
+Inherited wholesale from the Mills dashboard `DESIGN.md`, same tokens, same eight components, same Geist + Lora pairing, same chart palette in fixed order, same `motion-safe:` behaviour, same `/styleguide` route as the living reference. The console is a Zaraat Dost product and should look like one.
 
 Three console-only additions, each documented in the styleguide when built:
 
 | Addition | Why |
 |---|---|
-| `TerminalSurface` | a `pine` surface for Guacamole frames and the web terminal, with the recording banner, session timer, and disconnect control — the only place in the product with a dark background |
+| `TerminalSurface` | a `pine` surface for Guacamole frames and the web terminal, with the recording banner, session timer, and disconnect control: the only place in the product with a dark background |
 | `PlanDiff` | the reconciler's desired-vs-actual diff: additions in `brand`, removals in the danger tone, unchanged collapsed |
 | `GraphCanvas` | dependency graphs and the Dagster asset graph; nodes are SectionCard-derived, edges hairline, layout left-to-right |
 
@@ -244,7 +244,7 @@ The console is worth building only in the order that retires an existing tool.
 | Stage | Ships | Retires |
 |---|---|---|
 | **C1** (Phase 2) | Overview, Applications (Overview/Logs/Deploy history), Deployments | `package.ps1` / `update.ps1` and the deploy WhatsApp thread |
-| **C2** (Phase 2–3) | Compute → VMs → **Connect** (Guacamole), Sessions | RDP clients, the VPN-for-RDP habit, shared local admin passwords |
+| **C2** (Phase 2-3) | Compute → VMs → **Connect** (Guacamole), Sessions | RDP clients, the VPN-for-RDP habit, shared local admin passwords |
 | **C3** (Phase 3) | Data (Databases, Object storage, Query editor), Runbooks | ad-hoc SSMS sessions, S3 clients, tribal knowledge |
 | **C4** (Phase 4) | Identity & secrets, Access grants | standing admin rights |
 | **C5** (Phase 5) | Security (Posture, Alerts, Vulnerabilities, Evidence), ML, Capacity & cost | manual audit evidence, spreadsheet cost guesses |

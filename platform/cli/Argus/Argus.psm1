@@ -1,4 +1,4 @@
-# Argus — PowerShell client for the Argus Console API (signed; in the WDAC policy).
+# Argus: PowerShell client for the Argus Console API (signed; in the WDAC policy).
 $script:BaseUrl = $env:ARGUS_URL ?? 'https://console.zaraatdost.pk/api/v1'
 $script:Token   = $null
 

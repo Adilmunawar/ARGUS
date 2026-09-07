@@ -1,4 +1,4 @@
-# ADR-0008 — SQL Server stays; PostgreSQL + PostGIS added
+# ADR-0008: SQL Server stays; PostgreSQL + PostGIS added
 
 **Context.** `umairv3_db` is live under the surveyor mobile apps, uses tuned stored procedures returning multiple result sets, SQL geometry types, and HMAC password hashes shared with the apps. It cannot be migrated as a project prerequisite. The ML pipelines and the parcel/STAC catalogue want a spatial database with an open licence.
 

@@ -1,4 +1,4 @@
-# ADR-0031 — SQL Server back to FULL recovery *(Proposed)*
+# ADR-0031: SQL Server back to FULL recovery *(Proposed)*
 
 **Context.** `umairv3_db` was moved to SIMPLE recovery outside the Mills project in Aug 2026 because the log had grown to 466 GB with no log backups. The owner's standing ruling (D14) was FULL.
 

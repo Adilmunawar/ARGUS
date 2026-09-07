@@ -10,4 +10,4 @@ labels: decision
 
 **What you would do instead, and what that costs:**
 
-**What evidence would settle it** — a lab result, a benchmark, a vendor answer:
+**What evidence would settle it**, a lab result, a benchmark, a vendor answer:

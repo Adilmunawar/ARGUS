@@ -1,4 +1,4 @@
-# ADR-0030 — Mobile-app password scheme frozen; AD FS fronts the web
+# ADR-0030: Mobile-app password scheme frozen; AD FS fronts the web
 
 **Context.** `DECISIONS.md` in the Mills repo: passwords are HMAC-SHA512, written and read in the legacy scheme, shared with the surveyor apps; a rehash locks the apps out.
 

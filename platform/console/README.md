@@ -7,8 +7,8 @@ Conventions are the Mills dashboard's: bare camelCase records, RFC 9457 ProblemD
 ```
 src/
   Argus.Console.Api/       Program.cs · Features/{Overview,Apps,Deployments,Storage,Databases,Secrets,Identity,Hosts,Security,Ml,Runbooks,Audit}
-  Argus.Console.Web/       Next.js app — (app)/overview, apps, deployments, storage, databases, secrets, identity, hosts, security, ml, runbooks, audit
-  Argus.Reconciler/        Reconciler stateful service — Model/, Readers/{ServiceFabric,HyperV,SeaweedFS,OpenBao,Ad,Dsc,OpnSense}, Appliers/, Planner.cs
+  Argus.Console.Web/       Next.js app: (app)/overview, apps, deployments, storage, databases, secrets, identity, hosts, security, ml, runbooks, audit
+  Argus.Reconciler/        Reconciler stateful service: Model/, Readers/{ServiceFabric,HyperV,SeaweedFS,OpenBao,Ad,Dsc,OpnSense}, Appliers/, Planner.cs
   Argus.Shared/            Records shared by API and reconciler
 tests/
 ```

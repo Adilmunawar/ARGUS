@@ -1,4 +1,4 @@
-# sql-01 — SQL Server 2022 AG primary. Shielded Generation 2 VM on cluster argus-hvc-a.
+# sql-01: SQL Server 2022 AG primary. Shielded Generation 2 VM on cluster argus-hvc-a.
 module "sql_01" {
   source     = "./modules/shielded-vm"
   name       = "sql-01"

@@ -1,4 +1,4 @@
-# ADR-0006 — No container registry in v1
+# ADR-0006: No container registry in v1
 
 **Context.** With guest executables (ADR-0005) there are no images to store.
 

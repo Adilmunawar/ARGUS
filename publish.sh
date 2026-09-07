@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# publish.sh — create the GitHub repository, push, release, and protect main.
+# publish.sh: create the GitHub repository, push, release, and protect main.
 #
 #   cd argus
 #   ./publish.sh                    # public  (default)
@@ -22,7 +22,7 @@ NAME="argus"
 VISIBILITY="--public"
 WEBSITE="https://adilmunawar.vercel.app"
 
-DESCRIPTION="Sovereign, Windows-first private cloud replacing AWS on owned hardware. 34 architecture decisions, a full application–infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
+DESCRIPTION="Sovereign, Windows-first private cloud replacing AWS on owned hardware. 34 architecture decisions, a full application-infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
 
 TOPICS="private-cloud,self-hosted,windows-server,hyper-v,service-fabric,active-directory,gitops,infrastructure-as-code,architecture-decision-records,zero-trust,devops,aws-alternative,cloud-migration,disaster-recovery,openbao,seaweedfs,powershell,dotnet,design-system,accessibility"
 
@@ -41,7 +41,7 @@ die() { printf '\n\033[1;31m✗\033[0m %s\n' "$1" >&2; exit 1; }
 
 # ── Preflight ────────────────────────────────────────────────────────────────
 command -v git >/dev/null || die "git is not installed."
-command -v gh  >/dev/null || die "GitHub CLI is not installed. https://cli.github.com — then run: gh auth login"
+command -v gh  >/dev/null || die "GitHub CLI is not installed. https://cli.github.com, then run: gh auth login"
 [[ -d .git ]] || die "Run this from inside the argus repository."
 gh auth status >/dev/null 2>&1 || die "Not signed in. Run: gh auth login"
 
@@ -51,7 +51,7 @@ say "Checking for credentials before anything leaves this machine"
 if git log -p --all 2>/dev/null | grep -qE 'ghp_[A-Za-z0-9]{30,}|sk-ant-[A-Za-z0-9-]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'; then
   die "A credential-shaped string is in the git history. Do not push. Remove it, rewrite the history, and rotate the credential."
 fi
-echo "  clean — nothing credential-shaped in $(git rev-list --count HEAD) commits"
+echo "  clean: nothing credential-shaped in $(git rev-list --count HEAD) commits"
 
 if command -v node >/dev/null && [[ -f platform/console/prototype/tests/run-tests.js ]]; then
   say "Running the console test suite"
@@ -65,7 +65,7 @@ read -rp "  Continue? [y/N] " ok
 
 # ── Create ───────────────────────────────────────────────────────────────────
 if gh repo view "$OWNER/$NAME" >/dev/null 2>&1; then
-  say "Repository already exists — adding it as a remote"
+  say "Repository already exists, adding it as a remote"
   git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$OWNER/$NAME.git"
 else
   say "Creating the repository"
@@ -105,7 +105,7 @@ gh api -X PUT "repos/$OWNER/$NAME/branches/main/protection" \
   && gh api -X POST "repos/$OWNER/$NAME/branches/main/protection/required_signatures" \
        -H "Accept: application/vnd.github+json" >/dev/null 2>&1 \
   && echo "  protected" \
-  || echo "  Skipped — branch protection needs a paid plan on private repos. Set it in Settings → Branches."
+  || echo "  Skipped: branch protection needs a paid plan on private repos. Set it in Settings → Branches."
 
 # Free for public repositories, and it would have caught a pasted token.
 gh api -X PATCH "repos/$OWNER/$NAME" \
@@ -118,5 +118,5 @@ echo "  https://github.com/$OWNER/$NAME"
 echo "  Actions: https://github.com/$OWNER/$NAME/actions"
 echo
 echo "  The validate workflow runs on this push. If it is red, it is almost"
-echo "  certainly the Playwright browser install on the runner — check the"
+echo "  certainly the Playwright browser install on the runner: check the"
 echo "  'console' job before assuming a real failure."

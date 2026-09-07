@@ -1,4 +1,4 @@
-# ADR-0009 — Garnet for caching
+# ADR-0009: Garnet for caching
 
 **Context.** The Mills API holds three in-process caches (boundary, map geometry, report). Scaling to multiple instances needs an external cache. Redis relicensed in 2024; Valkey has no Windows build.
 

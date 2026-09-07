@@ -1,18 +1,18 @@
-# ZD Cloud — Master Implementation Plan
+# ZD Cloud: Master Implementation Plan
 
 **A sovereign, self-hosted cloud platform for Zaraat Dost, built from the best open-source infrastructure on GitHub, replacing AWS end to end.**
 
-Prepared 7 September 2026 · for Adil Munawar, Zaraat Dost (Pvt.) Ltd.
+Prepared 7 September 2026 for Zaraat Dost (Pvt.) Ltd.
 
 ---
 
 ## 0. Read this first
 
-Three things I need to say before the plan, because they shape every decision in it.
+Three things frame every decision in this plan and belong before it.
 
-**"All of AWS" is the wrong target.** AWS has ~240 services. Zaraat Dost uses, by my audit of the Mills repo and what I know of the ML pipelines, about **14 capability areas**. A platform that tries to replicate 240 services is a platform that ships in never. A platform that replicates the 14 you use, brilliantly, with room to add the next 10, ships in a quarter and is *more* robust because there is less of it to fail. This plan targets the 14, and is designed so the 15th is an afternoon of YAML rather than a project.
+**"All of AWS" is the wrong target.** AWS has ~240 services. Zaraat Dost uses, on an audit of the Mills repository and the ML pipelines, about **14 capability areas**. A platform that tries to replicate 240 services is a platform that ships in never. A platform that replicates the 14 you use, brilliantly, with room to add the next 10, ships in a quarter and is *more* robust because there is less of it to fail. This plan targets the 14, and is designed so the 15th is an afternoon of YAML rather than a project.
 
-**"Most advanced" has to mean something measurable.** I have written this plan against numbers, not adjectives:
+**"Most advanced" has to mean something measurable.** This plan is written against numbers, not adjectives:
 
 | Property | Target |
 |---|---|
@@ -27,7 +27,7 @@ If a component in this plan does not move one of those numbers, it is not in thi
 
 **The operational burden is real and must be staffed.** AWS's price includes people you never see: the ones replacing disks at 3 a.m. and patching hypervisors. Getting off AWS means hiring or training for that. Section 9 is honest about it. If that section is not acceptable, the right plan is a *hybrid* (Section 10), not a full exit.
 
-One correction to my earlier compose file: it used MinIO. **MinIO's community edition was archived in February 2026** — no more security patches, no prebuilt binaries, and commercial use without an AIStor licence is a legal exposure. This plan uses SeaweedFS instead and treats MinIO as retired.
+One correction to the earlier compose file, which used MinIO. **MinIO's community edition was archived in February 2026**: no more security patches, no prebuilt binaries, and commercial use without an AIStor licence is a legal exposure. This plan uses SeaweedFS instead and treats MinIO as retired.
 
 ---
 
@@ -62,7 +62,7 @@ Not on this list, because it will not be replaced: **Google Earth Engine** (crop
 
 **Cozystack** as the platform substrate, on **Talos Linux**, on your own servers, in **two sites**, with a curated set of operators on top.
 
-Cozystack is a CNCF Sandbox project that turns bare-metal servers into a private cloud: managed Kubernetes clusters, virtual machines, databases, object storage, load balancers and GPU workloads, from one Kubernetes-native REST API. v1.6.0 shipped in July 2026 with Talos-based tenant workers, tenant-controlled OIDC, a SecurityGroup firewall API and hierarchical quotas. It is the closest thing on GitHub to "AWS on your metal", and — critically — every piece inside it is standard upstream (Talos, KubeVirt, FluxCD, VictoriaMetrics, LINSTOR/Blockstor, Cilium/Kube-OVN), so if the project ever stalled you would keep running the same components without it.
+Cozystack is a CNCF Sandbox project that turns bare-metal servers into a private cloud: managed Kubernetes clusters, virtual machines, databases, object storage, load balancers and GPU workloads, from one Kubernetes-native REST API. v1.6.0 shipped in July 2026 with Talos-based tenant workers, tenant-controlled OIDC, a SecurityGroup firewall API and hierarchical quotas. It is the closest thing on GitHub to "AWS on your metal", and, critically, every piece inside it is standard upstream (Talos, KubeVirt, FluxCD, VictoriaMetrics, LINSTOR/Blockstor, Cilium/Kube-OVN), so if the project ever stalled you would keep running the same components without it.
 
 Why not OpenStack? It *is* the traditional "private AWS", and it is enormous: a dozen interlocking services, a specialist ops team, and a Kubernetes-on-top story you would still have to build. For a team your size it is the wrong bet.
 
@@ -79,10 +79,10 @@ Why not plain Proxmox + k3s? Perfectly viable, and it is the fallback (2.4). But
               └─────────────┬─────────────┘
                             │
    ┌────────────────────────┴───────────────────────────────────────────┐
-   │  SITE A — Lahore (primary)                                          │
+   │  SITE A, Lahore (primary)                                          │
    │                                                                      │
    │   ┌──────────────── Cozystack management cluster (Talos) ─────────┐ │
-   │   │  3 × control-plane/storage nodes    1–2 × GPU nodes            │ │
+   │   │  3 × control-plane/storage nodes    1-2 × GPU nodes            │ │
    │   │                                                                 │ │
    │   │  Tenant: zd-prod ─────┐  Tenant: zd-ml ──────┐  Tenant: zd-dev │ │
    │   │   • Mills API/Web/GW  │   • Ray cluster       │   • per-branch  │ │
@@ -100,51 +100,51 @@ Why not plain Proxmox + k3s? Perfectly viable, and it is the fallback (2.4). But
    └──────────────────────────────┬───────────────────────────────────────┘
                                   │  WireGuard site-to-site (encrypted, always on)
    ┌──────────────────────────────┴───────────────────────────────────────┐
-   │  SITE B — DR (different building / city)                             │
-   │   1–2 nodes · Garage (S3, object-locked) · warm SQL Server replica · │
+   │  SITE B: DR (different building / city)                             │
+   │   1-2 nodes · Garage (S3, object-locked) · warm SQL Server replica · │
    │   Velero/pgBackRest targets · can boot zd-prod from backup in ≤ 8 h  │
    └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 2.3 Layer map with chosen repositories
 
-Every row: the AWS service it replaces, the GitHub project, why this one over the alternatives, and the licence (because 2023–2026 taught everyone that licences change).
+Every row: the AWS service it replaces, the GitHub project, why this one over the alternatives, and the licence (because 2023-2026 taught everyone that licences change).
 
-#### Layer 0 — Host OS and virtualisation
+#### Layer 0: Host OS and virtualisation
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
-| Node OS | **siderolabs/talos** | Immutable, API-only Linux built for Kubernetes. No SSH, no shell, no package manager — the attack surface of a router. Secure Boot + TPM-backed disk encryption. Upgrades are atomic and rollback-able. | MPL-2.0 |
+| Node OS | **siderolabs/talos** | Immutable, API-only Linux built for Kubernetes. No SSH, no shell, no package manager: the attack surface of a router. Secure Boot + TPM-backed disk encryption. Upgrades are atomic and rollback-able. | MPL-2.0 |
 | VMs for Windows (SQL Server, legacy API) | **kubevirt/kubevirt** (bundled in Cozystack) | Windows VMs scheduled beside containers on the same cluster, same storage, same network policy, same backups. | Apache-2.0 |
 | Fallback hypervisor (Option B only) | **proxmox** | If Cozystack is rejected in the pilot, Proxmox VE + Talos VMs is the conservative path. | AGPL-3.0 |
 
-#### Layer 1 — Networking and edge
+#### Layer 1: Networking and edge
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
 | Edge firewall / router | **opnsense/core** | HA pair (CARP), Suricata IDS/IPS, WireGuard, GeoIP blocking, traffic shaping. Replaces the EC2 security group *and* the missing perimeter. | BSD-2 |
 | Collaborative threat intel | **crowdsecurity/crowdsec** | Bans IPs seen attacking anyone in the network; feeds OPNsense. Replaces AWS WAF's reputation lists. | MIT |
-| CNI, network policy, encryption | **cilium/cilium** | eBPF datapath (fastest CNI), L3–L7 NetworkPolicy, WireGuard node-to-node encryption, Hubble flow observability. Every "who talked to whom" question answerable. | Apache-2.0 |
+| CNI, network policy, encryption | **cilium/cilium** | eBPF datapath (fastest CNI), L3-L7 NetworkPolicy, WireGuard node-to-node encryption, Hubble flow observability. Every "who talked to whom" question answerable. | Apache-2.0 |
 | Load balancer IPs on bare metal | **metallb/metallb** or Cozystack's built-in | Replaces ALB/NLB at L4. | Apache-2.0 |
 | Ingress / API gateway | **envoyproxy/gateway** (Gateway API) | Envoy is what AWS ALB and most service meshes are built on. HTTP/3, rate limiting, JWT validation at the edge, WAF via Coraza. | Apache-2.0 |
 | WAF | **corazawaf/coraza** | OWASP CRS engine, embeds in Envoy. Replaces AWS WAF. | Apache-2.0 |
 | Certificates | **cert-manager/cert-manager** + **smallstep/certificates** (internal CA) | Let's Encrypt at the edge; a private ACME CA for every internal service. Replaces ACM. Also solves the Windows-cert-store problem in the gateway. | Apache-2.0 |
 | Admin / developer access | **juanfont/headscale** (self-hosted Tailscale control plane) | Identity-bound WireGuard mesh. No VPN appliance, no open ports for admin. Replaces bastion hosts + Session Manager. | BSD-3 |
 
-#### Layer 2 — Storage
+#### Layer 2: Storage
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
 | Block storage (EBS) | **Cozystack Blockstor / LINSTOR** (bundled) or **rook/rook** (Ceph) | Blockstor: LVM/ZFS backends, DRBD replication, LINSTOR-compatible API, open-sourced by the Cozystack team in 2026. Choose Rook-Ceph only if you go past ~6 nodes or need unified block+file+object from one system. | Apache-2.0 |
-| Object storage (S3) — primary | **seaweedfs/seaweedfs** | Apache-2.0, ~30 K stars, weekly releases, purpose-built for **many small objects** (your 1.16 M survey pictures are exactly its sweet spot), S3 API + lifecycle policies + erasure coding for warm data, mature Helm chart. | Apache-2.0 |
-| Object storage (S3) — DR site | **deuxfleurs-org/garage** | Designed for small clusters over unreliable links, built-in multi-site replication, tiny resource footprint. The ideal off-site target. | AGPL-3.0 (fine: you are not distributing it) |
+| Object storage (S3): primary | **seaweedfs/seaweedfs** | Apache-2.0, ~30 K stars, weekly releases, purpose-built for **many small objects** (your 1.16 M survey pictures are exactly its sweet spot), S3 API + lifecycle policies + erasure coding for warm data, mature Helm chart. | Apache-2.0 |
+| Object storage (S3): DR site | **deuxfleurs-org/garage** | Designed for small clusters over unreliable links, built-in multi-site replication, tiny resource footprint. The ideal off-site target. | AGPL-3.0 (fine: you are not distributing it) |
 | Shared POSIX filesystem (EFS) | **CephFS** via Rook, or SeaweedFS FUSE mount | For the legacy `C:\IIS_Deployments\TempLocationSurvey` path pattern until the app writes to S3 directly. | LGPL / Apache-2.0 |
 | Kubernetes backup (AWS Backup) | **vmware-tanzu/velero** | Snapshots PVs + manifests to S3 (SeaweedFS → Garage). Restore a whole namespace. | Apache-2.0 |
 | File-level backup engine | **kopia/kopia** (or **restic/restic**) | Deduplicated, encrypted, content-addressed. Used by Velero under the hood and directly for the survey-picture tree. | Apache-2.0 / BSD-2 |
 
 **Object-lock everywhere backups land.** Both SeaweedFS and Garage support WORM / object-lock semantics. Backups are written by a credential that can `PUT` but never `DELETE`. Ransomware that gets the API's credentials cannot touch yesterday's backup.
 
-#### Layer 3 — Data services
+#### Layer 3: Data services
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
@@ -155,18 +155,18 @@ Every row: the AWS service it replaces, the GitHub project, why this one over th
 | Analytics DB (Redshift / Athena) | **ClickHouse/ClickHouse** | Column store for season-over-season harvest analytics, surveyor productivity, per-parcel time series of Sentinel indices. Sub-second over billions of rows. | Apache-2.0 |
 | Lakehouse (optional, Glue/Athena) | **apache/iceberg** tables on SeaweedFS + **trinodb/trino** | Only if the ML feature tables outgrow Postgres. Defer. | Apache-2.0 |
 
-#### Layer 4 — Identity, secrets, trust
+#### Layer 4: Identity, secrets, trust
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
-| Human identity, SSO, MFA (Cognito, IAM users) | **keycloak/keycloak** | CNCF, OIDC + SAML, TOTP/WebAuthn/passkeys, fine-grained roles, user federation. Every dashboard, Grafana, Harbor, Forgejo, JupyterHub logs in through it. The Mills API keeps minting its own JWTs for the mobile apps (the password-scheme constraint) but validates Keycloak tokens for the web — a bridge, not a rewrite. | Apache-2.0 |
+| Human identity, SSO, MFA (Cognito, IAM users) | **keycloak/keycloak** | CNCF, OIDC + SAML, TOTP/WebAuthn/passkeys, fine-grained roles, user federation. Every dashboard, Grafana, Harbor, Forgejo, JupyterHub logs in through it. The Mills API keeps minting its own JWTs for the mobile apps (the password-scheme constraint) but validates Keycloak tokens for the web, a bridge, not a rewrite. | Apache-2.0 |
 | Secrets, encryption keys, PKI (Secrets Manager, KMS, ACM Private CA) | **openbao/openbao** | Linux Foundation, MPL-2.0 fork of Vault, API-compatible; v2.6 (Aug 2026) added per-namespace sealing. Dynamic short-lived DB credentials (no more `sa`), transit encryption for the survey pictures, auto-unseal with the TPM. Directly resolves OPEN-DECISIONS D16. | MPL-2.0 |
 | Secrets → Kubernetes | **external-secrets/external-secrets** | Syncs OpenBao into Secrets; apps never see OpenBao directly. | Apache-2.0 |
 | Secrets in Git (for GitOps) | **getsops/sops** + **FiloSottile/age** | Encrypted config committed safely. Never again a `sa` password in git history. | MPL-2.0 / BSD-3 |
 | Workload identity (IAM roles for services) | **spiffe/spire** (phase 5, optional) | Cryptographic identity for every pod; mTLS without shared secrets. | Apache-2.0 |
 | Password manager for the team | **dani-garcia/vaultwarden** | Bitwarden-compatible server. Humans stop putting keys in WhatsApp. | AGPL-3.0 |
 
-#### Layer 5 — Compute, delivery, registry
+#### Layer 5: Compute, delivery, registry
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
@@ -177,7 +177,7 @@ Every row: the AWS service it replaces, the GitHub project, why this one over th
 | Continuous deployment (CodeDeploy) | **fluxcd/flux2** (bundled with Cozystack) or **argoproj/argo-cd** | GitOps: the cluster's state is a Git repo; a merge is a deploy; a revert is a rollback. `update.ps1`'s stop-rename-swap-healthcheck-rollback dance becomes a Kubernetes rolling update with the same health gate. | Apache-2.0 |
 | Developer platform portal (optional) | **backstage/backstage** | Service catalogue + golden-path templates once you have > 10 services. Phase 6. | Apache-2.0 |
 
-#### Layer 6 — ML and geospatial platform
+#### Layer 6: ML and geospatial platform
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
@@ -187,23 +187,23 @@ Every row: the AWS service it replaces, the GitHub project, why this one over th
 | Model serving (SageMaker Endpoints) | **kserve/kserve** | Autoscaling inference endpoints on Knative; canary rollouts; the parcel classifier as a versioned HTTP endpoint the dashboard calls. | Apache-2.0 |
 | Notebooks (SageMaker Studio) | **jupyterhub/zero-to-jupyterhub-k8s** | Keycloak login, per-user GPU quota, S3 mounted. | BSD-3 |
 | Pipeline orchestration (Glue / Step Functions for data) | **dagster-io/dagster** | Asset-based: "the 15-day feature table for Kishtawar, season 2026-27" is a versioned asset with lineage, freshness SLAs and alerts when it is stale. Better fit than Airflow for data assets. | Apache-2.0 |
-| Satellite catalogue (no AWS equivalent — the sovereign replacement for hitting Copernicus/Earth Engine live) | **stac-utils/stac-fastapi** + **stac-utils/pgstac** | Local STAC index over a mirrored Sentinel-1/2 archive for Punjab and Sindh. Pipelines query "scenes over this AOI in this window" locally. | MIT |
+| Satellite catalogue (no AWS equivalent: the sovereign replacement for hitting Copernicus/Earth Engine live) | **stac-utils/stac-fastapi** + **stac-utils/pgstac** | Local STAC index over a mirrored Sentinel-1/2 archive for Punjab and Sindh. Pipelines query "scenes over this AOI in this window" locally. | MIT |
 | Raster tiles (no AWS equivalent) | **developmentseed/titiler** | Dynamic COG tiling: NDVI over a mauza rendered on demand for the dashboard map. | MIT |
 | Vector tiles from PostGIS | **maplibre/martin** | Parcel boundaries as MVT straight from PostGIS; the map stops shipping megabyte GeoJSON. | Apache-2.0 |
 | Sentinel mirror | **CDSE `openeo`/S3 pull via `eodag`** into SeaweedFS as COGs | Pull once, serve forever. On Pakistani bandwidth this alone changes pipeline latency from hours to seconds. | Apache-2.0 |
 
-#### Layer 7 — Observability
+#### Layer 7: Observability
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
 | Metrics (CloudWatch Metrics) | **VictoriaMetrics/VictoriaMetrics** (bundled in Cozystack) | Prometheus-compatible, ~10× less RAM and disk. | Apache-2.0 |
 | Logs (CloudWatch Logs) | **grafana/loki** | Labels not full-text index → cheap at volume. Every WinSW log file, every pod, every VM. | AGPL-3.0 |
 | Traces (X-Ray) | **grafana/tempo** + **open-telemetry/opentelemetry-collector** | .NET and Next.js both ship OTel natively. See a slow dashboard request across gateway → API → SQL. | AGPL-3.0 / Apache-2.0 |
-| Dashboards + alerting | **grafana/grafana** + Alertmanager → **caronc/apprise** | One login (Keycloak). Alerts to WhatsApp / Telegram / SMS — the channels your operations people actually watch. | AGPL-3.0 |
+| Dashboards + alerting | **grafana/grafana** + Alertmanager → **caronc/apprise** | One login (Keycloak). Alerts to WhatsApp / Telegram / SMS: the channels your operations people actually watch. | AGPL-3.0 |
 | Synthetic checks (Route 53 health checks) | **louislam/uptime-kuma** at Site B | Watches Site A from the outside. | MIT |
 | Status page | **Uptime Kuma** built-in | For mill officers when something is down. | MIT |
 
-#### Layer 8 — Security controls
+#### Layer 8: Security controls
 
 | Need | Choice | Why | Licence |
 |---|---|---|---|
@@ -213,9 +213,9 @@ Every row: the AWS service it replaces, the GitHub project, why this one over th
 | Supply chain (Signer) | **sigstore/cosign** + SBOMs (**anchore/syft**) | Every image signed in CI; Kyverno refuses unsigned images. Provenance for every binary in production. | Apache-2.0 |
 | SIEM / host intrusion / compliance (Security Hub) | **wazuh/wazuh** | Agents on the Windows VMs and the edge; file-integrity monitoring; CIS benchmark checks; PCI/ISO mappings. Wazuh is where "advanced security" becomes evidence you can hand an auditor. | GPL-2.0 |
 | Kubernetes hardening baseline | **aquasecurity/kube-bench** (CIS) + Talos defaults | Talos ships hardened; kube-bench proves it stays so. | Apache-2.0 |
-| DDoS / abuse | CrowdSec + Envoy rate limits + OPNsense shaping | Layered. | — |
+| DDoS / abuse | CrowdSec + Envoy rate limits + OPNsense shaping | Layered. | - |
 
-#### Layer 9 — The AWS Console
+#### Layer 9: The AWS Console
 
 | Need | Choice | Why |
 |---|---|---|
@@ -267,12 +267,12 @@ The word "advanced" is earned here or nowhere. This is a zero-trust design; the 
 
 ## 4. Performance architecture
 
-"Fastest and smoothest" — where the milliseconds actually go, and what each choice buys.
+"Fastest and smoothest": where the milliseconds actually go, and what each choice buys.
 
 | Bottleneck today | Change | Expected effect |
 |---|---|---|
 | Sentinel scenes pulled from Copernicus over Pakistani internet on every run | Local COG mirror in SeaweedFS + STAC index | Pipeline start: hours → seconds; reproducible |
-| Multi-MB boundary GeoJSON per page load | Martin vector tiles from PostGIS + TiTiler for rasters + Envoy edge cache | Map first paint: 3–8 s → < 500 ms on office links |
+| Multi-MB boundary GeoJSON per page load | Martin vector tiles from PostGIS + TiTiler for rasters + Envoy edge cache | Map first paint: 3-8 s → < 500 ms on office links |
 | Three in-process caches pinned to one API instance | Valkey; API becomes stateless; 3 replicas behind Envoy | Horizontal scale; zero-downtime deploys; the hourly precompute no longer competes with requests |
 | Sync shapefile ingest / exports blocking a request for minutes | NATS JetStream job queue + Argo Workflows workers | Instant 202 response; progress in the UI; retries |
 | Single Windows box for everything | Dedicated NVMe for SQL Server VM, `MultipleActiveResultSets=False` preserved, read replica at Site B for reports | Report queries stop hurting the surveyor apps |
@@ -286,32 +286,32 @@ The word "advanced" is earned here or nowhere. This is a zero-trust design; the 
 
 Prices are approximate USD for reference-class hardware as of mid-2026; verify with local vendors (Lahore/Karachi pricing varies ±25 %). Both tiers assume you already have rack space, cooling and a generator.
 
-### Tier 1 — Pilot / starter (Site A only, ~3 months to production)
+### Tier 1: Pilot / starter (Site A only, ~3 months to production)
 
 | Qty | Item | Spec | Est. |
 |---|---|---|---|
-| 3 | Compute/storage nodes | 1U, AMD EPYC 9004 32-core, 256 GB ECC, 2 × 3.84 TB NVMe (OS + hot data), 4 × 20 TB SATA (SeaweedFS warm), 2 × 25 GbE, TPM 2.0, IPMI | $9–12 k each |
-| 1 | GPU node | 2U, EPYC 24-core, 256 GB, 2 × NVIDIA L40S 48 GB (or RTX 6000 Ada), 4 × 3.84 TB NVMe, 2 × 25 GbE | $22–28 k |
-| 1 | Switch | 48 × 10/25 GbE SFP28 + 4 × 100 GbE (e.g. Mikrotik CRS520 / used Mellanox SN2410) | $3–6 k |
+| 3 | Compute/storage nodes | 1U, AMD EPYC 9004 32-core, 256 GB ECC, 2 × 3.84 TB NVMe (OS + hot data), 4 × 20 TB SATA (SeaweedFS warm), 2 × 25 GbE, TPM 2.0, IPMI | $9-12 k each |
+| 1 | GPU node | 2U, EPYC 24-core, 256 GB, 2 × NVIDIA L40S 48 GB (or RTX 6000 Ada), 4 × 3.84 TB NVMe, 2 × 25 GbE | $22-28 k |
+| 1 | Switch | 48 × 10/25 GbE SFP28 + 4 × 100 GbE (e.g. Mikrotik CRS520 / used Mellanox SN2410) | $3-6 k |
 | 2 | Edge firewalls | Small x86 with 4 × 10 GbE for OPNsense HA | $1.2 k each |
-| 1 | UPS | 10 kVA online double-conversion + 30 min runtime, NUT-managed graceful shutdown | $5–8 k |
-| — | Cabling, PDUs, rails, spares (2 NVMe, 2 HDD, 1 PSU) | | $3 k |
-| | **Tier 1 total** | | **≈ $60–80 k** |
+| 1 | UPS | 10 kVA online double-conversion + 30 min runtime, NUT-managed graceful shutdown | $5-8 k |
+| - | Cabling, PDUs, rails, spares (2 NVMe, 2 HDD, 1 PSU) | | $3 k |
+| | **Tier 1 total** | | **≈ $60-80 k** |
 
-### Tier 2 — Production + DR (adds to Tier 1 over 6–9 months)
+### Tier 2: Production + DR (adds to Tier 1 over 6-9 months)
 
 | Qty | Item | Est. |
 |---|---|---|
-| 2 | Additional compute/storage nodes (Site A → 5, allows two failures) | $20–24 k |
-| 1 | Second GPU node | $22–28 k |
-| 2 | Site B nodes (compute + 6 × 20 TB, Garage + SQL replica + Velero targets) | $14–18 k |
+| 2 | Additional compute/storage nodes (Site A → 5, allows two failures) | $20-24 k |
+| 1 | Second GPU node | $22-28 k |
+| 2 | Site B nodes (compute + 6 × 20 TB, Garage + SQL replica + Velero targets) | $14-18 k |
 | 1 | Site B switch, firewall, UPS | $8 k |
 | 1 | Dedicated fibre / point-to-point or business ISP at each site | recurring |
-| | **Tier 2 total** | **≈ $70–90 k** |
+| | **Tier 2 total** | **≈ $70-90 k** |
 
-Versus AWS: an equivalent always-on footprint (a Windows EC2, an r6i for SQL, 2 × g5/g6 GPU instances 30 % utilised, 30 TB S3 + egress, backups) runs roughly $4–7 k/month in ap-southeast-1. Tier 1 pays back in ~12–18 months; the GPU nodes pay back fastest because on-demand GPU hours are the most expensive thing AWS sells you.
+Versus AWS: an equivalent always-on footprint (a Windows EC2, an r6i for SQL, 2 × g5/g6 GPU instances 30 % utilised, 30 TB S3 + egress, backups) runs roughly $4-7 k/month in ap-southeast-1. Tier 1 pays back in ~12-18 months; the GPU nodes pay back fastest because on-demand GPU hours are the most expensive thing AWS sells you.
 
-**Power is the design constraint in Pakistan, not compute.** Budget the UPS and generator interconnect first. Talos and Cozystack tolerate ungraceful power loss (etcd, DRBD, SeaweedFS are all crash-consistent), but SQL Server on a VM does not love it — the NUT-triggered clean shutdown of the Windows VM must be tested before go-live.
+**Power is the design constraint in Pakistan, not compute.** Budget the UPS and generator interconnect first. Talos and Cozystack tolerate ungraceful power loss (etcd, DRBD, SeaweedFS are all crash-consistent), but SQL Server on a VM does not love it: the NUT-triggered clean shutdown of the Windows VM must be tested before go-live.
 
 ---
 
@@ -319,14 +319,14 @@ Versus AWS: an equivalent always-on footprint (a Windows EC2, an r6i for SQL, 2 
 
 Each phase has an exit criterion. Do not start the next until it is met. Total: **~9 months** to full exit, with AWS turned off at the end of Phase 5, not before.
 
-### Phase 0 — Pilot (weeks 1–6)
+### Phase 0: Pilot (weeks 1-6)
 
 Goal: prove Cozystack on your hardware, or reject it early for Option B.
 
 - Procure Tier 1. Rack, cable, IPMI reachable over Headscale.
 - Install Cozystack via PXE (talos-bootstrap). Three nodes, no GPU yet.
 - Create tenants `zd-dev`, `zd-prod`, `zd-ml`. Enable: SeaweedFS, CloudNativePG, KubeVirt, VictoriaMetrics/Grafana, Flux.
-- Deploy the `docker-compose.local.yml` stack from my previous deliverable **as Kubernetes manifests** in `zd-dev`: Mills API/Web/Gateway containers, SQL Server 2022 Developer on a KubeVirt Windows VM from a restored `umairv3_db` copy.
+- Deploy the earlier `docker-compose.local.yml` stack **as Kubernetes manifests** in `zd-dev`: Mills API/Web/Gateway containers, SQL Server 2022 Developer on a KubeVirt Windows VM from a restored `umairv3_db` copy.
 - Stand up Keycloak, OpenBao (auto-unseal via TPM), Harbor, Forgejo mirror of the GitHub repos with Actions runners inside the cluster.
 - Run the first-boot checklist from `DEPLOYMENT.md` against the cluster deployment.
 
@@ -334,7 +334,7 @@ Goal: prove Cozystack on your hardware, or reject it early for Option B.
 
 **Decision gate:** if Cozystack fights you (installation, VM networking, storage), switch to Option B (§2.4) before Phase 1. Two weeks of pain is data; six is a mistake.
 
-### Phase 1 — Storage and backups (weeks 7–10) — *first AWS cost disappears*
+### Phase 1, Storage and backups (weeks 7-10), *first AWS cost disappears*
 
 - SeaweedFS production buckets: `zd-survey-pictures`, `zd-rasters`, `zd-backups` (object-lock 35 d).
 - Migrate the 1.16 M survey pictures and the raster archive into SeaweedFS with `rclone`; keep the legacy path served via a FUSE mount until the API reads S3 natively.
@@ -344,7 +344,7 @@ Goal: prove Cozystack on your hardware, or reject it early for Option B.
 
 **Exit:** two independent, object-locked copies of every backup at two sites; drill report on file; `zd-daily-db-backups` on S3 set to read-only.
 
-### Phase 2 — Mills dashboard cutover (weeks 11–16)
+### Phase 2: Mills dashboard cutover (weeks 11-16)
 
 - Promote the Phase 0 deployment to `zd-prod`. Envoy Gateway with cert-manager (Let's Encrypt) on a new hostname, e.g. `mills.zaraatdost.pk`; keep `zdost.aoserv.com:8443` alive as a redirect for 90 days.
 - Externalise caches to Valkey; run 3 API replicas; move the hourly precompute to an Argo CronWorkflow.
@@ -355,7 +355,7 @@ Goal: prove Cozystack on your hardware, or reject it early for Option B.
 
 **Exit:** all dashboard traffic served from Site A for 2 weeks with 99.9 %; the EC2 Windows box is a warm standby only.
 
-### Phase 3 — ML and geospatial platform (weeks 15–24, overlaps Phase 2)
+### Phase 3: ML and geospatial platform (weeks 15-24, overlaps Phase 2)
 
 - Add the GPU node(s); GPU operator + HAMi.
 - JupyterHub, MLflow, Ray/KubeRay, KServe, Dagster in `zd-ml`.
@@ -365,7 +365,7 @@ Goal: prove Cozystack on your hardware, or reject it early for Option B.
 
 **Exit:** one full season's feature table regenerated end-to-end on-prem, matching the current outputs; training run on the L40S faster than your current best.
 
-### Phase 4 — Database and mobile apps (weeks 20–30)
+### Phase 4: Database and mobile apps (weeks 20-30)
 
 The riskiest phase; it touches the surveyor phones.
 
@@ -376,14 +376,14 @@ The riskiest phase; it touches the surveyor phones.
 
 **Exit:** no client anywhere references the AWS IP; AWS SQL box powered off for 30 days with no incident.
 
-### Phase 5 — DR and the AWS exit (weeks 28–34)
+### Phase 5: DR and the AWS exit (weeks 28-34)
 
 - Site B to full spec. Quarterly DR drill: fail Site A entirely, serve from Site B within 8 h, fail back.
 - Decommission AWS: snapshot the EC2 (kept 90 days), delete the bucket after Garage retention proves out, close the account.
 
 **Exit:** signed DR drill report; AWS invoice = $0.
 
-### Phase 6 — Hardening and audit (weeks 34–40)
+### Phase 6: Hardening and audit (weeks 34-40)
 
 - External penetration test (a Pakistani or regional firm; scope = the public edge + a "assumed breach" internal test).
 - Wazuh CIS/ISO 27001 control mapping; write the security policy documents against the evidence Wazuh and Kyverno already produce.
@@ -399,7 +399,7 @@ The riskiest phase; it touches the surveyor phones.
 | `54.251.99.28` hard-coded in deployed mobile apps | High | Surveyor apps break | Phase 4 DNS + forwarder; app release first; adoption metrics before cutover |
 | Cozystack is a Sandbox project with a small community | Medium | Slower support | Every component is upstream-standard; Option B exit path; pin versions; test upgrades in `zd-dev` |
 | Power quality / load shedding | High | Corruption, downtime | Online UPS, NUT graceful shutdown, generator ATS; all storage crash-consistent; SQL VM shutdown tested |
-| Team lacks Kubernetes depth | Medium | Slow Phase 0 | Hire one platform engineer (or contract) for Phases 0–2; the team already uses Claude Code — the GitOps repo is its natural interface |
+| Team lacks Kubernetes depth | Medium | Slow Phase 0 | Hire one platform engineer (or contract) for Phases 0-2; the team already uses Claude Code: the GitOps repo is its natural interface |
 | SQL Server licensing on-prem | Medium | Cost | Standard per-core for prod, Developer for everything else; plan the PostGIS migration |
 | Off-site bandwidth for ~3 TB of backups | Medium | Site B lags | Incremental (kopia/pgBackRest) after the first seed by physical disk; Garage tolerates flaky links by design |
 | Earth Engine remains external | Certain | "Sovereign" is partial | Phase 3's local Sentinel mirror + STAC makes 80 % of what GEE does for you local; keep GEE for the rest |
@@ -414,7 +414,7 @@ The riskiest phase; it touches the surveyor phones.
 |---|---|---|
 | Google Earth Engine | Petabyte planetary archive + compute; no local equivalent | Local Sentinel mirror + STAC + TiTiler for everything Punjab/Sindh; GEE only for ad-hoc global queries; key in OpenBao; egress only via an allow-listed proxy |
 | Anthropic API (Zaraat Dost AI) | The models are the product | Key in OpenBao; prompts and answers logged to Loki for audit; on-prem inference (vLLM on the L40S) as a fallback tier for the briefing feature if connectivity drops |
-| OpenRouteService | 2,000/day quota, external | Self-host **GIScience/openrouteservice** with the Pakistan OSM extract in Phase 3 — it is Apache-2.0 and the quota disappears |
+| OpenRouteService | 2,000/day quota, external | Self-host **GIScience/openrouteservice** with the Pakistan OSM extract in Phase 3: it is Apache-2.0 and the quota disappears |
 | GitHub | Public presence, the team's habit | Forgejo mirror is the build system of record; GitHub outage ≠ deploy outage |
 
 ---
@@ -425,7 +425,7 @@ What AWS was quietly doing for you, and who does it now:
 
 | Responsibility | Effort | Owner |
 |---|---|---|
-| Platform engineering (Cozystack, Talos, storage, network) | 1 FTE Phases 0–2, then 0.5 | New hire or contractor, then Adil/Zayan |
+| Platform engineering (Cozystack, Talos, storage, network) | 1 FTE Phases 0-2, then 0.5 | New hire or contractor, then Adil/Zayan |
 | On-call for the platform | Rota of 3, one week each | Adil, Zayan, +1 |
 | Security operations (Wazuh, Falco, Trivy triage, patching) | 0.25 FTE | Rotating, with Claude Code triage |
 | Backup/DR drills | 1 day/month + 2 days/quarter | Platform owner |
@@ -434,29 +434,29 @@ What AWS was quietly doing for you, and who does it now:
 
 **Skill-building plan:** two weeks of Talos + Cozystack hands-on in Phase 0 for the whole team; the GitOps repo *is* the documentation; runbooks live beside the manifests; every incident produces a runbook update. Claude Code, with a `zd-platform` plugin holding the runbooks and cluster conventions, turns "what do I do when Falco fires X" into a five-minute conversation.
 
-**Three-year TCO (rough):** hardware $150 k + one platform FTE $30–45 k/yr locally + power/connectivity $10 k/yr + SQL licences ≈ **$300–350 k** over 3 years, against AWS at $4–7 k/month ≈ $150–250 k *plus* the GPU hours you are currently not buying because they are too expensive. The financial case is decent but not overwhelming; **the real case is capability** (GPUs you actually use, data that never leaves the country, pipelines that run in seconds) **and control**.
+**Three-year TCO (rough):** hardware $150 k + one platform FTE $30-45 k/yr locally + power/connectivity $10 k/yr + SQL licences ≈ **$300-350 k** over 3 years, against AWS at $4-7 k/month ≈ $150-250 k *plus* the GPU hours you are currently not buying because they are too expensive. The financial case is decent but not overwhelming; **the real case is capability** (GPUs you actually use, data that never leaves the country, pipelines that run in seconds) **and control**.
 
 ---
 
 ## 10. If full exit is too much: the hybrid
 
-Do Phases 0–3 and stop. Keep SQL Server and the surveyor apps' endpoint on AWS. You get: local GPUs, local imagery, local S3, local CI, zero-trust security, real observability, and an AWS bill that shrinks by roughly 60 % — without ever touching the phones. Phase 4 can wait a year.
+Do Phases 0-3 and stop. Keep SQL Server and the surveyor apps' endpoint on AWS. You get: local GPUs, local imagery, local S3, local CI, zero-trust security, real observability, and an AWS bill that shrinks by roughly 60 %, without ever touching the phones. Phase 4 can wait a year.
 
 ---
 
 ## 11. Decisions I need from you
 
-1. **Cozystack vs Option B** — I recommend Cozystack with a hard two-week evaluation gate. Agree?
-2. **Site B location** — a second Zaraat Dost office, a partner mill's server room, or a rented rack in a Karachi datacentre? Each is fine; the choice changes the bandwidth plan.
-3. **Current AWS monthly spend** — I estimated; the real number sets the payback timeline.
-4. **SQL Server licence status on-prem** — do you hold Standard licences, or is this a new purchase?
-5. **Who is the platform engineer** — hire, contract, or Adil/Zayan with training time carved out?
-6. **Mobile app release cadence** — Phase 4 depends on shipping one release with a new DB endpoint.
+1. **Cozystack vs Option B**: I recommend Cozystack with a hard two-week evaluation gate. Agree?
+2. **Site B location**: a second Zaraat Dost office, a partner mill's server room, or a rented rack in a Karachi datacentre? Each is fine; the choice changes the bandwidth plan.
+3. **Current AWS monthly spend**: I estimated; the real number sets the payback timeline.
+4. **SQL Server licence status on-prem**: do you hold Standard licences, or is this a new purchase?
+5. **Who is the platform engineer**: hire, contract, or Adil/Zayan with training time carved out?
+6. **Mobile app release cadence**: Phase 4 depends on shipping one release with a new DB endpoint.
 7. **Appetite for the hybrid** (§10) as a checkpoint rather than an end state.
 
 ---
 
-## Appendix A — Full repository list
+## Appendix A: Full repository list
 
 | Layer | Repository |
 |---|---|
@@ -471,11 +471,11 @@ Do Phases 0–3 and stop. Keep SQL Server and the surveyor apps' endpoint on AWS
 | Security | github.com/kyverno/kyverno · github.com/falcosecurity/falco · github.com/aquasecurity/trivy · github.com/aquasecurity/trivy-operator · github.com/aquasecurity/kube-bench · github.com/sigstore/cosign · github.com/anchore/syft · github.com/wazuh/wazuh |
 | Console | github.com/headlamp-k8s/headlamp |
 
-## Appendix B — Option B (if Cozystack is rejected in Phase 0)
+## Appendix B: Option B (if Cozystack is rejected in Phase 0)
 
-Proxmox VE on each node → Talos Linux VMs for Kubernetes → Cilium → Rook-Ceph → the same operators from §2.3 installed by hand via Flux. Proxmox Backup Server replaces Velero for the Windows VMs. Roughly 3–4 extra weeks of assembly in Phase 0; identical from Phase 1 onward.
+Proxmox VE on each node → Talos Linux VMs for Kubernetes → Cilium → Rook-Ceph → the same operators from §2.3 installed by hand via Flux. Proxmox Backup Server replaces Velero for the Windows VMs. Roughly 3-4 extra weeks of assembly in Phase 0; identical from Phase 1 onward.
 
-## Appendix C — What I did not put in, and why
+## Appendix C: What I did not put in, and why
 
 - **Service mesh (Istio/Linkerd):** Cilium's mTLS and L7 policy cover 90 % of the value at 10 % of the complexity. Revisit if you pass 30 services.
 - **Kubeflow:** Ray + MLflow + KServe + Dagster is lighter and each piece is best-of-breed; Kubeflow's value is bundling, which Cozystack's tenancy already provides.

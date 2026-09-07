@@ -1,4 +1,4 @@
-# ADR-0003 — Two accepted Linux exceptions
+# ADR-0003: Two accepted Linux exceptions
 
 **Context.** Two capabilities have no Windows-native implementation worth using: fractional/shared GPU scheduling for ML, and a SIEM manager (Wazuh's manager runs on Linux; only its agents run on Windows).
 

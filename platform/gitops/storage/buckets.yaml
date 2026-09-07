@@ -24,7 +24,7 @@ buckets:
     objectLock: { mode: COMPLIANCE, days: 365 }
     replication: { siteB: true }
   - name: argus-backups
-    owner: gmsa-backup$      # policy: PutObject only — no Delete, no lock override
+    owner: gmsa-backup$      # policy: PutObject only, no Delete, no lock override
     readers: [gmsa-restore$]
     objectLock: { mode: COMPLIANCE, days: 35 }
     replication: { siteB: true, siteBObjectLockDays: 90 }

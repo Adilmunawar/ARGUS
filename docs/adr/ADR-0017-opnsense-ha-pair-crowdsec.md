@@ -1,4 +1,4 @@
-# ADR-0017 — OPNsense HA pair + CrowdSec
+# ADR-0017: OPNsense HA pair + CrowdSec
 
 **Decision.** Two OPNsense appliances per site (CARP failover): perimeter firewall, Suricata IDS/IPS, GeoIP policy, WireGuard site-to-site and admin VPN authenticated against AD via NPS (RADIUS) with MFA, traffic shaping. CrowdSec agents on Caddy and the Windows hosts feed decisions to an OPNsense bouncer.
 

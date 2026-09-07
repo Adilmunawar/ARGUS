@@ -1,4 +1,4 @@
-# ADR-0028 — Local Sentinel mirror + STAC
+# ADR-0028: Local Sentinel mirror + STAC
 
 **Decision.** Sentinel-1 GRD and Sentinel-2 L2A for the Punjab and Sindh AOIs pulled via `eodag` from the Copernicus Data Space, converted to COGs, stored in `argus-sentinel`, indexed in `pgstac` on PostgreSQL. TiTiler (Python, Windows) serves dynamic raster tiles; Martin (Rust, Windows build) serves parcel vector tiles from PostGIS.
 
