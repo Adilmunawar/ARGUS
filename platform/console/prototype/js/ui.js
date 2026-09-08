@@ -598,7 +598,14 @@
 
     function add() {
       var v = input.value.trim();
-      if (!v) return;
+      if (!v) {
+        // Pressing "Add filter" with an empty box used to return silently, so
+        // the control looked broken rather than unsatisfied. Say what is
+        // missing and put the cursor where it has to go.
+        input.focus();
+        A.announce('Type a value first, then add the filter');
+        return;
+      }
       var f = fields.filter(function (x) { return x.key === fieldSel.value; })[0];
       tokens.push({ key: f.key, label: f.label, value: v });
       input.value = '';
@@ -649,6 +656,16 @@
    *
    * items: [{label, onSelect, danger, disabled, title, hint}] or 'divider'.
    */
+  var openMenus = [];
+
+  /** Close every open overflow menu. Navigation calls this. */
+  UI.closeMenus = function () {
+    while (openMenus.length) {
+      var fn = openMenus.pop();
+      try { fn(); } catch (e) { /* already gone */ }
+    }
+  };
+
   function menu(items, opts) {
     opts = opts || {};
     var open = false, pop = null, offClick = null, onScroll = null;
@@ -682,6 +699,8 @@
     function close(refocus) {
       if (!open) return;
       open = false;
+      var ix = openMenus.indexOf(closeQuietly);
+      if (ix !== -1) openMenus.splice(ix, 1);
       trigger.setAttribute('aria-expanded', 'false');
       if (pop) { pop.remove(); pop = null; }
       if (offClick) { document.removeEventListener('mousedown', offClick, true); offClick = null; }
@@ -693,9 +712,12 @@
       if (refocus !== false) trigger.focus();
     }
 
+    function closeQuietly() { close(false); }
+
     function show(startAt) {
       if (open) return;
       open = true;
+      openMenus.push(closeQuietly);
       trigger.setAttribute('aria-expanded', 'true');
 
       pop = el('div.menu', { role: 'menu', 'aria-label': opts.label || 'More actions' },

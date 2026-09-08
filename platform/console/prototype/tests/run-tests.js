@@ -970,6 +970,95 @@ async function axeOn(page, label) {
       return ok && !document.querySelector('.dialog[role="dialog"]');
     }));
 
+  /* ------------------------------------------------------------- OVERLAY */
+
+  // A dialog and an overflow menu are both mounted on <body>, so neither is
+  // removed when main is cleared. Pressing a "g then key" shortcut while the
+  // shortcuts dialog was open left that dialog floating over a different
+  // screen, with body.has-dialog stuck on and an opener that no longer existed.
+  const strandedDialog = await page.evaluate(async () => {
+    window.location.hash = '#/overview';
+    await new Promise(r => setTimeout(r, 200));
+    window.ARGUS.shortcuts();
+    await new Promise(r => setTimeout(r, 200));
+    const opened = !!document.querySelector('.dialog[role="dialog"]');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
+    await new Promise(r => setTimeout(r, 300));
+    return {
+      opened,
+      route: window.ARGUS.state.route,
+      stillOpen: !!document.querySelector('.dialog[role="dialog"]'),
+      bodyClass: document.body.classList.contains('has-dialog')
+    };
+  });
+  rec('OVERLAY', 'navigating away closes an open dialog',
+    strandedDialog.opened && strandedDialog.route === 'apps' && !strandedDialog.stillOpen,
+    JSON.stringify(strandedDialog));
+  rec('OVERLAY', 'navigating away clears the has-dialog state on the body',
+    !strandedDialog.bodyClass, JSON.stringify(strandedDialog));
+
+  const strandedMenu = await page.evaluate(async () => {
+    window.location.hash = '#/apps';
+    await new Promise(r => setTimeout(r, 300));
+    const t = document.querySelector('.menubtn');
+    if (!t) return { err: 'no menu trigger' };
+    t.click();
+    await new Promise(r => setTimeout(r, 150));
+    const opened = !!document.querySelector('.menu[role="menu"]');
+    window.location.hash = '#/compute';
+    await new Promise(r => setTimeout(r, 300));
+    return { opened, stillOpen: !!document.querySelector('.menu[role="menu"]') };
+  });
+  rec('OVERLAY', 'navigating away closes an open overflow menu',
+    strandedMenu.opened && !strandedMenu.stillOpen, JSON.stringify(strandedMenu));
+
+  // Closing the same dialog twice must not pop the opener stack twice, or the
+  // dialog after it inherits an opener that belongs to something else.
+  const doubleClose = await page.evaluate(async () => {
+    window.location.hash = '#/overview';
+    await new Promise(r => setTimeout(r, 200));
+    const opener = document.getElementById('helpbtn');
+    opener.focus();
+    const h = window.ARGUS.dialog({ title: 'First' });
+    await new Promise(r => setTimeout(r, 150));
+    h.close(); h.close(); h.close();
+    await new Promise(r => setTimeout(r, 150));
+    const bell = document.getElementById('bell');
+    bell.focus();
+    const h2 = window.ARGUS.dialog({ title: 'Second' });
+    await new Promise(r => setTimeout(r, 150));
+    h2.close();
+    await new Promise(r => setTimeout(r, 150));
+    return { restored: document.activeElement === bell, active: document.activeElement.id };
+  });
+  rec('OVERLAY', 'closing a dialog more than once does not corrupt the next one',
+    doubleClose.restored, JSON.stringify(doubleClose));
+
+  // "Add filter" with an empty box returned silently, so the control looked
+  // broken rather than unsatisfied.
+  const emptyFilter = await page.evaluate(async () => {
+    window.location.hash = '#/apps';
+    await new Promise(r => setTimeout(r, 300));
+    const input = document.querySelector('.pf-input');
+    const add = Array.prototype.filter.call(document.querySelectorAll('#main .btn'),
+      b => /Add filter/i.test(b.textContent))[0];
+    if (!input || !add) return { err: 'filter controls not found' };
+    input.value = '';
+    document.getElementById('main').focus();
+    const tokensBefore = document.querySelectorAll('.pf-token').length;
+    add.click();
+    await new Promise(r => setTimeout(r, 150));
+    return {
+      tokensBefore,
+      tokensAfter: document.querySelectorAll('.pf-token').length,
+      focused: document.activeElement === input
+    };
+  });
+  rec('OVERLAY', 'adding an empty filter adds nothing and says why',
+    emptyFilter.tokensAfter === emptyFilter.tokensBefore && emptyFilter.focused,
+    JSON.stringify(emptyFilter));
+
   /* ---------------------------------------------------------------- MENU */
 
   await goto(page, 'apps');

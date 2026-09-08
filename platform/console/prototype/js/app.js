@@ -158,6 +158,7 @@
    * Focus is trapped, Escape closes, and focus returns to whatever opened it.
    */
   var openerStack = [];
+  var openDialogs = [];
   A.dialog = function (opts) {
     // A dialog opened from inside another dialog would otherwise capture <body>
     // as its opener, because the first dialog has already returned focus.
@@ -168,10 +169,18 @@
     openerStack.push(opener);
     var titleId = 'dlg-title-' + Math.random().toString(36).slice(2, 8);
 
+    var closed = false;
     function close() {
+      // Idempotent: navigation dismisses overlays, and the dialog that caused
+      // the navigation may already have closed itself on the way out. Popping
+      // the opener stack twice for one dialog corrupts the opener of the next.
+      if (closed) return;
+      closed = true;
       untrap();
       scrim.remove();
       openerStack.pop();
+      var ix = openDialogs.indexOf(handle);
+      if (ix !== -1) openDialogs.splice(ix, 1);
       if (!openerStack.length) document.body.classList.remove('has-dialog');
       if (opener && opener.focus && document.contains(opener)) opener.focus();
     }
@@ -195,7 +204,27 @@
     document.body.classList.add('has-dialog');
     var untrap = trapFocus(panel, close);
     panel.querySelector('h2').focus();
-    return { close: close, panel: panel };
+    var handle = { close: close, panel: panel };
+    openDialogs.push(handle);
+    return handle;
+  };
+
+  /**
+   * Close every open overlay.
+   *
+   * A dialog and an overflow menu both outlive the screen that opened them:
+   * the scrim and the menu are mounted on <body>, not inside main, so a
+   * keyboard shortcut pressed while the shortcuts dialog was open left that
+   * dialog floating over a completely different screen, with body.has-dialog
+   * stuck on and an opener pointing at a control that no longer existed.
+   */
+  A.dismissOverlays = function () {
+    var guard = 0;
+    while (openDialogs.length && guard++ < 20) {
+      var h = openDialogs[openDialogs.length - 1];
+      try { h.close(); } catch (e) { openDialogs.pop(); }
+    }
+    if (ui.closeMenus) ui.closeMenus();
   };
 
   /**
@@ -348,6 +377,7 @@
     // Treating it as one used to blank the page and announce "that screen does
     // not exist" to exactly the keyboard users the skip link exists for.
     if (window.location.hash && !/^#\//.test(window.location.hash)) return;
+    A.dismissOverlays();
     runLeaveHooks();
     var r = parseHash();
     A.state.route = r.route; A.state.rest = r.rest; A.state.params = r.params;

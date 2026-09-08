@@ -5,7 +5,9 @@
   "description": "Argus: a sovereign, Windows-first private cloud. This manifest exists only to pin the console prototype's test dependencies.",
   "license": "MIT",
   "scripts": {
-    "test": "node platform/console/prototype/tests/run-tests.js"
+    "test": "node platform/console/prototype/tests/run-tests.js",
+    "test:sandbox": "node platform/console/prototype/tests/sandbox.js",
+    "test:all": "npm test && npm run test:sandbox"
   },
   "devDependencies": {
     "axe-core": "^4.10.2",

@@ -74,3 +74,21 @@ jobs:
           echo "clean"
       - name: Accessibility, responsive, density and keyboard suite
         run: node platform/console/prototype/tests/run-tests.js
+
+      # The property suite cannot find a control that was never wired to
+      # anything: it navigates by assigning location.hash, which is how a
+      # sidebar that did nothing on click stayed green for six releases. The
+      # sandbox presses every control in nine environments instead.
+      - name: Full-scale sandbox
+        run: node platform/console/prototype/tests/sandbox.js
+
+      - name: Keep the screenshots from both suites
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-screenshots
+          path: |
+            /tmp/argus-console-shots
+            /tmp/argus-sandbox-shots
+          if-no-files-found: ignore
+          retention-days: 14

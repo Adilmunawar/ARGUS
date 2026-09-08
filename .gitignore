@@ -9,3 +9,6 @@ node_modules/
 bin/
 obj/
 .next/
+
+# test output
+platform/console/prototype/tests/sandbox-last-run.json

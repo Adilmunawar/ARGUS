@@ -1254,6 +1254,36 @@
     "detail": ""
   },
   {
+    "suite": "OVERLAY",
+    "id": "navigating away closes an open dialog",
+    "pass": true,
+    "detail": "{\"opened\":true,\"route\":\"apps\",\"stillOpen\":false,\"bodyClass\":false}"
+  },
+  {
+    "suite": "OVERLAY",
+    "id": "navigating away clears the has-dialog state on the body",
+    "pass": true,
+    "detail": "{\"opened\":true,\"route\":\"apps\",\"stillOpen\":false,\"bodyClass\":false}"
+  },
+  {
+    "suite": "OVERLAY",
+    "id": "navigating away closes an open overflow menu",
+    "pass": true,
+    "detail": "{\"opened\":true,\"stillOpen\":false}"
+  },
+  {
+    "suite": "OVERLAY",
+    "id": "closing a dialog more than once does not corrupt the next one",
+    "pass": true,
+    "detail": "{\"restored\":true,\"active\":\"bell\"}"
+  },
+  {
+    "suite": "OVERLAY",
+    "id": "adding an empty filter adds nothing and says why",
+    "pass": true,
+    "detail": "{\"tokensBefore\":0,\"tokensAfter\":0,\"focused\":true}"
+  },
+  {
     "suite": "MENU",
     "id": "the overflow trigger declares a menu to assistive technology",
     "pass": true,
