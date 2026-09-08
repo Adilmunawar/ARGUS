@@ -108,6 +108,28 @@ async function axeOn(page, label) {
   for (const t of navTargets) {
     rec('NAV', `nav target "${t}" has a screen`, globals.screens.indexOf(t) !== -1);
   }
+
+  // Press the control a person presses. Every other navigation test in this
+  // file assigns location.hash, and that blind spot is exactly how the console
+  // shipped with a sidebar that did nothing on click: the buttons carried
+  // data-go, the routes all resolved, and no test ever clicked one.
+  for (const t of navTargets) {
+    await page.evaluate(() => { window.location.hash = '#/overview'; });
+    await page.waitForTimeout(120);
+    await page.click(`.nav[data-go="${t}"]`);
+    await page.waitForTimeout(180);
+    const st = await page.evaluate(() => ({
+      route: window.ARGUS.state.route,
+      painted: document.getElementById('main').textContent.trim().length,
+      current: (document.querySelector('.nav[aria-current="page"]') || {}).dataset
+    }));
+    rec('NAV', `clicking the "${t}" sidebar button navigates to it`,
+      st.route === t && st.painted > 50, JSON.stringify({ route: st.route, painted: st.painted }));
+    rec('NAV', `the "${t}" sidebar button is marked current once open`,
+      st.current && st.current.go === t, JSON.stringify(st.current || null));
+  }
+  await page.evaluate(() => { window.location.hash = '#/overview'; });
+  await page.waitForTimeout(120);
   for (const r of ROUTES) {
     await goto(page, r);
     const st = await page.evaluate(() => ({
@@ -740,6 +762,359 @@ async function axeOn(page, label) {
       }
       return true;
     })());
+
+  /* --------------------------------------------------------------- ROUTE */
+
+  // parseHash runs on every hashchange and *before* the try/catch that guards
+  // a screen's render, so anything it throws takes the console down until a
+  // manual reload. decodeURIComponent throws URIError on a malformed escape,
+  // which made a pasted link with a stray percent sign a denial of service.
+  const ROUTE_CASES = [
+    { hash: '#/apps?q=%', route: 'apps', why: 'a stray percent sign' },
+    { hash: '#/apps?q=%zz', route: 'apps', why: 'an invalid escape' },
+    { hash: '#/apps?%=x', route: 'apps', why: 'a malformed parameter key' },
+    { hash: '#/compute?a=%E0%A4', route: 'compute', why: 'a truncated UTF-8 sequence' },
+    { hash: '#/data?q=100%&x=1', route: 'data', why: 'a percent at the end of a value' }
+  ];
+  for (const c of ROUTE_CASES) {
+    await page.evaluate(h => { window.location.hash = h; }, c.hash);
+    await page.waitForTimeout(120);
+    const st = await page.evaluate(() => ({
+      route: window.ARGUS.state.route,
+      painted: document.getElementById('main').textContent.trim().length
+    }));
+    rec('ROUTE', `${c.why} does not crash the router`,
+      st.route === c.route && st.painted > 0, `${c.hash} -> ${JSON.stringify(st)}`);
+  }
+
+  // Splitting a query pair on every '=' truncated any value that legitimately
+  // contained one, so a base64 filter never survived being shared as a link.
+  await page.evaluate(() => { window.location.hash = '#/audit?q=YWRtaW4='; });
+  await page.waitForTimeout(120);
+  const eqParam = await page.evaluate(() => window.ARGUS.state.params.q);
+  rec('ROUTE', "a '=' inside a query value survives parsing", eqParam === 'YWRtaW4=', String(eqParam));
+
+  // href() encodes each segment and parseHash() decodes it; if the pair does
+  // not round-trip then a resource whose name contains a space, a slash or a
+  // percent sign cannot be linked to at all.
+  const roundTrip = await page.evaluate(async () => {
+    const awkward = 'a b/c%d';
+    window.location.hash = window.ARGUS.href('apps', [awkward]);
+    await new Promise(r => setTimeout(r, 120));
+    return { got: window.ARGUS.state.rest.join('/'), want: awkward };
+  });
+  rec('ROUTE', 'href and parseHash round-trip a segment with space, slash and percent',
+    roundTrip.got === roundTrip.want, JSON.stringify(roundTrip));
+
+  // A hash that is not a route at all (the skip link) must be left alone.
+  await page.evaluate(() => { window.location.hash = '#/overview'; });
+  await page.waitForTimeout(100);
+
+  /* --------------------------------------------------------------- THEME */
+
+  await goto(page, 'overview');
+  const themes = await page.evaluate(() => {
+    const read = () => ({
+      attr: document.documentElement.getAttribute('data-theme'),
+      bg: getComputedStyle(document.body).backgroundColor,
+      fg: getComputedStyle(document.body).color,
+      card: getComputedStyle(document.querySelector('.side')).backgroundColor,
+      meta: (document.querySelector('meta[name="color-scheme"]') || {}).content
+    });
+    window.ARGUS.setTheme('light'); const light = read();
+    window.ARGUS.setTheme('dark'); const dark = read();
+    return { light, dark };
+  });
+  rec('THEME', 'choosing dark stamps data-theme on the document element',
+    themes.dark.attr === 'dark', JSON.stringify(themes.dark));
+  rec('THEME', 'the dark theme repaints the page surface',
+    themes.dark.bg !== themes.light.bg, `${themes.light.bg} -> ${themes.dark.bg}`);
+  rec('THEME', 'the dark theme repaints body text',
+    themes.dark.fg !== themes.light.fg, `${themes.light.fg} -> ${themes.dark.fg}`);
+  rec('THEME', 'the dark theme repaints panel chrome, not just the body',
+    themes.dark.card !== themes.light.card, `${themes.light.card} -> ${themes.dark.card}`);
+  rec('THEME', 'the color-scheme meta follows the resolved theme',
+    themes.dark.meta === 'dark', String(themes.dark.meta));
+
+  // A shadow token driven by --ink-rgb would invert with the text and put a
+  // white halo around every card in dark mode.
+  const shadowInk = await page.evaluate(() => {
+    const v = getComputedStyle(document.documentElement);
+    return { shadow: v.getPropertyValue('--shadow-rgb').trim(), ink: v.getPropertyValue('--ink-rgb').trim() };
+  });
+  rec('THEME', 'shadows do not invert with the text colour',
+    shadowInk.shadow !== shadowInk.ink, JSON.stringify(shadowInk));
+
+  // The theme is a preference, so it has to survive a reload.
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(AXE);
+  await page.waitForTimeout(150);
+  rec('THEME', 'the chosen theme survives a reload',
+    await page.evaluate(() => document.documentElement.getAttribute('data-theme') === 'dark'),
+    await page.evaluate(() => document.documentElement.getAttribute('data-theme')));
+
+  // Everything the light theme is held to, the dark theme is held to as well.
+  for (const r of ['overview', 'security', 'compute', 'apps/mills']) {
+    await goto(page, r);
+    await axeOn(page, 'dark ' + r);
+  }
+
+  let darkLowContrast = [];
+  for (const r of ['overview', 'security', 'deploys', 'identity']) {
+    await goto(page, r);
+    const found = await page.evaluate(() => {
+      const out = [];
+      const walk = document.createTreeWalker(document.getElementById('main'), NodeFilter.SHOW_TEXT);
+      let n, seen = 0;
+      while ((n = walk.nextNode()) && seen < 400) {
+        const txt = n.textContent.trim();
+        if (!txt) continue;
+        const p = n.parentElement;
+        if (!p || p.closest('.sr') || p.classList.contains('sr')) continue;
+        const st = getComputedStyle(p);
+        if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.5) continue;
+        let bg = null, e = p;
+        while (e && !bg) {
+          const es = getComputedStyle(e);
+          if (es.backgroundImage && es.backgroundImage !== 'none') { bg = 'gradient'; break; }
+          if (es.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(es.backgroundColor)) bg = es.backgroundColor;
+          e = e.parentElement;
+        }
+        seen++;
+        out.push({ fg: st.color, bg: bg, size: parseFloat(st.fontSize), weight: st.fontWeight, txt: txt.slice(0, 28) });
+      }
+      return out;
+    });
+    for (const it of found) {
+      if (it.bg === 'gradient' || !it.bg) continue;
+      const f = RGB(it.fg), b = RGB(it.bg);
+      if (!f || !b) continue;
+      const L1 = lum(f), L2 = lum(b);
+      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const large = it.size >= 24 || (it.size >= 18.66 && Number(it.weight) >= 700);
+      const need = large ? 3 : 4.5;
+      if (ratio < need - 0.01) darkLowContrast.push(`${r} "${it.txt}" ${ratio.toFixed(2)}:1 need ${need}`);
+    }
+  }
+  rec('THEME', 'all text meets WCAG AA contrast in the dark theme',
+    darkLowContrast.length === 0, darkLowContrast.slice(0, 6).join(' | '));
+
+  await page.evaluate(() => window.ARGUS.setTheme('system'));
+  await page.waitForTimeout(80);
+  rec('THEME', 'system resolves to a concrete theme rather than no theme',
+    await page.evaluate(() => ['light', 'dark'].indexOf(document.documentElement.getAttribute('data-theme')) !== -1),
+    await page.evaluate(() => document.documentElement.getAttribute('data-theme')));
+  await page.evaluate(() => window.ARGUS.setTheme('light'));
+  await page.waitForTimeout(80);
+
+  /* --------------------------------------------------------------- PREFS */
+
+  // localStorage is writable by anything else on this origin, and the whole
+  // blob used to be copied into prefs unchecked: one junk value put the shell
+  // into a class no stylesheet defines, with no way back but clearing storage.
+  const prefGuard = await page.evaluate(async () => {
+    localStorage.setItem('argus.prefs', JSON.stringify({
+      density: '"><img src=x>', theme: 'neon', timezone: 42, rail: 'yes'
+    }));
+    return true;
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(AXE);
+  await page.waitForTimeout(150);
+  const survived = await page.evaluate(() => ({
+    prefs: window.ARGUS.prefs(),
+    theme: document.documentElement.getAttribute('data-theme'),
+    bodyClass: document.body.className
+  }));
+  rec('PREFS', 'a junk density in storage falls back to the default',
+    survived.prefs.density === 'comfortable', JSON.stringify(survived.prefs));
+  rec('PREFS', 'an unknown theme in storage falls back to the default',
+    survived.prefs.theme === 'light' && survived.theme === 'light',
+    JSON.stringify({ pref: survived.prefs.theme, resolved: survived.theme }));
+  rec('PREFS', 'a wrong-typed timezone in storage falls back to the default',
+    survived.prefs.timezone === 'utc', String(survived.prefs.timezone));
+  rec('PREFS', 'a wrong-typed rail flag in storage falls back to the default',
+    survived.prefs.rail === false, String(survived.prefs.rail));
+  rec('PREFS', 'junk in storage never reaches a class name',
+    !/[<>"]/.test(survived.bodyClass), survived.bodyClass);
+  await page.evaluate(() => localStorage.removeItem('argus.prefs'));
+
+  // The timezone preference shipped in the first commit and nothing read it,
+  // so every timestamp was UTC whatever the operator chose.
+  const stamps = await page.evaluate(() => {
+    const d = new Date(Date.UTC(2026, 8, 8, 9, 30));
+    window.ARGUS.setTimezone('utc');
+    const utc = window.ARGUS.ui.fmt.stamp(d);
+    window.ARGUS.setTimezone('local');
+    const local = window.ARGUS.ui.fmt.stamp(d);
+    window.ARGUS.setTimezone('utc');
+    return { utc, local, offset: new Date().getTimezoneOffset() };
+  });
+  rec('PREFS', 'UTC timestamps are marked as UTC', /Z$/.test(stamps.utc), stamps.utc);
+  rec('PREFS', 'local timestamps carry their offset', /[+-]\d\d:\d\d$/.test(stamps.local), stamps.local);
+  rec('PREFS', 'the timezone preference actually changes what is rendered',
+    stamps.offset === 0 || stamps.utc.slice(0, 16) !== stamps.local.slice(0, 16),
+    `${stamps.utc} vs ${stamps.local} (offset ${stamps.offset})`);
+
+  rec('PREFS', 'the preferences dialog opens from the header and traps focus',
+    await page.evaluate(async () => {
+      document.getElementById('prefsbtn').click();
+      await new Promise(r => setTimeout(r, 120));
+      const dlg = document.querySelector('.dialog[role="dialog"]');
+      const ok = !!dlg && dlg.querySelectorAll('input[type="radio"]').length >= 7
+        && dlg.contains(document.activeElement);
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+      (dlg || document).dispatchEvent(esc);
+      await new Promise(r => setTimeout(r, 120));
+      return ok && !document.querySelector('.dialog[role="dialog"]');
+    }));
+
+  /* ---------------------------------------------------------------- MENU */
+
+  await goto(page, 'apps');
+  const menuOpen = await page.evaluate(async () => {
+    const trig = document.querySelector('.tablewrap .menubtn');
+    if (!trig) return { err: 'no overflow trigger rendered' };
+    const before = {
+      haspopup: trig.getAttribute('aria-haspopup'),
+      expanded: trig.getAttribute('aria-expanded'),
+      label: trig.getAttribute('aria-label')
+    };
+    trig.click();
+    await new Promise(r => setTimeout(r, 150));
+    const pop = document.querySelector('.menu[role="menu"]');
+    const items = pop ? pop.querySelectorAll('[role="menuitem"]') : [];
+    const r = pop ? pop.getBoundingClientRect() : null;
+    return {
+      before,
+      expandedAfter: trig.getAttribute('aria-expanded'),
+      opened: !!pop,
+      items: items.length,
+      danger: pop ? !!pop.querySelector('.menuitem.danger') : false,
+      // A popup mounted inside .tablewrap is clipped by its overflow-x, which
+      // sliced the labels in half; it has to live on <body>.
+      onBody: pop ? pop.parentElement === document.body : false,
+      rect: r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null,
+      vw: window.innerWidth, vh: window.innerHeight
+    };
+  });
+  rec('MENU', 'the overflow trigger declares a menu to assistive technology',
+    menuOpen.before && menuOpen.before.haspopup === 'menu' && menuOpen.before.expanded === 'false',
+    JSON.stringify(menuOpen.before));
+  rec('MENU', 'the overflow trigger is individually labelled',
+    !!(menuOpen.before && /Actions for /.test(menuOpen.before.label || '')),
+    (menuOpen.before || {}).label);
+  rec('MENU', 'clicking the trigger opens the menu and flips aria-expanded',
+    menuOpen.opened && menuOpen.expandedAfter === 'true', JSON.stringify(menuOpen));
+  rec('MENU', 'the menu carries its actions, including a destructive one',
+    menuOpen.items >= 5 && menuOpen.danger, JSON.stringify({ items: menuOpen.items, danger: menuOpen.danger }));
+  rec('MENU', 'the menu escapes the table scroll container instead of being clipped',
+    menuOpen.onBody, 'parent is body: ' + menuOpen.onBody);
+  rec('MENU', 'the open menu sits fully inside the viewport',
+    !!menuOpen.rect && menuOpen.rect.left >= 0 && menuOpen.rect.top >= 0 &&
+    menuOpen.rect.right <= menuOpen.vw + 0.5 && menuOpen.rect.bottom <= menuOpen.vh + 0.5,
+    JSON.stringify(menuOpen.rect) + ' in ' + menuOpen.vw + 'x' + menuOpen.vh);
+
+  const menuKeys = await page.evaluate(async () => {
+    const pop = document.querySelector('.menu[role="menu"]');
+    if (!pop) return { err: 'menu closed unexpectedly' };
+    const items = Array.prototype.slice.call(pop.querySelectorAll('[role="menuitem"]'));
+    items[0].focus();
+    const first = document.activeElement === items[0];
+    pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    const second = document.activeElement === items[1];
+    pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    const last = document.activeElement === items[items.length - 1];
+    pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    const wrapped = document.activeElement === items[0];
+    return { first, second, last, wrapped };
+  });
+  rec('MENU', 'arrow keys move through the menu and wrap at the ends',
+    menuKeys.first && menuKeys.second && menuKeys.last && menuKeys.wrapped, JSON.stringify(menuKeys));
+
+  const menuEsc = await page.evaluate(async () => {
+    const trig = document.querySelector('.tablewrap .menubtn');
+    const pop = document.querySelector('.menu[role="menu"]');
+    pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise(r => setTimeout(r, 150));
+    return {
+      closed: !document.querySelector('.menu[role="menu"]'),
+      refocused: document.activeElement === trig,
+      expanded: trig.getAttribute('aria-expanded')
+    };
+  });
+  rec('MENU', 'Escape closes the menu and returns focus to its trigger',
+    menuEsc.closed && menuEsc.refocused && menuEsc.expanded === 'false', JSON.stringify(menuEsc));
+
+  // Opening a row menu must not also trigger the row's own navigation.
+  const menuRow = await page.evaluate(async () => {
+    window.location.hash = '#/apps';
+    await new Promise(r => setTimeout(r, 250));
+    const before = window.ARGUS.state.rest.join('/');
+    document.querySelector('.tablewrap .menubtn').click();
+    await new Promise(r => setTimeout(r, 150));
+    const after = window.ARGUS.state.rest.join('/');
+    document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 100));
+    return { before, after };
+  });
+  rec('MENU', 'opening a row menu does not navigate the row underneath it',
+    menuRow.before === menuRow.after, JSON.stringify(menuRow));
+
+  /* ------------------------------------------------------------- SESSION */
+
+  // The shortcuts table has always documented Escape as closing "a dialog,
+  // drawer or palette", but only the navigation drawer was ever wired to it,
+  // so a recorded session could be dismissed with the mouse alone.
+  const session = await page.evaluate(async () => {
+    window.location.hash = '#/compute';
+    await new Promise(r => setTimeout(r, 200));
+    const vm = window.ARGUS.data.vms.filter(v => v.connect.indexOf('rdp') !== -1)[0];
+    window.ARGUS.data.me.elevation = { group: 'Argus-Tier1-Operators', reason: 'test', expires: new Date(Date.now() + 3600000) };
+    const opener = document.querySelector('.nav[data-go="compute"]');
+    opener.focus();
+    window.ARGUS.connect(vm, 'rdp');
+    await new Promise(r => setTimeout(r, 150));
+    const opened = !document.getElementById('drawer').hidden;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await new Promise(r => setTimeout(r, 150));
+    const closed = document.getElementById('drawer').hidden;
+    const refocused = document.activeElement === opener;
+    const emptied = document.getElementById('drawer-body').childNodes.length === 0;
+    window.ARGUS.data.me.elevation = null;
+    window.ARGUS.paintElevation();
+    return { opened, closed, refocused, emptied };
+  });
+  rec('SESSION', 'a recorded session opens in the drawer', session.opened, JSON.stringify(session));
+  rec('SESSION', 'Escape closes the session drawer, as the shortcuts table claims',
+    session.closed, JSON.stringify(session));
+  rec('SESSION', 'closing the session returns focus to whatever opened it',
+    session.refocused, JSON.stringify(session));
+  rec('SESSION', 'closing the session tears down the terminal it held',
+    session.emptied, JSON.stringify(session));
+
+  /* --------------------------------------------------------------- TIMER */
+
+  // Every screen that starts an interval has to stop it on navigation, or the
+  // console accumulates one live timer per visit for the length of a shift.
+  const timers = await page.evaluate(async () => {
+    let live = 0;
+    const realSet = window.setInterval, realClear = window.clearInterval;
+    window.setInterval = function () { live++; return realSet.apply(window, arguments); };
+    window.clearInterval = function (id) { if (id !== undefined && id !== null) live--; return realClear.call(window, id); };
+    for (const r of ['identity', 'security', 'ops', 'overview']) {
+      window.location.hash = '#/' + r;
+      await new Promise(res => setTimeout(res, 260));
+    }
+    window.location.hash = '#/overview';
+    await new Promise(res => setTimeout(res, 300));
+    const net = live;
+    window.setInterval = realSet; window.clearInterval = realClear;
+    return net;
+  });
+  rec('TIMER', 'navigating across every ticking screen leaves no timer behind',
+    timers <= 1, `net live intervals after the tour: ${timers}`);
 
   /* ----------------------------------------------------------------- DET */
 

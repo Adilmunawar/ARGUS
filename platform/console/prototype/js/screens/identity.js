@@ -202,15 +202,25 @@
     var node = el('span.mono', { text: '' });
     var mountedAt = Date.now();
 
-    function tick() {
-      if (!document.body.contains(node)) { window.clearInterval(timer); return; }
+    function paint() {
       var virtualNow = d.now.getTime() + (Date.now() - mountedAt);
       var left = Math.max(0, Math.round((expires.getTime() - virtualNow) / 1000));
       node.textContent = left > 0 ? fmt.dur(left) + ' left' : 'expired';
     }
 
-    tick();
+    function tick() {
+      // The detach check belongs to the interval, not to the first paint. The
+      // first paint used to run this same guard while the node was still
+      // unmounted -- it is returned to the caller and appended afterwards --
+      // so it always bailed out and the cell sat empty for a whole second
+      // before the first interval filled it in.
+      if (!document.body.contains(node)) { window.clearInterval(timer); return; }
+      paint();
+    }
+
+    paint();
     var timer = window.setInterval(tick, 1000);
+    A.onLeave(function () { window.clearInterval(timer); });
     return node;
   }
 

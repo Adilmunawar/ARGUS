@@ -25,16 +25,78 @@
 
   // localStorage can throw outright in a locked-down browser, so every access
   // is guarded and the console renders correctly with nothing stored.
-  var prefs = { density: 'comfortable', rail: false, timezone: 'utc' };
+  var prefs = { density: 'comfortable', rail: false, timezone: 'utc', theme: 'light' };
+  var PREF_VALUES = {
+    density: ['comfortable', 'compact'],
+    timezone: ['utc', 'local'],
+    theme: ['system', 'light', 'dark']
+  };
   function loadPrefs() {
     try {
       var raw = window.localStorage.getItem('argus.prefs');
-      if (raw) { var p = JSON.parse(raw); Object.keys(p).forEach(function (k) { prefs[k] = p[k]; }); }
+      if (!raw) return;
+      var p = JSON.parse(raw);
+      if (!p || typeof p !== 'object') return;
+      // Only known keys with known values are taken. localStorage is writable
+      // by anything else served from this origin, and a preference blob was
+      // previously copied in wholesale: a junk value for density put the shell
+      // into a class that no stylesheet defines, with no way back but clearing
+      // storage by hand.
+      Object.keys(prefs).forEach(function (k) {
+        if (!(k in p)) return;
+        if (PREF_VALUES[k]) { if (PREF_VALUES[k].indexOf(p[k]) !== -1) prefs[k] = p[k]; }
+        else if (typeof p[k] === typeof prefs[k]) prefs[k] = p[k];
+      });
     } catch (e) { /* private window, cleared storage, or blocked: use defaults */ }
   }
   function savePrefs() {
     try { window.localStorage.setItem('argus.prefs', JSON.stringify(prefs)); } catch (e) { /* not fatal */ }
   }
+  A.prefs = function () { return prefs; };
+
+  /* ------------------------------------------------------------- theme --- */
+
+  // 'system' is resolved here rather than in a second copy of every token
+  // under prefers-color-scheme: the console is a JavaScript application, so
+  // the cheaper and less duplicative place to decide is one attribute on
+  // <html>. The media query is still watched, so a machine that flips to dark
+  // at sunset takes the console with it without a reload.
+  var darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+  function resolveTheme() {
+    if (prefs.theme === 'light' || prefs.theme === 'dark') return prefs.theme;
+    return darkQuery && darkQuery.matches ? 'dark' : 'light';
+  }
+
+  function applyTheme() {
+    var t = resolveTheme();
+    document.documentElement.setAttribute('data-theme', t);
+    var meta = document.querySelector('meta[name="color-scheme"]');
+    if (meta) meta.setAttribute('content', t);
+    return t;
+  }
+  A.applyTheme = applyTheme;
+  A.resolvedTheme = resolveTheme;
+
+  A.setTheme = function (t) {
+    if (PREF_VALUES.theme.indexOf(t) === -1) return;
+    prefs.theme = t; savePrefs();
+    var resolved = applyTheme();
+    A.announce('Theme: ' + (t === 'system' ? 'follows the system, currently ' + resolved : t));
+  };
+
+  /* ---------------------------------------------------------- timezone --- */
+
+  // The preference existed from the first commit and nothing ever read it, so
+  // every timestamp in the console was UTC whatever an operator chose. Times
+  // are formatted through ui.fmt, so one hook here reaches every screen.
+  A.timezone = function () { return prefs.timezone; };
+  A.setTimezone = function (tz) {
+    if (PREF_VALUES.timezone.indexOf(tz) === -1) return;
+    prefs.timezone = tz; savePrefs();
+    A.announce('Timestamps now shown in ' + (tz === 'utc' ? 'UTC' : 'local time'));
+    render();
+  };
 
   /* ------------------------------------------------------- live region --- */
 
@@ -227,24 +289,48 @@
     });
   }
 
+  /**
+   * decodeURIComponent throws URIError on a malformed escape such as "%" or
+   * "%zz". parseHash runs on every hashchange and *before* the try/catch that
+   * guards a screen's render, so an uncaught throw here left the console blank
+   * until a manual reload: pasting a link with a stray percent sign, or a
+   * filter value someone had hand-edited, was enough to brick the router.
+   * Decode defensively and keep the raw text when it cannot be decoded.
+   */
+  function safeDecode(s) {
+    try { return decodeURIComponent(s); } catch (e) { return s; }
+  }
+
   function parseHash() {
     var h = (window.location.hash || '#/overview').replace(/^#\/?/, '');
     var qi = h.indexOf('?');
     var params = {};
     if (qi !== -1) {
       h.slice(qi + 1).split('&').forEach(function (kv) {
-        var p = kv.split('=');
-        if (p[0]) params[decodeURIComponent(p[0])] = decodeURIComponent(p[1] || '');
+        if (!kv) return;
+        // Split on the first '=' only. Splitting on every '=' truncated any
+        // value that legitimately contains one: a base64 filter such as
+        // "q=YWRtaW4=" arrived as "YWRtaW4" and no longer decoded.
+        var eq = kv.indexOf('=');
+        var k = eq === -1 ? kv : kv.slice(0, eq);
+        var v = eq === -1 ? '' : kv.slice(eq + 1);
+        if (k) params[safeDecode(k)] = safeDecode(v);
       });
       h = h.slice(0, qi);
     }
-    var segs = h.split('/').filter(Boolean);
+    // Path segments are encoded by A.href, so they are decoded here. Without
+    // this a resource whose name contains a space or a slash never resolved.
+    var segs = h.split('/').filter(Boolean).map(safeDecode);
     return { route: segs[0] || 'overview', rest: segs.slice(1), params: params };
   }
 
   /** Build a hash link. go('apps', ['mills'], {tab:'logs'}) */
   A.href = function (route, rest, params) {
-    var h = '#/' + route + (rest && rest.length ? '/' + rest.join('/') : '');
+    // Segments are encoded so that parseHash can decode them symmetrically.
+    // A resource name containing a space, a slash or a percent sign used to
+    // produce a link that never resolved back to the resource it named.
+    var h = '#/' + encodeURIComponent(route)
+      + (rest && rest.length ? '/' + rest.map(function (s) { return encodeURIComponent(String(s)); }).join('/') : '');
     var q = Object.keys(params || {}).filter(function (k) { return params[k] !== null && params[k] !== undefined && params[k] !== ''; });
     if (q.length) h += '?' + q.map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
     return h;
@@ -345,6 +431,8 @@
     items.push({ kind: 'Action', label: 'Switch to ' + (A.state.env === 'production' ? 'staging' : 'production'), hint: 'Environment', run: function () { A.setEnv(A.state.env === 'production' ? 'staging' : 'production'); } });
     items.push({ kind: 'Action', label: 'Toggle compact density', hint: 'Rows per screen', run: function () { A.setDensity(prefs.density === 'compact' ? 'comfortable' : 'compact'); } });
     items.push({ kind: 'Action', label: 'Show keyboard shortcuts', hint: '?', run: function () { A.shortcuts(); } });
+    items.push({ kind: 'Action', label: 'Console preferences', hint: 'Theme, timestamps, density', run: function () { A.settings(); } });
+    items.push({ kind: 'Action', label: 'Switch to ' + (resolveTheme() === 'dark' ? 'the light theme' : 'the dark theme'), hint: 'Appearance', run: function () { A.setTheme(resolveTheme() === 'dark' ? 'light' : 'dark'); } });
     return items;
   }
 
@@ -400,7 +488,14 @@
     }
 
     function setActive(i) {
-      if (!results.length) return;
+      if (!results.length) {
+        // With nothing to point at, a leftover aria-activedescendant still
+        // names an option id that has just been removed from the list, and a
+        // screen reader goes on announcing the last match as selected while
+        // the visible list reads "Nothing matches".
+        input.removeAttribute('aria-activedescendant');
+        return;
+      }
       active = Math.max(0, Math.min(results.length - 1, i));
       Array.prototype.forEach.call(list.children, function (li, j) {
         li.setAttribute('aria-selected', j === active ? 'true' : 'false');
@@ -439,7 +534,13 @@
 
   /* ------------------------------------------------------- environment --- */
 
-  A.setEnv = function (env) {
+  /**
+   * Set the environment. `quiet` paints the pill without announcing a change
+   * or re-rendering: boot used to call this unconditionally, which fired a
+   * toast on every page load telling the operator the environment was the one
+   * they had not changed, and rendered the first screen twice.
+   */
+  A.setEnv = function (env, quiet) {
     A.state.env = env;
     var pill = document.getElementById('envbtn');
     clear(pill);
@@ -447,6 +548,7 @@
     pill.appendChild(el('span.env-dot', { 'aria-hidden': 'true' }));
     pill.appendChild(el('span', { text: env === 'production' ? 'Production' : 'Staging' }));
     pill.setAttribute('aria-label', 'Environment: ' + env + '. Activate to switch.');
+    if (quiet) return;
     A.flash(env === 'production' ? 'info' : 'warn', 'Environment: ' + env,
       env === 'production' ? 'Destructive actions will name this environment before they run.' : 'Changes here do not affect production.',
       { timeout: 6000 });
@@ -519,8 +621,12 @@
    */
   A.connect = function (vm, protocol) {
     var proto = protocol.toUpperCase();
+    // Captured before any dialog runs, because by the time the drawer opens
+    // the elevation dialog has already returned focus to its own opener.
+    var invokedFrom = document.activeElement;
     var open = function () {
       var drawer = document.getElementById('drawer');
+      sessionOpener = invokedFrom && document.contains(invokedFrom) ? invokedFrom : null;
       drawer.hidden = false;
       document.body.classList.add('has-drawer');
       var body = document.getElementById('drawer-body');
@@ -541,8 +647,7 @@
           el('span.muted', { text: 'Clipboard: in only · File transfer: blocked for your role' }),
           ui.btn('Disconnect', {
             variant: 'danger', onClick: function () {
-              document.getElementById('drawer').hidden = true;
-              document.body.classList.remove('has-drawer');
+              A.closeSession();
               A.flash('ok', 'Session ended',
                 'The recording is written to argus-sessions and the one-time credential is revoked.');
             }
@@ -597,7 +702,8 @@
     ['g then c', 'Compute'], ['g then t', 'Data'], ['g then i', 'Identity and secrets'],
     ['g then s', 'Security'], ['g then m', 'ML and geospatial'], ['g then p', 'Operations'],
     ['g then u', 'Audit'],
-    ['?', 'This list'], ['Escape', 'Close a dialog, drawer or palette']
+    ['?', 'This list'], ['Escape', 'Close a dialog, drawer or palette'],
+    ['g then ,', 'Console preferences']
   ];
 
   A.shortcuts = function () {
@@ -610,6 +716,67 @@
             return el('tr', [el('th', { scope: 'row' }, el('kbd', s[0])), el('td', { text: s[1] })]);
           }))
         ]);
+      }
+    });
+  };
+
+  /* -------------------------------------------------------- preferences --- */
+
+  /**
+   * Console preferences. Radio groups rather than switches, because each of
+   * these has a third state ("follow the system") or a name worth reading, and
+   * a switch cannot express either. Every group is a real fieldset with a
+   * legend, so a screen reader announces what the choice is for.
+   */
+  A.settings = function () {
+    var groups = [
+      {
+        key: 'theme', legend: 'Appearance',
+        hint: 'Dark is for a bridge call at three in the morning. System follows the machine.',
+        options: [['system', 'System'], ['light', 'Light'], ['dark', 'Dark']],
+        get: function () { return prefs.theme; },
+        set: function (v) { A.setTheme(v); }
+      },
+      {
+        key: 'timezone', legend: 'Timestamps',
+        hint: 'UTC is what the logs, the audit trail and the runbooks use. Local time always carries its offset.',
+        options: [['utc', 'UTC'], ['local', 'Local time']],
+        get: function () { return prefs.timezone; },
+        set: function (v) { A.setTimezone(v); }
+      },
+      {
+        key: 'density', legend: 'Density',
+        hint: 'Compact fits roughly a third more rows on a 13-inch laptop.',
+        options: [['comfortable', 'Comfortable'], ['compact', 'Compact']],
+        get: function () { return prefs.density; },
+        set: function (v) { A.setDensity(v); }
+      }
+    ];
+
+    A.dialog({
+      title: 'Console preferences',
+      body: function () {
+        return groups.map(function (g) {
+          // Ids are suffixed per dialog instance: two dialogs open at once
+          // would otherwise share an id and the label would point at the
+          // wrong control.
+          var uid = g.key + '-' + Math.random().toString(36).slice(2, 7);
+          return el('fieldset.prefgroup', [
+            el('legend', { text: g.legend }),
+            el('div.prefopts', g.options.map(function (o, i) {
+              var id = uid + '-' + i;
+              return el('label.prefopt', { for: id }, [
+                el('input', {
+                  type: 'radio', id: id, name: uid, value: o[0],
+                  checked: g.get() === o[0] ? true : null,
+                  on: { change: function () { g.set(o[0]); } }
+                }),
+                el('span', { text: o[1] })
+              ]);
+            })),
+            el('p.hint', { text: g.hint })
+          ]);
+        });
       }
     });
   };
@@ -639,10 +806,48 @@
     if (first) first.focus();
   }
 
+  /* ---------------------------------------------------- session drawer --- */
+
+  // Whatever opened the session drawer, so focus can go back there when it
+  // closes. Closing a drawer and dropping focus onto <body> strands a keyboard
+  // user at the top of the document.
+  var sessionOpener = null;
+
+  A.isSessionOpen = function () {
+    var d = document.getElementById('drawer');
+    return !!d && !d.hidden;
+  };
+
+  /**
+   * Close the session drawer. The shortcuts table has always documented
+   * Escape as closing "a dialog, drawer or palette", but only the navigation
+   * drawer was ever wired to it, so a recorded session could be dismissed only
+   * with the mouse. One helper now serves the close button, the Disconnect
+   * action and the Escape key alike.
+   */
+  A.closeSession = function () {
+    var drawer = document.getElementById('drawer');
+    if (!drawer || drawer.hidden) return false;
+    drawer.hidden = true;
+    document.body.classList.remove('has-drawer');
+    ui.clear(document.getElementById('drawer-body'));
+    if (sessionOpener && sessionOpener.focus && document.contains(sessionOpener)) sessionOpener.focus();
+    sessionOpener = null;
+    return true;
+  };
+
   /* ------------------------------------------------------------- boot --- */
 
   function boot() {
     loadPrefs();
+    applyTheme();
+    // A machine that flips to dark at sunset takes the console with it, but
+    // only while the operator has not made an explicit choice.
+    if (darkQuery) {
+      var onSchemeChange = function () { if (prefs.theme === 'system') applyTheme(); };
+      if (darkQuery.addEventListener) darkQuery.addEventListener('change', onSchemeChange);
+      else if (darkQuery.addListener) darkQuery.addListener(onSchemeChange);
+    }
     liveNode = document.getElementById('live');
     flashHost = document.getElementById('flashes');
     mount = document.getElementById('main');
@@ -650,6 +855,20 @@
 
     if (prefs.density === 'compact') document.body.classList.add('is-compact');
     if (prefs.rail) document.body.classList.add('railed');
+
+    /* The sidebar carries data-go on every button and nothing ever listened
+       for a click on them, so the console's primary navigation did not work
+       with a mouse or a touch screen at all: only the keyboard shortcuts, the
+       command palette and hand-edited URLs moved between screens. The test
+       suite missed it for the same reason it existed -- every test navigated
+       by assigning location.hash rather than by pressing the control a person
+       presses. Delegated from the rail so it survives the rail being rebuilt. */
+    document.querySelector('.side').addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('.nav[data-go]');
+      if (!btn) return;
+      e.preventDefault();
+      A.go(btn.dataset.go);
+    });
 
     document.getElementById('kbar').addEventListener('click', A.palette);
     document.getElementById('envbtn').addEventListener('click', function () {
@@ -665,11 +884,9 @@
       this.setAttribute('aria-label', prefs.rail ? 'Expand navigation' : 'Collapse navigation');
       A.announce(prefs.rail ? 'Navigation collapsed' : 'Navigation expanded');
     });
-    document.getElementById('drawer-close').addEventListener('click', function () {
-      document.getElementById('drawer').hidden = true;
-      document.body.classList.remove('has-drawer');
-    });
+    document.getElementById('drawer-close').addEventListener('click', A.closeSession);
     document.getElementById('helpbtn').addEventListener('click', A.shortcuts);
+    document.getElementById('prefsbtn').addEventListener('click', A.settings);
     document.getElementById('bell').addEventListener('click', function () { A.go('security', ['alerts']); });
     document.getElementById('whobtn').addEventListener('click', function () { A.go('identity', ['people']); });
 
@@ -682,7 +899,9 @@
         if (f) { e.preventDefault(); f.focus(); }
         return;
       }
-      if (e.key === 'Escape') { closeDrawerNav(); return; }
+      // Innermost surface first: a recorded session, then the mobile nav.
+      if (e.key === 'Escape') { if (!A.closeSession()) closeDrawerNav(); return; }
+      if (goArmed && e.key === ',') { e.preventDefault(); goArmed = false; A.settings(); return; }
       if (goArmed && GO_KEYS[e.key]) { e.preventDefault(); goArmed = false; A.go(GO_KEYS[e.key]); return; }
       if (e.key === 'g') {
         goArmed = true;
@@ -692,7 +911,7 @@
     });
 
     window.addEventListener('hashchange', render);
-    A.setEnv('production');
+    A.setEnv('production', true);
     paintElevation();
     render();
   }

@@ -127,6 +127,126 @@
   },
   {
     "suite": "NAV",
+    "id": "clicking the \"overview\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"overview\",\"painted\":2196}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"overview\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"overview\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"apps\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"apps\",\"painted\":630}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"apps\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"apps\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"deploys\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"deploys\",\"painted\":1428}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"deploys\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"deploys\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"compute\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"compute\",\"painted\":721}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"compute\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"compute\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"data\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"data\",\"painted\":1088}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"data\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"data\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"ml\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"ml\",\"painted\":1677}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"ml\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"ml\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"identity\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"identity\",\"painted\":891}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"identity\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"identity\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"security\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"security\",\"painted\":1244}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"security\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"security\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"ops\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"ops\",\"painted\":1174}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"ops\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"ops\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"audit\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"audit\",\"painted\":1771}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"audit\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"audit\"}"
+  },
+  {
+    "suite": "NAV",
     "id": "\"overview\" routes and renders",
     "pass": true,
     "detail": "route=overview children=5"
@@ -609,7 +729,7 @@
     "suite": "KBD",
     "id": "the overview has focusable controls",
     "pass": true,
-    "detail": "29 found"
+    "detail": "30 found"
   },
   {
     "suite": "KBD",
@@ -813,19 +933,19 @@
     "suite": "DENS",
     "id": "laptop-1366 chrome and header stay under 55% of the screen",
     "pass": true,
-    "detail": "134px used, budget 422px"
+    "detail": "128px used, budget 422px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1366 every stat tile clears the fold",
     "pass": true,
-    "detail": "tiles end at 341px of 768px"
+    "detail": "tiles end at 332px of 768px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1366 overview stays under two screens",
     "pass": true,
-    "detail": "1325px = 1.7 screens"
+    "detail": "1302px = 1.7 screens"
   },
   {
     "suite": "RESP",
@@ -837,19 +957,19 @@
     "suite": "DENS",
     "id": "laptop-1280 chrome and header stay under 55% of the screen",
     "pass": true,
-    "detail": "134px used, budget 440px"
+    "detail": "128px used, budget 440px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 every stat tile clears the fold",
     "pass": true,
-    "detail": "tiles end at 341px of 800px"
+    "detail": "tiles end at 332px of 800px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 overview stays under two screens",
     "pass": true,
-    "detail": "1325px = 1.7 screens"
+    "detail": "1321px = 1.7 screens"
   },
   {
     "suite": "RESP",
@@ -861,19 +981,19 @@
     "suite": "DENS",
     "id": "small-laptop chrome and header stay under 55% of the screen",
     "pass": true,
-    "detail": "134px used, budget 422px"
+    "detail": "128px used, budget 422px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop every stat tile clears the fold",
     "pass": true,
-    "detail": "tiles end at 437px of 768px"
+    "detail": "tiles end at 424px of 768px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop overview stays under two screens",
     "pass": true,
-    "detail": "1421px = 1.9 screens"
+    "detail": "1414px = 1.8 screens"
   },
   {
     "suite": "RESP",
@@ -958,6 +1078,264 @@
     "id": "no secret value is rendered anywhere",
     "pass": true,
     "detail": ""
+  },
+  {
+    "suite": "ROUTE",
+    "id": "a stray percent sign does not crash the router",
+    "pass": true,
+    "detail": "#/apps?q=% -> {\"route\":\"apps\",\"painted\":630}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "an invalid escape does not crash the router",
+    "pass": true,
+    "detail": "#/apps?q=%zz -> {\"route\":\"apps\",\"painted\":630}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "a malformed parameter key does not crash the router",
+    "pass": true,
+    "detail": "#/apps?%=x -> {\"route\":\"apps\",\"painted\":630}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "a truncated UTF-8 sequence does not crash the router",
+    "pass": true,
+    "detail": "#/compute?a=%E0%A4 -> {\"route\":\"compute\",\"painted\":721}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "a percent at the end of a value does not crash the router",
+    "pass": true,
+    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1088}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "a '=' inside a query value survives parsing",
+    "pass": true,
+    "detail": "YWRtaW4="
+  },
+  {
+    "suite": "ROUTE",
+    "id": "href and parseHash round-trip a segment with space, slash and percent",
+    "pass": true,
+    "detail": "{\"got\":\"a b/c%d\",\"want\":\"a b/c%d\"}"
+  },
+  {
+    "suite": "THEME",
+    "id": "choosing dark stamps data-theme on the document element",
+    "pass": true,
+    "detail": "{\"attr\":\"dark\",\"bg\":\"rgb(13, 23, 20)\",\"fg\":\"rgb(230, 237, 233)\",\"card\":\"rgb(21, 33, 28)\",\"meta\":\"dark\"}"
+  },
+  {
+    "suite": "THEME",
+    "id": "the dark theme repaints the page surface",
+    "pass": true,
+    "detail": "rgb(245, 243, 233) -> rgb(13, 23, 20)"
+  },
+  {
+    "suite": "THEME",
+    "id": "the dark theme repaints body text",
+    "pass": true,
+    "detail": "rgb(22, 48, 38) -> rgb(230, 237, 233)"
+  },
+  {
+    "suite": "THEME",
+    "id": "the dark theme repaints panel chrome, not just the body",
+    "pass": true,
+    "detail": "rgb(255, 254, 250) -> rgb(21, 33, 28)"
+  },
+  {
+    "suite": "THEME",
+    "id": "the color-scheme meta follows the resolved theme",
+    "pass": true,
+    "detail": "dark"
+  },
+  {
+    "suite": "THEME",
+    "id": "shadows do not invert with the text colour",
+    "pass": true,
+    "detail": "{\"shadow\":\"0,0,0\",\"ink\":\"230,237,233\"}"
+  },
+  {
+    "suite": "THEME",
+    "id": "the chosen theme survives a reload",
+    "pass": true,
+    "detail": "dark"
+  },
+  {
+    "suite": "A11Y",
+    "id": "dark overview: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "dark security: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "dark compute: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "dark apps/mills: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "THEME",
+    "id": "all text meets WCAG AA contrast in the dark theme",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "THEME",
+    "id": "system resolves to a concrete theme rather than no theme",
+    "pass": true,
+    "detail": "light"
+  },
+  {
+    "suite": "PREFS",
+    "id": "a junk density in storage falls back to the default",
+    "pass": true,
+    "detail": "{\"density\":\"comfortable\",\"rail\":false,\"timezone\":\"utc\",\"theme\":\"light\"}"
+  },
+  {
+    "suite": "PREFS",
+    "id": "an unknown theme in storage falls back to the default",
+    "pass": true,
+    "detail": "{\"pref\":\"light\",\"resolved\":\"light\"}"
+  },
+  {
+    "suite": "PREFS",
+    "id": "a wrong-typed timezone in storage falls back to the default",
+    "pass": true,
+    "detail": "utc"
+  },
+  {
+    "suite": "PREFS",
+    "id": "a wrong-typed rail flag in storage falls back to the default",
+    "pass": true,
+    "detail": "false"
+  },
+  {
+    "suite": "PREFS",
+    "id": "junk in storage never reaches a class name",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "PREFS",
+    "id": "UTC timestamps are marked as UTC",
+    "pass": true,
+    "detail": "2026-09-08 09:30Z"
+  },
+  {
+    "suite": "PREFS",
+    "id": "local timestamps carry their offset",
+    "pass": true,
+    "detail": "2026-09-08 14:30 +05:00"
+  },
+  {
+    "suite": "PREFS",
+    "id": "the timezone preference actually changes what is rendered",
+    "pass": true,
+    "detail": "2026-09-08 09:30Z vs 2026-09-08 14:30 +05:00 (offset -300)"
+  },
+  {
+    "suite": "PREFS",
+    "id": "the preferences dialog opens from the header and traps focus",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "MENU",
+    "id": "the overflow trigger declares a menu to assistive technology",
+    "pass": true,
+    "detail": "{\"haspopup\":\"menu\",\"expanded\":\"false\",\"label\":\"Actions for AGIS\"}"
+  },
+  {
+    "suite": "MENU",
+    "id": "the overflow trigger is individually labelled",
+    "pass": true,
+    "detail": "Actions for AGIS"
+  },
+  {
+    "suite": "MENU",
+    "id": "clicking the trigger opens the menu and flips aria-expanded",
+    "pass": true,
+    "detail": "{\"before\":{\"haspopup\":\"menu\",\"expanded\":\"false\",\"label\":\"Actions for AGIS\"},\"expandedAfter\":\"true\",\"opened\":true,\"items\":5,\"danger\":true,\"onBody\":true,\"rect\":{\"left\":1215,\"right\":1405,\"top\":271.75,\"bottom\":456.5},\"vw\":1440,\"vh\":900}"
+  },
+  {
+    "suite": "MENU",
+    "id": "the menu carries its actions, including a destructive one",
+    "pass": true,
+    "detail": "{\"items\":5,\"danger\":true}"
+  },
+  {
+    "suite": "MENU",
+    "id": "the menu escapes the table scroll container instead of being clipped",
+    "pass": true,
+    "detail": "parent is body: true"
+  },
+  {
+    "suite": "MENU",
+    "id": "the open menu sits fully inside the viewport",
+    "pass": true,
+    "detail": "{\"left\":1215,\"right\":1405,\"top\":271.75,\"bottom\":456.5} in 1440x900"
+  },
+  {
+    "suite": "MENU",
+    "id": "arrow keys move through the menu and wrap at the ends",
+    "pass": true,
+    "detail": "{\"first\":true,\"second\":true,\"last\":true,\"wrapped\":true}"
+  },
+  {
+    "suite": "MENU",
+    "id": "Escape closes the menu and returns focus to its trigger",
+    "pass": true,
+    "detail": "{\"closed\":true,\"refocused\":true,\"expanded\":\"false\"}"
+  },
+  {
+    "suite": "MENU",
+    "id": "opening a row menu does not navigate the row underneath it",
+    "pass": true,
+    "detail": "{\"before\":\"\",\"after\":\"\"}"
+  },
+  {
+    "suite": "SESSION",
+    "id": "a recorded session opens in the drawer",
+    "pass": true,
+    "detail": "{\"opened\":true,\"closed\":true,\"refocused\":true,\"emptied\":true}"
+  },
+  {
+    "suite": "SESSION",
+    "id": "Escape closes the session drawer, as the shortcuts table claims",
+    "pass": true,
+    "detail": "{\"opened\":true,\"closed\":true,\"refocused\":true,\"emptied\":true}"
+  },
+  {
+    "suite": "SESSION",
+    "id": "closing the session returns focus to whatever opened it",
+    "pass": true,
+    "detail": "{\"opened\":true,\"closed\":true,\"refocused\":true,\"emptied\":true}"
+  },
+  {
+    "suite": "SESSION",
+    "id": "closing the session tears down the terminal it held",
+    "pass": true,
+    "detail": "{\"opened\":true,\"closed\":true,\"refocused\":true,\"emptied\":true}"
+  },
+  {
+    "suite": "TIMER",
+    "id": "navigating across every ticking screen leaves no timer behind",
+    "pass": true,
+    "detail": "net live intervals after the tour: 0"
   },
   {
     "suite": "DET",

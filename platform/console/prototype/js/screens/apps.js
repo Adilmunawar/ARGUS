@@ -86,8 +86,61 @@
         key: 'deployedAt', label: 'Last deployed',
         sort: function (r) { return r.deployedAt.getTime(); },
         render: function (r) { return fmt.time(r.deployedAt); }
+      },
+      {
+        /* Secondary actions live behind the overflow menu rather than as six
+         * more buttons per row. The trigger stops its own click from reaching
+         * the row, which is itself a link to the application. */
+        key: 'actions', label: 'Actions', align: 'right', sortable: false,
+        render: function (r) {
+          return ui.menu([
+            { label: 'Open application', onSelect: function () { A.go('apps', [r.name]); } },
+            { label: 'Deployment history', onSelect: function () { A.go('apps', [r.name], { tab: 'deploys' }); } },
+            { label: 'Logs', onSelect: function () { A.go('apps', [r.name], { tab: 'logs' }); } },
+            'divider',
+            { label: 'Copy link', hint: 'Shareable', onSelect: function () { copyLink(r); } },
+            {
+              label: 'Restart instances', danger: true,
+              title: 'Restarting is a Tier 1 operation and is recorded in the audit',
+              onSelect: function () { restartApp(r); }
+            }
+          ], { label: 'Actions for ' + r.display });
+        }
       }
     ];
+  }
+
+  /* The console runs from file:// in development and behind a VPN in
+   * production, and the async clipboard API is unavailable in the first and
+   * blocked without a user gesture in some builds of the second. Neither case
+   * should lose the operator the link, so failure falls back to showing it. */
+  function copyLink(app) {
+    var href = A.href('apps', [app.name]);
+    var url = window.location.href.split('#')[0] + href;
+    function shown() { A.flash('ok', 'Link copied', url, { timeout: 5000 }); }
+    try {
+      if (window.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(shown, function () {
+          A.flash('info', 'Copy the link', url);
+        });
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    A.flash('info', 'Copy the link', url);
+  }
+
+  function restartApp(app) {
+    A.confirmDestructive({
+      title: 'Restart ' + app.display,
+      match: app.name,
+      confirmLabel: 'Restart',
+      detail: 'Every instance of ' + app.display + ' is replaced one at a time. In-flight requests on each instance are drained first, so this is not an outage, but it does reset every in-process cache the application holds.',
+      blast: app.instances + ' instance' + (app.instances === 1 ? '' : 's') + ' in ' + app.env + '.',
+      onConfirm: function () {
+        A.flash('ok', 'Restart requested for ' + app.display,
+          'The reconciler rolls the instances one at a time. Your identity and the reason are in the audit.');
+      }
+    });
   }
 
   function renderList(mount) {

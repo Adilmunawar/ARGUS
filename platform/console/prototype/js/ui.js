@@ -114,8 +114,25 @@
       else out = Math.round(s / 86400) + ' d';
       return future ? 'in ' + out : out + ' ago';
     },
+    /**
+     * An absolute timestamp, in whichever clock the operator chose.
+     *
+     * Local time always carries its offset. A console that renders a bare
+     * "14:30" is unreadable on a bridge call with a colleague in another zone,
+     * and Argus runs across two sites; the offset is what makes the number
+     * quotable.
+     */
     stamp: function (d) {
       if (!d) return '';
+      if (A.timezone && A.timezone() === 'local') {
+        var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+        var off = -d.getTimezoneOffset();
+        var sign = off < 0 ? '-' : '+';
+        var oh = Math.floor(Math.abs(off) / 60), om = Math.abs(off) % 60;
+        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+          ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) +
+          ' ' + sign + pad(oh) + ':' + pad(om);
+      }
       return d.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
     },
     /** A time element carrying both the relative and the absolute value. */
@@ -615,12 +632,145 @@
     });
   }
 
+  /**
+   * An overflow menu: the "..." that carries a row's secondary actions.
+   *
+   * A table row cannot afford six visible buttons, and a console that hides
+   * its secondary actions behind a right-click hides them from keyboard and
+   * touch alike. This is the pattern every mature console settled on, built
+   * to the WAI-ARIA menu-button pattern rather than approximated:
+   *
+   *  - the trigger owns aria-haspopup and aria-expanded, so assistive tech
+   *    announces that there is a menu and whether it is open;
+   *  - Up/Down/Home/End move within the menu and wrap, Escape closes it and
+   *    returns focus to the trigger, Tab closes it and moves on;
+   *  - a disabled item keeps its place in the order and states its reason,
+   *    for the same reason ui.btn does.
+   *
+   * items: [{label, onSelect, danger, disabled, title, hint}] or 'divider'.
+   */
+  function menu(items, opts) {
+    opts = opts || {};
+    var open = false, pop = null, offClick = null, onScroll = null;
+
+    var trigger = el('button.iconbtn.menubtn', {
+      type: 'button',
+      'aria-haspopup': 'menu',
+      'aria-expanded': 'false',
+      'aria-label': opts.label || 'More actions',
+      title: opts.label || 'More actions',
+      on: {
+        click: function (e) { e.stopPropagation(); open ? close() : show(); },
+        keydown: function (e) {
+          if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(0); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); show(-1); }
+        }
+      }
+    }, el('span.menudots', { 'aria-hidden': 'true', text: '⋯' }));
+
+    function entries() {
+      return pop ? Array.prototype.filter.call(pop.querySelectorAll('.menuitem'), function () { return true; }) : [];
+    }
+
+    function focusAt(i) {
+      var list = entries();
+      if (!list.length) return;
+      var n = ((i % list.length) + list.length) % list.length;
+      list[n].focus();
+    }
+
+    function close(refocus) {
+      if (!open) return;
+      open = false;
+      trigger.setAttribute('aria-expanded', 'false');
+      if (pop) { pop.remove(); pop = null; }
+      if (offClick) { document.removeEventListener('mousedown', offClick, true); offClick = null; }
+      if (onScroll) {
+        window.removeEventListener('scroll', onScroll, true);
+        window.removeEventListener('resize', onScroll);
+        onScroll = null;
+      }
+      if (refocus !== false) trigger.focus();
+    }
+
+    function show(startAt) {
+      if (open) return;
+      open = true;
+      trigger.setAttribute('aria-expanded', 'true');
+
+      pop = el('div.menu', { role: 'menu', 'aria-label': opts.label || 'More actions' },
+        items.map(function (it) {
+          if (it === 'divider') return el('div.menudiv', { role: 'separator' });
+          var disabled = !!it.disabled;
+          return el('button.menuitem' + (it.danger ? '.danger' : ''), {
+            type: 'button', role: 'menuitem',
+            'aria-disabled': disabled ? 'true' : null,
+            title: it.title || null,
+            class: disabled ? 'is-disabled' : null,
+            on: {
+              click: function () { if (disabled) return; close(); if (it.onSelect) it.onSelect(); }
+            }
+          }, [
+            el('span.menuitem-label', { text: it.label }),
+            it.hint ? el('span.menuitem-hint', { text: it.hint }) : null
+          ]);
+        }));
+
+      pop.addEventListener('keydown', function (e) {
+        var list = entries(), at = list.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown') { e.preventDefault(); focusAt(at + 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); focusAt(at - 1); }
+        else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
+        else if (e.key === 'End') { e.preventDefault(); focusAt(list.length - 1); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+        else if (e.key === 'Tab') { close(false); }
+      });
+
+      /* The menu is mounted on <body> and positioned fixed rather than
+       * absolutely inside the row. Every table in the console scrolls
+       * horizontally, and an absolutely positioned popup inside a scroll
+       * container is clipped by it: the first build of this menu opened
+       * half off the right edge of the table with its labels sliced in
+       * half. Fixed coordinates computed from the trigger avoid the
+       * clipping entirely. */
+      document.body.appendChild(pop);
+
+      var r = trigger.getBoundingClientRect();
+      var h = pop.offsetHeight, w = pop.offsetWidth, GAP = 5, EDGE = 8;
+
+      // Right-aligned to the trigger, flipped up when the last row of a long
+      // table would otherwise open past the bottom of the viewport.
+      var top = r.bottom + GAP;
+      if (top + h + EDGE > window.innerHeight) top = Math.max(EDGE, r.top - h - GAP);
+      var left = r.right - w;
+      if (left < EDGE) left = EDGE;
+      if (left + w + EDGE > window.innerWidth) left = Math.max(EDGE, window.innerWidth - w - EDGE);
+      pop.style.top = top + 'px';
+      pop.style.left = left + 'px';
+
+      offClick = function (e) { if (pop && !pop.contains(e.target) && e.target !== trigger) close(false); };
+      document.addEventListener('mousedown', offClick, true);
+
+      // A fixed popup cannot follow its row, so scrolling dismisses it rather
+      // than leaving it floating over unrelated content.
+      onScroll = function () { close(false); };
+      window.addEventListener('scroll', onScroll, true);
+      window.addEventListener('resize', onScroll);
+
+      if (startAt !== undefined) focusAt(startAt === -1 ? entries().length - 1 : startAt);
+    }
+
+    var wrap = el('span.menuwrap', trigger);
+    wrap.closeMenu = close;
+    return wrap;
+  }
+
   UI.el = el; UI.svg = svg; UI.clear = clear; UI.append = append; UI.fmt = fmt;
   UI.pill = pill; UI.btn = btn; UI.pageHeader = pageHeader; UI.statTile = statTile;
   UI.card = card; UI.table = table; UI.emptyState = emptyState; UI.errorState = errorState;
   UI.skeleton = skeleton; UI.dl = dl; UI.tabs = tabs; UI.sparkline = sparkline; UI.bar = bar;
   UI.graph = graph; UI.heatgrid = heatgrid; UI.timeline = timeline;
-  UI.propertyFilter = propertyFilter; UI.applyTokens = applyTokens;
+  UI.propertyFilter = propertyFilter; UI.applyTokens = applyTokens; UI.menu = menu;
 
   A.ui = UI;
 })();
