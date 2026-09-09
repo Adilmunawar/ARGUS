@@ -2,6 +2,7 @@
 $script:BaseUrl = $env:ARGUS_URL ?? 'https://console.zaraatdost.pk/api/v1'
 $script:Token   = $null
 
+# Connect-Argus: authenticate once per session; every other cmdlet reuses the cached token.
 function Connect-Argus {
     [CmdletBinding()] param([string]$Authority = 'https://adfs.argus.local/adfs')
     # OIDC device-code flow against AD FS; token cached with DPAPI for the current user.
