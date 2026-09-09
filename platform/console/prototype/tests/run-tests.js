@@ -841,6 +841,34 @@ async function axeOn(page, label) {
       if (o.doc > o.view + 1) bad.push(`${r}: ${o.doc}>${o.view}`);
     }
     rec('ZOOM', `reflow at ${z.label} zoom (${z.w}px equivalent)`, bad.length === 0, bad.slice(0, 3).join(' | '));
+
+    /* WCAG 2.4.11: and nothing may cover the control that has focus.
+     *
+     * Reflow alone was not enough. At the 320px equivalent the top bar wraps
+     * to 162px against a 200px viewport, and while it was still sticky every
+     * control the browser scrolled focus to landed underneath it, on all ten
+     * routes. A fixed scroll-padding cannot track a height that depends on how
+     * the row wraps, so below 620px the bar stops being sticky -- and this
+     * asserts the outcome rather than the mechanism. */
+    let covered = [];
+    for (const r of ROUTES) {
+      await goto(page, r);
+      const n = await page.evaluate(() => {
+        const bar = document.querySelector('.top');
+        if (!bar || getComputedStyle(bar).position !== 'sticky') return 0;
+        const br = bar.getBoundingClientRect();
+        let hit = 0;
+        const targets = [...document.querySelectorAll('#main button, #main a[href], #main input')].slice(0, 25);
+        for (const f of targets) {
+          f.focus();
+          const rr = f.getBoundingClientRect();
+          if (rr.height && rr.top < br.bottom - 1 && rr.bottom > br.top) hit++;
+        }
+        return hit;
+      });
+      if (n) covered.push(`${r}: ${n}`);
+    }
+    rec('ZOOM', `focus is never obscured at ${z.label} zoom`, covered.length === 0, covered.slice(0, 3).join(' | '));
   }
   await ctx.pages()[0].setViewportSize({ width: 1440, height: 900 });
 

@@ -1075,7 +1075,19 @@
   },
   {
     "suite": "ZOOM",
+    "id": "focus is never obscured at 200% zoom",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ZOOM",
     "id": "reflow at 400% zoom (320px equivalent)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ZOOM",
+    "id": "focus is never obscured at 400% zoom",
     "pass": true,
     "detail": ""
   },

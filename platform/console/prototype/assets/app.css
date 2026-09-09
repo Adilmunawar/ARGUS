@@ -224,6 +224,15 @@ body.railed .nav{justify-content:center;padding:9px 0}
 }
 
 @media (max-width: 620px) {
+  /* Below this width the bar wraps, and a wrapped bar is not a bar: measured
+     at a 320px viewport -- which is what 400% browser zoom gives you on a
+     1280px screen, the WCAG 1.4.10 reflow case -- it is 162px tall against a
+     200px viewport. Sticky, it covered 81% of the screen and every control
+     the browser scrolled focus to landed underneath it on all ten routes.
+     A fixed scroll-padding cannot track a height that depends on how the row
+     happens to wrap, so the bar stops being sticky instead and gives the
+     viewport back. */
+  .top { position: static; }
   .top { flex-wrap: wrap; row-gap: 8px; }
   .crumbs { order: 1; flex: 1 1 auto; }
   .kbar { order: 3; flex: 1 1 100%; margin-left: 0; }
@@ -236,6 +245,9 @@ body.railed .nav{justify-content:center;padding:9px 0}
   .elevation { margin: 12px 12px 0; }
   .top { padding: 8px 12px; }
 }
+
+/* The reserved room goes with the sticky behaviour that needed it. */
+@media (max-width: 620px) { html { scroll-padding-top: 0; } }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (prefers-contrast: more) { :root { --muted: var(--ink-soft); } }
