@@ -451,6 +451,7 @@ services:
 
   garnet:
     <<: *hardening
+    profiles: [cache]
     image: ghcr.io/microsoft/garnet:${GARNET_TAG:-2.1.5}
     container_name: argus-garnet
     hostname: garnet
@@ -490,6 +491,7 @@ services:
       start_period: 30s
 
   garnet-init:
+    profiles: [cache]
     image: valkey/valkey:${VALKEY_TAG:-9.1.2-alpine}
     container_name: argus-garnet-init
     restart: "no"
@@ -513,8 +515,27 @@ services:
   # and MUST be re-created R3 at Site A -- an R1 stream looks perfectly healthy
   # in the UI until a node dies.
 
+  # ── NOT YET IN THE DEFAULT `up` ─────────────────────────────────────────
+  #
+  # These carry `profiles:` so that `docker compose up -d` starts only what is
+  # actually built. Each of them bind-mounts a config file -- nats-server.conf,
+  # garnet.conf, the OpenBao policies -- that belongs to a later increment of
+  # the build order and is not committed yet.
+  #
+  # A missing bind-mount source is NOT a clean failure. Docker creates an empty
+  # DIRECTORY at the path, then the container dies with "not a directory: are
+  # you trying to mount a directory onto a file", which names neither the
+  # service nor the missing file. Worse, the stray directory persists and the
+  # next `up` fails the same way for a reason that is now invisible in git.
+  #
+  # Enable one only once its configuration lands:
+  #   docker compose --profile cache   up -d
+  #   docker compose --profile queues  up -d
+  #   docker compose --profile secrets up -d
+
   nats:
     <<: *hardening
+    profiles: [queues]
     # The -alpine suffix is LOAD-BEARING: the default tag is scratch-based with
     # no shell and no busybox, so the wget healthcheck silently becomes a
     # permanently-unhealthy container that blocks everything gated on it.
@@ -552,6 +573,7 @@ services:
       start_period: 30s
 
   nats-init:
+    profiles: [queues]
     # The official `nats` image ships nats-server ONLY. The `nats` CLI lives in
     # nats-box; `docker compose exec nats nats ...` fails "executable file not
     # found", which reads as a network problem.
@@ -586,6 +608,7 @@ services:
 
   openbao:
     <<: *hardening
+    profiles: [secrets]
     image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
     container_name: argus-openbao
     hostname: openbao
@@ -624,6 +647,7 @@ services:
       start_period: 15s
 
   bao-init:
+    profiles: [secrets]
     image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
     container_name: argus-bao-init
     restart: "no"
@@ -655,6 +679,7 @@ services:
       openbao: { condition: service_started }
 
   openbao-unseal:
+    profiles: [secrets]
     # A LONG-RUNNING sidecar, not a one-shot. Docker restarts `openbao` after a
     # Windows reboot but NEVER re-runs an exited init container, so without this
     # the estate comes back permanently sealed. In ceremony mode it sleeps
