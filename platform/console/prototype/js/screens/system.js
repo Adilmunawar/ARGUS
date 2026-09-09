@@ -1,0 +1,256 @@
+/* Argus Console: System.
+ *
+ * The first screen in this console that shows real data.
+ *
+ * Everything else renders fixtures. This one asks the console API for the
+ * actual machine it is running on and the actual AWS account it can see, and
+ * renders whatever comes back -- including nothing, including an error,
+ * including a value that is older than it looks. Those three are the states a
+ * fixture-backed screen never has to think about, and they are most of what
+ * separates a dashboard from a mockup.
+ *
+ * The rule this screen holds to: never show a number without saying where it
+ * came from and how old it is.
+ */
+(function () {
+  'use strict';
+
+  var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
+
+  function registerScreen(id, def) {
+    if (typeof A.screen === 'function') { A.screen(id, def); return; }
+    document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
+  }
+
+  function bytes(n) {
+    if (n === null || n === undefined) return '-';
+    var gb = n / 1073741824;
+    if (gb >= 1024) return fmt.num(gb / 1024, 2) + ' TB';
+    if (gb >= 1) return fmt.num(gb, 1) + ' GB';
+    return fmt.num(n / 1048576, 0) + ' MB';
+  }
+
+  function ratioTone(r) { return r >= 0.9 ? 'bad' : r >= 0.75 ? 'warn' : null; }
+
+  /**
+   * A panel that owns its own request and its own four states.
+   *
+   * loading, ok, empty and failed are all real and all different, and a screen
+   * that only draws the third is the thing that makes a prototype feel like a
+   * prototype. The panel renders itself immediately as a skeleton, then
+   * replaces itself -- and if the screen is left before the request lands, it
+   * throws the result away rather than writing into a detached node.
+   */
+  function livePanel(title, path, render, opts) {
+    opts = opts || {};
+    var body = el('div');
+    var card = ui.card(title, body);
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+
+    ui.clear(body);
+    body.appendChild(el('div.skel', [
+      el('div.skel-row', { style: { width: '70%' } }),
+      el('div.skel-row', { style: { width: '45%' } }),
+      el('div.skel-row', { style: { width: '60%' } })
+    ]));
+
+    A.read(path, opts).then(function (env) {
+      if (!alive) return;
+      ui.clear(body);
+
+      if (env.mode === A.MODE.SAMPLE) {
+        body.appendChild(ui.emptyState(
+          'Not available on sample data',
+          'This panel reads the machine and the cloud account through the console API. Start it with `npm start` in platform/console/server and reload.'));
+        return;
+      }
+      if (!env.ok) {
+        var e = env.error || {};
+        body.appendChild(ui.errorState(
+          opts.errorTitle || 'This could not be read',
+          e.message || 'The request failed.',
+          function () { A.forget(path); A.go(A.state.route); }));
+        return;
+      }
+
+      if (env.stale) {
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'Showing the last value that could be read.' }),
+          el('p', {
+            text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
+              ' The figures below are from ' + new Date(env.at).toISOString().replace('T', ' ').slice(0, 19) + 'Z.'
+          })
+        ]));
+      }
+
+      render(body, env.data, env);
+    });
+
+    return card;
+  }
+
+  /* ---------------------------------------------------------------- host --- */
+
+  function renderHost(body, h) {
+    body.appendChild(el('div.tiles', [
+      ui.statTile('CPU', fmt.pct(h.cpu.usageRatio * 100, 1), {
+        note: fmt.num(h.cpu.cores) + ' cores, sampled over ' + fmt.num(h.cpu.sampledOverMs) + ' ms'
+      }),
+      ui.statTile('Memory', fmt.pct(h.memory.usageRatio * 100, 0), {
+        note: bytes(h.memory.usedBytes) + ' of ' + bytes(h.memory.totalBytes)
+      }),
+      ui.statTile('Uptime', fmt.dur(h.uptimeSeconds), { note: 'Booted ' + h.bootedAt.slice(0, 16).replace('T', ' ') + 'Z' }),
+      ui.statTile('Console process', fmt.dur(h.process.uptimeSeconds), {
+        note: 'Node ' + h.process.nodeVersion + ', ' + bytes(h.process.rssBytes) + ' resident'
+      })
+    ]));
+
+    body.appendChild(ui.dl([
+      ['Hostname', el('code.mono', { text: h.hostname })],
+      ['Platform', h.platform + ' ' + h.release + ' (' + h.arch + ')'],
+      ['CPU', h.cpu.model]
+    ]));
+
+    body.appendChild(el('div.sectiontitle', { text: 'Volumes' }));
+    body.appendChild(ui.table([
+      { key: 'mount', label: 'Mount', render: function (d) { return el('code.mono', { text: d.mount }); } },
+      {
+        key: 'usageRatio', label: 'Used', align: 'right',
+        render: function (d) {
+          if (d.error) return ui.pill(d.error, 'idle');
+          return el('div.row', [
+            ui.bar(d.usageRatio, {
+              tone: ratioTone(d.usageRatio),
+              label: d.mount + ' is ' + fmt.pct(d.usageRatio * 100, 0) + ' full'
+            }),
+            el('span.num', { text: fmt.pct(d.usageRatio * 100, 0) })
+          ]);
+        }
+      },
+      { key: 'usedBytes', label: 'Used', align: 'right', render: function (d) { return d.error ? '-' : bytes(d.usedBytes); } },
+      { key: 'freeBytes', label: 'Free', align: 'right', render: function (d) { return d.error ? '-' : bytes(d.freeBytes); } },
+      { key: 'totalBytes', label: 'Size', align: 'right', render: function (d) { return d.error ? '-' : bytes(d.totalBytes); } }
+    ], h.disks, {
+      caption: 'Volumes on this host, with used, free and total capacity',
+      sortKey: 'mount',
+      rowKey: function (d) { return d.mount; },
+      empty: 'No volume could be read on this host.'
+    }));
+
+    body.appendChild(el('div.sectiontitle', { text: 'Network interfaces' }));
+    body.appendChild(ui.table([
+      { key: 'interface', label: 'Interface' },
+      { key: 'family', label: 'Family' },
+      { key: 'address', label: 'Address', render: function (n) { return el('code.mono', { text: n.address }); } }
+    ], h.network, {
+      caption: 'Non-loopback network interfaces on this host',
+      sortKey: 'interface',
+      empty: 'This host has no non-loopback interface.'
+    }));
+  }
+
+  /* ----------------------------------------------------------------- aws --- */
+
+  function renderAws(body, d) {
+    if (!d.ok) {
+      body.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'This console is not connected to AWS.' }),
+        el('p', { text: d.message || 'No reason was given.' })
+      ]));
+      return;
+    }
+    body.appendChild(ui.dl([
+      ['Account', el('code.mono', { text: d.account })],
+      ['Region', el('code.mono', { text: d.region })],
+      /* The caller ARN names a principal, not a credential. The credential
+         itself never leaves the server and has no route that could return it. */
+      ['Signed in as', el('code.mono', { text: d.arn })]
+    ]));
+  }
+
+  function countPanel(body, d, key, noun) {
+    if (!d.ok) {
+      body.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'Unavailable' }),
+        el('p', { text: d.message || 'No reason was given.' })
+      ]));
+      return;
+    }
+    var rows = d[key] || [];
+    if (!rows.length) {
+      body.appendChild(ui.emptyState('No ' + noun,
+        'This account has no ' + noun + ' in this region. That is a real answer, not a failure to load.'));
+      return;
+    }
+    body.appendChild(el('p.hint', { text: fmt.num(rows.length) + ' ' + noun + ' in this region.' }));
+  }
+
+  /* -------------------------------------------------------------- screen --- */
+
+  registerScreen('system', {
+    title: 'System',
+    crumb: 'System',
+    render: function (mount) {
+      mount.appendChild(ui.pageHeader(
+        'System',
+        'The machine this console runs on, and the cloud account it can see. Everything here is read live.',
+        [ui.btn('Refresh', {
+          onClick: function () { A.forget(); A.go('system'); }
+        })]));
+
+      /* Whether there is an API to read is itself something that has to be
+         found out, so the screen is built after the probe rather than guessing
+         from a mode that may still be 'unknown' on the first paint. */
+      var body = el('div');
+      mount.appendChild(body);
+      var alive = true;
+      A.onLeave(function () { alive = false; });
+      A.probe().then(function () { if (alive) build(body); });
+    }
+  });
+
+  function build(mount) {
+      var mode = A.storeMode();
+
+      if (mode !== A.MODE.LIVE) {
+        mount.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'The console API is not running, so this screen has nothing to read.' }),
+          el('p', {
+            text: 'Every other screen is showing bundled sample data. Start the API with `npm start` in ' +
+              'platform/console/server and reload to see this machine and your AWS account.'
+          })
+        ]));
+        return;
+      }
+
+      var caps = A.capabilities() || {};
+      mount.appendChild(el('div.callout.info', [
+        el('strong', { text: 'Live data.' }),
+        el('p', {
+          text: 'Region ' + (caps.region || 'unknown') + '. ' +
+            (caps.writesAllowed
+              ? 'This console is permitted to make changes.'
+              : 'This console is read-only: it will refuse any request that changes anything.') +
+            (caps.aws && caps.aws.connected
+              ? ' Connected to AWS account ' + caps.aws.account + '.'
+              : ' Not connected to AWS.')
+        })
+      ]));
+
+      mount.appendChild(el('div.grid.grid-2', [
+        livePanel('AWS account', '/api/aws/identity', renderAws, { errorTitle: 'The AWS identity could not be read' }),
+        livePanel('EC2 instances', '/api/aws/instances', function (b, d) { countPanel(b, d, 'instances', 'instances'); })
+      ]));
+
+      mount.appendChild(el('div.grid.grid-2', [
+        livePanel('S3 buckets', '/api/aws/buckets', function (b, d) { countPanel(b, d, 'buckets', 'buckets'); }),
+        livePanel('RDS databases', '/api/aws/databases', function (b, d) { countPanel(b, d, 'databases', 'databases'); })
+      ]));
+
+      mount.appendChild(livePanel('This host', '/api/host', renderHost, {
+        ttlMs: 2000,
+        errorTitle: 'Host telemetry could not be read'
+      }));
+  }
+})();

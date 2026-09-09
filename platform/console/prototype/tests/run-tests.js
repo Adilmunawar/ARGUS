@@ -602,9 +602,22 @@ async function axeOn(page, label) {
       const found = await page.evaluate((route) => {
         const bad = [];
         // Callouts: a tone in background and border needs a glyph too.
+        /* Not just "non-empty": a stylesheet that ended up holding a control
+           character and the text "C6" -- a CSS escape written through a layer
+           that read it as octal -- rendered a tofu box and passed this check,
+           because a tofu box is not the empty string. The glyph has to be one
+           of the shapes the pill vocabulary actually uses. */
+        const GLYPHS = ['●', '▲', '■', '◆', '○'];
         document.querySelectorAll('.callout').forEach(n => {
-          const g = getComputedStyle(n, '::before').content;
-          if (!g || g === 'none' || g === 'normal') bad.push(route + ': callout with no glyph');
+          const raw = getComputedStyle(n, '::before').content;
+          if (!raw || raw === 'none' || raw === 'normal') {
+            bad.push(route + ': callout with no glyph');
+            return;
+          }
+          const g = raw.replace(/^["']|["']$/g, '');
+          if (g.length !== 1 || GLYPHS.indexOf(g) === -1) {
+            bad.push(route + ': callout glyph is ' + JSON.stringify(raw) + ', not one of the pill shapes');
+          }
         });
         // Toned bars: the tone says "over a threshold", so it needs a texture
         // and it needs to say so in the accessible name.
