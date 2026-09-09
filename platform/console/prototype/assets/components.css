@@ -133,6 +133,12 @@
 /* ------------------------------------------------------------- tables --- */
 
 .tablewrap { overflow-x: auto; border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px; background: var(--paper); }
+/* A windowed table needs somewhere to scroll, and a header that stays put --
+   otherwise the columns scroll away from the rows they label, which is worse
+   than the cost the windowing is saving. */
+.tablewrap.is-virtual { overflow-y: auto; max-height: min(70vh, 640px); }
+.tablewrap.is-virtual thead th { position: sticky; top: 0; z-index: 2; }
+.tablewrap.is-virtual tr.vspacer td { border: none; }
 .tablewrap:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 2px; }
 .tablewrap table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tablewrap th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
@@ -265,7 +271,12 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
 
 /* ---------------------------------------------------------- callouts --- */
 
-/* Every pill in the console carries a glyph so that colour is never the only
+/* Literal glyphs, not CSS CF escapes. The escapes were written through a
+   layer that read  as an octal byte, so the stylesheet ended up holding a
+   control character followed by "C6" and the info callout rendered as a tofu
+   box. The rest of the codebase uses the characters directly; so does this.
+
+   Every pill in the console carries a glyph so that colour is never the only
    signal; callouts did not, so a `bad` callout and an `info` callout were
    identical in greyscale, on a projector, and to a deuteranope -- including the
    rolled-back-deployment banner. The glyph is the same vocabulary the pills
@@ -274,10 +285,10 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
 .callout { border-radius: 12px; padding: 11px 14px; font-size: 12.5px; border: 1px solid; margin-bottom: 14px;
   position: relative; padding-left: 34px; }
 .callout::before { position: absolute; left: 13px; top: 11px; font-size: 11px; font-weight: 700; line-height: 1.5; }
-.callout.ok::before { content: "CF"; color: var(--ok); }
-.callout.warn::before { content: "B2"; color: var(--warn); }
-.callout.bad::before { content: "A0"; color: var(--bad); }
-.callout.info::before { content: "C6"; color: var(--info); }
+.callout.ok::before { content: "●"; color: var(--ok); }
+.callout.warn::before { content: "▲"; color: var(--warn); }
+.callout.bad::before { content: "■"; color: var(--bad); }
+.callout.info::before { content: "◆"; color: var(--info); }
 .callout.ok { background: var(--ok-bg-soft); border-color: var(--ok-line); }
 .callout.warn { background: var(--warn-bg-soft); border-color: var(--warn-line); }
 .callout.bad { background: var(--bad-bg-soft); border-color: var(--bad-line); }

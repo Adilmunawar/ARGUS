@@ -9,61 +9,61 @@
     "suite": "BOOT",
     "id": "screen \"overview\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"apps\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"deploys\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"compute\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"data\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"identity\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"security\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"ml\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"ops\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"audit\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,audit"
+    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "NAV",
@@ -116,6 +116,12 @@
   {
     "suite": "NAV",
     "id": "nav target \"ops\" has a screen",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "nav target \"system\" has a screen",
     "pass": true,
     "detail": ""
   },
@@ -232,6 +238,18 @@
     "id": "the \"ops\" sidebar button is marked current once open",
     "pass": true,
     "detail": "{\"go\":\"ops\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"system\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"system\",\"painted\":338}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"system\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"system\"}"
   },
   {
     "suite": "NAV",
@@ -729,7 +747,7 @@
     "suite": "KBD",
     "id": "the overview has focusable controls",
     "pass": true,
-    "detail": "30 found"
+    "detail": "31 found"
   },
   {
     "suite": "KBD",

@@ -348,8 +348,111 @@
       });
     }
 
-    function paint() {
+    /*
+     * Windowed rendering, past a threshold.
+     *
+     * Building every row was the thing that would not survive real data. It is
+     * fine for the seven rows a fixture holds and it is not fine for an audit
+     * log, which is the one collection in this product that genuinely grows
+     * without bound -- every action by anyone, kept forever, is the promise the
+     * Audit screen makes. Ten thousand rows is ~180,000 elements, and the
+     * browser pays for all of them on every sort.
+     *
+     * Past VIRTUAL_MIN only the rows near the viewport are built, with a spacer
+     * above and below standing in for the rest so the scrollbar stays honest.
+     * Below the threshold nothing changes -- a windowed table has real costs
+     * (a scroll listener, a measured row height, find-in-page only seeing what
+     * is rendered) and they are not worth paying for thirty rows.
+     *
+     * The accessibility contract is what makes this safe to do at all: the
+     * table declares aria-rowcount for the WHOLE set and each rendered row
+     * carries its true aria-rowindex, so a screen reader is told "row 4,812 of
+     * 96,000" rather than being quietly handed a window and told it is
+     * everything.
+     */
+    var VIRTUAL_MIN = 150;
+    var OVERSCAN = 10;
+    var rowHeight = 0;
+    var windowed = false;
+
+    function buildRow(row, absoluteIndex) {
+      var tr = el('tr');
+      tr.dataset.rowIndex = String(absoluteIndex);
+      // 1-based, and the header occupies row 1.
+      tr.setAttribute('aria-rowindex', String(absoluteIndex + 2));
+      if (opts.rowKey) tr.dataset.key = opts.rowKey(row);
+      cols.forEach(function (c) {
+        var td = el('td' + (c.align === 'right' ? '.num' : '') + (c.status ? '.st' : ''));
+        var v = c.render ? c.render(row) : row[c.key];
+        append(td, v === undefined || v === null ? '-' : v);
+        tr.appendChild(td);
+      });
+      if (opts.onRow) {
+        /* No role="link" here. An explicit role REPLACES the implicit `row`,
+           so the tr stopped being a row of its table and its cells lost their
+           header association -- on exactly the rows that are the main way into
+           every detail screen. The row stays a row; it keeps its tabindex so it
+           is still reachable without a mouse, and the listeners live on the
+           tbody. */
+        tr.classList.add('is-clickable');
+        tr.tabIndex = 0;
+      }
+      return tr;
+    }
+
+    function spacer(height) {
+      return el('tr.vspacer', { 'aria-hidden': 'true' },
+        el('td', { colspan: String(cols.length), style: { height: height + 'px', padding: '0' } }));
+    }
+
+    /** Render the slice of `current` that the viewport can actually show. */
+    function renderWindow() {
+      var list = current;
       clear(tbody);
+
+      if (!list.length) {
+        tbody.appendChild(el('tr', el('td', { colspan: String(cols.length) },
+          el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
+        return;
+      }
+
+      var frag = document.createDocumentFragment();
+
+      if (!windowed) {
+        list.forEach(function (row, i) { frag.appendChild(buildRow(row, i)); });
+        tbody.appendChild(frag);
+        return;
+      }
+
+      // One measurement, reused. Reading it per scroll would be the layout
+      // thrash this is meant to avoid.
+      if (!rowHeight) {
+        var probe = buildRow(list[0], 0);
+        tbody.appendChild(probe);
+        rowHeight = probe.offsetHeight || 34;
+        clear(tbody);
+      }
+
+      var viewH = wrap.clientHeight || 480;
+      var first = Math.max(0, Math.floor(wrap.scrollTop / rowHeight) - OVERSCAN);
+      var count = Math.ceil(viewH / rowHeight) + OVERSCAN * 2;
+      var last = Math.min(list.length, first + count);
+
+      if (first > 0) frag.appendChild(spacer(first * rowHeight));
+      for (var i = first; i < last; i++) frag.appendChild(buildRow(list[i], i));
+      if (last < list.length) frag.appendChild(spacer((list.length - last) * rowHeight));
+
+      tbody.appendChild(frag);
+    }
+
+    var scrollQueued = false;
+    function onScroll() {
+      if (!windowed || scrollQueued) return;
+      scrollQueued = true;
+      window.requestAnimationFrame(function () { scrollQueued = false; renderWindow(); });
+    }
+
+    function paint() {
       var list = rows.slice();
       if (state.key) {
         var col = cols.filter(function (c) { return c.key === state.key; })[0];
@@ -360,38 +463,17 @@
       current = list;
       rowsShown = list;
 
-      // Build detached and attach once. Appending each row to a tbody that is
-      // already in the document makes the browser invalidate the table on every
-      // one of them.
-      var frag = document.createDocumentFragment();
+      var wasWindowed = windowed;
+      windowed = list.length > VIRTUAL_MIN;
+      wrap.classList.toggle('is-virtual', windowed);
+      t.setAttribute('aria-rowcount', String(list.length + 1));
+      if (windowed && !wasWindowed) wrap.addEventListener('scroll', onScroll);
+      if (!windowed && wasWindowed) wrap.removeEventListener('scroll', onScroll);
+      // A re-sort re-orders everything, so the old scroll offset means nothing.
+      if (windowed) wrap.scrollTop = 0;
 
-      if (!list.length) {
-        frag.appendChild(el('tr', el('td', { colspan: String(cols.length) },
-          el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
-      }
-      list.forEach(function (row, rowIndex) {
-        var tr = el('tr');
-        tr.dataset.rowIndex = String(rowIndex);
-        if (opts.rowKey) tr.dataset.key = opts.rowKey(row);
-        cols.forEach(function (c) {
-          var td = el('td' + (c.align === 'right' ? '.num' : '') + (c.status ? '.st' : ''));
-          var v = c.render ? c.render(row) : row[c.key];
-          append(td, v === undefined || v === null ? '-' : v);
-          tr.appendChild(td);
-        });
-        if (opts.onRow) {
-          /* No role="link" here. An explicit role REPLACES the implicit `row`,
-             so the tr stopped being a row of its table and its cells lost their
-             header association -- on exactly the rows that are the main way
-             into every detail screen. The row stays a row; it keeps its
-             tabindex so it is still reachable without a mouse, and the
-             listeners live on the tbody. */
-          tr.classList.add('is-clickable');
-          tr.tabIndex = 0;
-        }
-        frag.appendChild(tr);
-      });
-      tbody.appendChild(frag);
+      renderWindow();
+
       // Only a sort the operator asked for is worth announcing. Announcing the
       // first paint of all 31 tables races the route-change announcement and
       // silently drops it.
