@@ -450,6 +450,40 @@ async function main() {
   const worm = await probeWorm();
   log(`WORM enforcement: ${worm.verdict.toUpperCase()} -- ${worm.detail}`);
 
+  /* Record what ACTUALLY exists, not just what was declared.
+   *
+   * This is the only place in the stack that can. ListBuckets on SeaweedFS
+   * 3.97 requires a GLOBAL Write action, and giving that to the console would
+   * mean write access to every bucket including any added later -- so the
+   * console has per-bucket grants and cannot enumerate. This process is the
+   * one holding admin, for the few seconds it takes.
+   *
+   * The difference between this list and buckets.yaml is drift: a bucket
+   * somebody made by hand, or one deleted out from under the declaration.
+   * Without it the console can only ever show what the file claims, which
+   * makes the file unfalsifiable. */
+  let actual = null;
+  let actualError = null;
+  try {
+    const out = await s3.send(new ListBucketsCommand({}));
+    actual = (out.Buckets || []).map((b) => ({
+      name: b.Name,
+      createdAt: b.CreationDate ? new Date(b.CreationDate).toISOString() : null
+    })).sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    actualError = `${errName(err)}: ${err && err.message}`;
+    warn(`could not enumerate buckets for the drift record: ${actualError}`);
+  }
+
+  if (actual) {
+    const declaredNames = new Set(specs.map((s) => s.name));
+    const undeclared = actual.map((b) => b.name)
+      .filter((n) => !declaredNames.has(n) && n !== PROBE_BUCKET);
+    if (undeclared.length) {
+      warn(`${undeclared.length} bucket(s) exist but are not declared in ${BUCKETS_FILE}: ${undeclared.join(', ')}`);
+    }
+  }
+
   const report = {
     at: new Date().toISOString(),
     endpoint: ENDPOINT,
@@ -457,6 +491,9 @@ async function main() {
     source: BUCKETS_FILE,
     devOverrides: PROFILE === 'dev' ? { mode: DEV_LOCK_MODE, days: DEV_LOCK_DAYS } : null,
     buckets: rows,
+    actual,
+    actualError,
+    probeBucket: PROBE_BUCKET,
     problems,
     worm
   };

@@ -29,8 +29,45 @@ const path = require('path');
 const config = require('./config');
 const host = require('./host');
 const aws = require('./aws');
+const storage = require('./storage');
 
 const STARTED = new Date();
+
+/* A handler returns one of these when the response is not JSON -- object
+   preview is the only case today. Without an escape hatch the alternative is a
+   second server or a base64 blob inside a JSON envelope, and the second one
+   quietly triples the memory cost of every image an operator opens. */
+class RawResponse {
+  constructor({ status = 200, headers = {}, body = null, stream = null }) {
+    this.status = status;
+    this.headers = headers;
+    this.body = body;
+    this.stream = stream;
+  }
+}
+
+/* Map a thrown error onto the status it deserves.
+ *
+ * Everything used to become a 500, which told the browser "the server is
+ * broken" when the truth was "you asked for a bucket that does not exist".
+ * The console renders retry affordances off these, so getting them wrong means
+ * offering Try Again for something that will never succeed. */
+const STATUS_FOR = {
+  ValidationError: 400,
+  UnsupportedType: 415,
+  TooLarge: 413,
+  Busy: 429
+};
+
+function statusForError(err) {
+  if (err && STATUS_FOR[err.name]) return STATUS_FOR[err.name];
+  const c = storage.classify(err);
+  if (c.reason === 'not-found' || c.reason === 'no-such-bucket') return 404;
+  if (c.reason === 'denied') return 403;
+  if (c.reason === 'timeout') return 504;
+  if (c.reason === 'unreachable') return 503;
+  return 500;
+}
 
 /* decodeURIComponent throws URIError on a malformed escape such as "%" or
    "%zz". A request for one of those must be a 404, not an unhandled throw. */
@@ -70,6 +107,49 @@ const routes = {
   'GET /api/aws/databases': async () => aws.databases(),
   'GET /api/aws/alarms': async () => aws.alarms(),
   'GET /api/aws/cost': async () => aws.cost(),
+
+  /* ---------------------------------------------------------- object store ---
+     The S3 replacement. Unlike the /api/aws/* routes above, these read a
+     service this project runs itself, so "not configured" is not an expected
+     answer -- if these fail, something is actually wrong, and the reason says
+     which part. */
+
+  'GET /api/storage/health': async () => storage.health(),
+  'GET /api/storage/capacity': async () => storage.capacity(),
+  'GET /api/storage/buckets': async () => storage.buckets(),
+  'GET /api/storage/lock-status': async () => storage.lockStatus(),
+
+  'GET /api/storage/objects': async (q) =>
+    storage.listObjects({ bucket: q.bucket, prefix: q.prefix || '', cursor: q.cursor || null }),
+
+  'GET /api/storage/object': async (q) =>
+    storage.describeObject({ bucket: q.bucket, key: q.key }),
+
+  /* Budgeted, serialised, and only ever reached from a button. See storage.js. */
+  'GET /api/storage/prefix-size': async (q) =>
+    storage.prefixSize({ bucket: q.bucket, prefix: q.prefix || '' }),
+
+  /* The one non-JSON route. Every header here is load-bearing: these are
+     user-uploaded survey photographs served from the console's own origin, so
+     without the sandbox and a content type chosen by allowlist rather than by
+     the uploader, an .html in a bucket is stored XSS against the control
+     plane. */
+  'GET /api/storage/preview': async (q) => {
+    const { stream, contentType, contentLength } = await storage.previewObject({ bucket: q.bucket, key: q.key });
+    return new RawResponse({
+      status: 200,
+      headers: {
+        'content-type': contentType,
+        'content-length': contentLength,
+        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        'x-content-type-options': 'nosniff',
+        'content-disposition': 'inline',
+        'cache-control': 'private, max-age=60',
+        'referrer-policy': 'no-referrer'
+      },
+      stream
+    });
+  },
 
   /* The estate in one call, for the overview screen. Partial failure is the
      normal case -- an account may allow EC2 and deny RDS -- so each section
@@ -156,16 +236,46 @@ const server = http.createServer(async (req, res) => {
   try {
     if (handler) {
       const body = await handler(Object.fromEntries(parsed.searchParams));
-      sendJson(res, 200, body);
+      if (body instanceof RawResponse) {
+        res.writeHead(body.status, body.headers);
+        if (body.stream) {
+          /* Destroy the upstream body if the browser goes away mid-download,
+             so an operator closing a tab does not leave the S3 connection open
+             until it times out. */
+          res.on('close', () => { if (typeof body.stream.destroy === 'function') body.stream.destroy(); });
+          body.stream.on('error', (err) => {
+            log('error', `${key} stream failed: ${err && err.message}`);
+            res.destroy();
+          });
+          body.stream.pipe(res);
+        } else {
+          res.end(body.body);
+        }
+      } else {
+        sendJson(res, 200, body);
+      }
     } else if (pathname.startsWith('/api/')) {
       sendJson(res, 404, { error: 'no such endpoint', path: pathname });
     } else {
       await serveStatic(req, res, pathname);
     }
   } catch (err) {
-    // Never leak an internal stack to the client; log it, return a shape.
     log('error', `${key} failed: ${err && err.message}`);
-    sendJson(res, 500, { error: 'internal', message: 'The request failed. The reason is in the server log.' });
+    if (res.headersSent) { res.destroy(); return; }
+    const status = statusForError(err);
+    /* A 4xx is the caller's fault and the caller can fix it, so it gets the
+       real reason. A 5xx is ours: the client gets a shape and the stack stays
+       in the log, because an internal stack in an HTTP body is a map of the
+       filesystem. */
+    if (status < 500) {
+      const c = storage.classify(err);
+      sendJson(res, status, { ok: false, error: err.name || c.reason, message: err.message || c.message });
+    } else {
+      sendJson(res, status, {
+        ok: false, error: 'internal',
+        message: 'The request failed. The reason is in the server log.'
+      });
+    }
   } finally {
     log('info', `${req.method} ${pathname} ${Date.now() - started}ms`);
   }

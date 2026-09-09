@@ -120,6 +120,49 @@ function send(method, path) {
     assert.ok(overview.host.hostname, 'host section should still work');
   });
 
+  /* ------------------------------------------------------------- storage --- */
+  /* These run with NO object store reachable, which is the state on a laptop
+     before `docker compose up` and during any outage of it. The requirement is
+     not that they succeed -- it is that they fail as data rather than as a
+     stack trace, so the console can render a reason instead of a blank panel. */
+
+  for (const path of ['/api/storage/health', '/api/storage/capacity', '/api/storage/buckets']) {
+    const r = await get(path);
+    check(`${path} degrades to a reason, not a 500`, () => {
+      assert.strictEqual(r.status, 200, `status ${r.status}`);
+      const b = JSON.parse(r.body);
+      if (b.ok === false) {
+        assert.ok(b.reason, 'no machine-readable reason');
+        assert.ok(b.message && b.message.length > 20, 'no human-readable message');
+      }
+    });
+  }
+
+  const lock = await get('/api/storage/lock-status');
+  check('lock-status says "not determined" rather than inventing a verdict', () => {
+    assert.strictEqual(lock.status, 200);
+    const b = JSON.parse(lock.body);
+    /* The dangerous failure here is a green shield with nothing behind it, so
+       the only two acceptable answers are a real verdict or an explicit
+       "undetermined". A default of "enforced" would be a lie about the one
+       control ADR-0020 depends on. */
+    if (b.determined) assert.ok(['enforced', 'not-enforced', 'unknown'].includes(b.verdict), `verdict ${b.verdict}`);
+    else assert.ok(b.message && /probe|storage-init/i.test(b.message), 'no explanation for the missing verdict');
+  });
+
+  const badBucket = await get('/api/storage/objects?bucket=xx');
+  check('a bucket name that cannot exist is a 400, not a 500', () => {
+    assert.strictEqual(badBucket.status, 400, `status ${badBucket.status}`);
+  });
+
+  const badType = await get('/api/storage/preview?bucket=argus-ml&key=payload.exe');
+  check('preview refuses a type that is not on the allowlist', () => {
+    /* 415 when the store is reachable, an upstream failure when it is not.
+       What must never happen is 200: the allowlist decides the content type,
+       so a hole here is stored XSS against the console's own origin. */
+    assert.notStrictEqual(badType.status, 200, 'an executable was previewable');
+  });
+
   /* -------------------------------------------------------------- guards --- */
   const post = await send('POST', '/api/aws/instances');
   check('mutating verbs are refused while read-only', () => {

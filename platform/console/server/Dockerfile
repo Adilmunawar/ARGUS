@@ -52,6 +52,18 @@ COPY --chown=node:node server/    ./server/
 COPY --chown=node:node prototype/ ./prototype/
 COPY --chown=node:node tools/     ./tools/
 
+# /state is a NAMED VOLUME at runtime. Docker initialises an empty named volume
+# from the image path it is mounted on -- including its ownership -- so creating
+# it here as node:node is what makes it writable by uid 1000. Without this the
+# volume is created root:root 0755, the init container writes its WORM verdict
+# nowhere, and the console renders "not determined" over a probe that actually
+# ran and actually passed.
+#
+# Deliberately NOT a VOLUME instruction: that would make every plain
+# `docker run` of this image leave an anonymous volume behind. The compose file
+# names the volume; the image only has to own the mount point.
+RUN mkdir -p /state && chown node:node /state
+
 # uid 1000, shipped by the node image. Declared explicitly because a future base
 # change that drops the user would otherwise silently run this as root, and
 # nothing in the application would notice or complain.

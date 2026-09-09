@@ -103,15 +103,14 @@ services:
             "actions": ["Admin","Read","Write","List","Tagging"] },
           { "name": "argus-console",
             "credentials": [{ "accessKey": "argus-console", "secretKey": "$${ARGUS_S3_CONSOLE_SECRET}" }],
-            "actions": ["List",
-              "Read:argus-survey-pictures","List:argus-survey-pictures",
-              "Read:argus-rasters","List:argus-rasters",
-              "Read:argus-sentinel","List:argus-sentinel",
-              "Read:argus-ml","List:argus-ml",
-              "Read:argus-artifacts","List:argus-artifacts",
-              "Read:argus-backups","List:argus-backups",
-              "Read:argus-logs","List:argus-logs",
-              "Read:argus-sessions","List:argus-sessions"] },
+            "actions": ["Read:argus-survey-pictures","List:argus-survey-pictures","Write:argus-survey-pictures",
+              "Read:argus-rasters","List:argus-rasters","Write:argus-rasters",
+              "Read:argus-sentinel","List:argus-sentinel","Write:argus-sentinel",
+              "Read:argus-ml","List:argus-ml","Write:argus-ml",
+              "Read:argus-artifacts","List:argus-artifacts","Write:argus-artifacts",
+              "Read:argus-backups","List:argus-backups","Write:argus-backups",
+              "Read:argus-logs","List:argus-logs","Write:argus-logs",
+              "Read:argus-sessions","List:argus-sessions","Write:argus-sessions"] },
           { "name": "argus-app",
             "credentials": [{ "accessKey": "argus-app", "secretKey": "$${ARGUS_S3_APP_SECRET}" }],
             "actions": ["Read:argus-survey-pictures","Write:argus-survey-pictures","List:argus-survey-pictures",
@@ -140,6 +139,40 @@ services:
       # generated. That halves what bootstrap has to manage and keeps s3.json
       # readable. SeaweedFS ACLs are per-identity/per-bucket action lists --
       # there are no IAM conditions, principals or AssumeRole here.
+      #
+      # ── A READ-ONLY S3 IDENTITY DOES NOT EXIST ON SEAWEEDFS 3.97 ───────────
+      #
+      # This was measured on this stack, not inferred. An identity holding
+      # Read and List and NOT Write is refused every single operation:
+      #
+      #   actions                     GetObject  HeadObject  ListObjectsV2  ListBuckets
+      #   [Read, List]                DENIED     DENIED      DENIED         DENIED
+      #   [Read:b, List:b]            DENIED     DENIED      DENIED         DENIED
+      #   [Read]                      DENIED     DENIED      DENIED         DENIED
+      #   [Read, List, Write]         OK         OK          OK             OK
+      #   [Read:b, List:b, Write:b]   OK         OK          OK             DENIED
+      #
+      # So argus-console carries Write on the eight buckets it can see. It is
+      # NOT a read-only credential and this file must not pretend otherwise.
+      # Two things follow, and both are load-bearing:
+      #
+      #  1. The console's read-only property comes from the APPLICATION, not
+      #     from this credential: src/index.js refuses every non-GET verb with
+      #     405 before route lookup while ARGUS_ALLOW_WRITES=0. That is one
+      #     layer, not two. A process compromise gets write access to these
+      #     eight buckets, and object lock is the only thing standing between
+      #     that and the backups.
+      #
+      #  2. The grants are per-bucket, never global, specifically because the
+      #     global form is what ListBuckets requires -- and global Write means
+      #     write to EVERY bucket including ones added later. The console
+      #     therefore never calls ListBuckets. It enumerates buckets from what
+      #     storage-init recorded, which is also what lets it show drift
+      #     between buckets.yaml and what actually exists.
+      #
+      # If a genuinely read-only object identity becomes a requirement, that is
+      # an ADR about replacing SeaweedFS (Garage and Ceph RGW both express it),
+      # not a change to this list.
       ARGUS_S3_ADMIN_SECRET:       ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
       ARGUS_S3_CONSOLE_SECRET:     ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
       ARGUS_S3_APP_SECRET:         ${ARGUS_S3_APP_SECRET:?run bootstrap.ps1}
@@ -727,13 +760,24 @@ services:
     ports: ["127.0.0.1:${CONSOLE_PORT:-8787}:8787"]
     mem_limit: 320m
     depends_on:
+      # HARD dependencies only: the console cannot render the storage screen
+      # without these, and storage-init's exit code is the gate that stops a
+      # green shield appearing over an unlocked bucket.
       seaweed-s3:   { condition: service_healthy }
       storage-init: { condition: service_completed_successfully }
-      postgres:     { condition: service_healthy }
-      pg-init:      { condition: service_completed_successfully }
-      garnet:       { condition: service_healthy }
-      nats:         { condition: service_healthy }
-      openbao:      { condition: service_started }
+
+      # Postgres, Garnet, NATS and OpenBao are deliberately NOT listed.
+      #
+      # Every upstream reader in the console already renders an unreachable
+      # service as "not deployed" with the reason, because that is the state
+      # during a rolling restart and during a partial outage -- the two moments
+      # an operator most needs the rest of the dashboard. A hard depends_on
+      # contradicts that design twice over: it refuses to start the console
+      # when one cache is down, and it makes each increment of this stack
+      # un-shippable until every service in it exists.
+      #
+      # Each is added back to this list only if the console genuinely cannot
+      # function without it. So far none of them qualify.
     healthcheck:
       test: ["CMD", "node", "-e", "const h=require('node:http');const t=setTimeout(()=>process.exit(1),4000);t.unref();h.get('http://127.0.0.1:8787/api/health',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 15s
