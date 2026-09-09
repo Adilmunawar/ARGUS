@@ -82,7 +82,13 @@
   --glow:rgba(var(--leaf-rgb),.05);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{-webkit-text-size-adjust:100%}
+html{-webkit-text-size-adjust:100%;
+  /* The top bar is position:sticky and 46px tall. Nothing in either stylesheet
+     reserved room for it, so a focused control scrolled to by the browser
+     could land underneath it (WCAG 2.4.11). Chromium's sequential-focus
+     scrolling happened to keep it clear, which means the guarantee was held by
+     browser behaviour rather than by anything here. scroll-padding states it. */
+  scroll-padding-top:58px}
 /* background-attachment was `fixed`. A viewport-anchored background cannot use
    the browser's fast scroll path: the gradient is re-rasterised across the
    whole viewport on every frame of every scroll, on every screen, forever --

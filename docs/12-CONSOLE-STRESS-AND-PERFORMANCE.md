@@ -247,11 +247,33 @@ Three deep-link parameters the console has always emitted are finally consumed: 
 
 And the falsy-zero family is gone: a checkpoint taken within the last minute no longer reads as "no replica", `ratioPct(null)` reports missing rather than a confident `0.0%`, and a zero-weight timeline segment no longer renders full width.
 
-## Part 7: What is still not tested
+## Part 7: The colour-blind verification, which had been outstanding since v2
+
+`11-CONSOLE-UX-BENCHMARK-AND-BUGS.md` has carried "colour-blindness verification of the pill tones" as an open item. It is now done, computed rather than eyeballed, against the console's own status tokens:
+
+```
+status ink, light  (--ok #046c4e, --warn #92400e, --bad #991b1b, --info #075985, idle #4c5a52)
+  worst adjacent pair   bad <-> warn    deltaE 2.9 deutan · 4.0 tritan · 6.7 normal vision
+  contrast vs surface   all five >= 3:1
+status ink, dark
+  worst adjacent pair   bad <-> warn    deltaE 6.6 deutan
+```
+
+**The two states that matter most in an operations console are close to indistinguishable by hue.** A deuteranopic delta-E of 2.9 is not a near miss; the threshold for "tell these apart at a glance" is around 8, and 15 for normal vision.
+
+That is not a reason to repaint the palette — it is the reason the console's own rule exists. "Colour is never the only signal. Every status pill carries a glyph" is load-bearing, not decorative, and the right response to this measurement is to find every place that was breaking it. Two were left after the earlier passes:
+
+- **Callouts** carried severity in background and border alone. They now carry the same geometric glyph vocabulary the pills use.
+- **Toned bars** — the utilisation bar over 85%, and cache memory pressure — put "this has crossed a threshold" in hue alone. The number beside the bar says 87%; nothing said 87% was over the line, and the accessible label did not mention the tone either. A toned fill now carries a diagonal texture and names its threshold in the label.
+
+The heat grid was already safe (every cell carries its score as text, and not-applicable carries a hatch), as were the plan diff (`.sr` "changes from"/"to" plus a line-through) and the rollout progress bar (a real `progressbar` with `aria-valuetext`).
+
+One related gap closed at the same time: there was no `scroll-padding-top` anywhere, so the 46px sticky top bar could cover a control the browser had just scrolled focus to. Chromium's own sequential-focus behaviour happened to keep it clear, which meant WCAG 2.4.11 was being held by the browser rather than by the stylesheet. It is now stated.
+
+## Part 8: What is still not tested
 
 The prototype remains static HTML with no backend, so none of this says anything about the platform. Specific to the measurements above:
 
 - Real browser zoom at 200% and 400%, as opposed to viewport emulation.
 - A screen-reader pass with NVDA and Narrator. Several findings here (H3, M8, M9) are about what an assistive technology *says*, and only a real one can settle it.
-- Colour-blind verification of the pill and heat tones. Non-colour signals were checked to exist; the hues were not checked to be separable.
 - Firefox and Safari. Sticky-header focus obscuring came out clean in Chromium, but it is held by browser behaviour rather than by anything in the stylesheets — there is no `scroll-padding-top` anywhere.

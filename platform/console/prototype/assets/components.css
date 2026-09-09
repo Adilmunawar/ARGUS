@@ -190,8 +190,14 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .spark { display: block; overflow: visible; }
 .bar, .meter { background: var(--sunk); border-radius: 999px; height: 8px; overflow: hidden; min-width: 60px; }
 .bar-fill, .meter-fill { height: 100%; background: var(--c1); border-radius: 999px; }
-.bar-fill.warn, .meter-fill.warn { background: var(--c2); }
-.bar-fill.bad, .meter-fill.bad { background: var(--c4); }
+/* A toned fill carries a texture as well as a hue. warn and bad separate by a
+   deuteranopic delta-E of 2.9 in this palette, so hue alone does not tell a
+   colour-blind operator that a bar has crossed its threshold. The stripe
+   survives greyscale, projection and forced-colours too. */
+.bar-fill.warn, .meter-fill.warn { background-color: var(--c2);
+  background-image: repeating-linear-gradient(45deg, rgba(var(--white-rgb),.38) 0 3px, transparent 3px 7px); }
+.bar-fill.bad, .meter-fill.bad { background-color: var(--c4);
+  background-image: repeating-linear-gradient(135deg, rgba(var(--white-rgb),.42) 0 3px, transparent 3px 7px); }
 
 .graphwrap { overflow-x: auto; }
 .graph { display: block; min-width: 100%; height: auto; }

@@ -925,6 +925,12 @@
   },
   {
     "suite": "GUARD",
+    "id": "no status is conveyed by colour alone",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
     "id": "a deep link opens the tab it names",
     "pass": true,
     "detail": "Access grants"

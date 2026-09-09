@@ -578,6 +578,42 @@ async function axeOn(page, label) {
       return order[order.length - 1] === 'b';
     }));
 
+  /* Colour is never the only signal.
+   *
+   * Measured against this palette, `bad` and `warn` separate by a deuteranopic
+   * delta-E of 2.9 -- so the glyph rule is what actually carries severity, and
+   * an assertion is the only thing that keeps it true as screens are added. */
+  {
+    const colourOnly = [];
+    for (const r of ['overview', 'deploys', 'data/cache', 'security/posture', 'compute/host/hv-03', 'ml/pipelines']) {
+      await goto(page, r);
+      const found = await page.evaluate((route) => {
+        const bad = [];
+        // Callouts: a tone in background and border needs a glyph too.
+        document.querySelectorAll('.callout').forEach(n => {
+          const g = getComputedStyle(n, '::before').content;
+          if (!g || g === 'none' || g === 'normal') bad.push(route + ': callout with no glyph');
+        });
+        // Toned bars: the tone says "over a threshold", so it needs a texture
+        // and it needs to say so in the accessible name.
+        document.querySelectorAll('.bar-fill.warn, .bar-fill.bad, .meter-fill.warn, .meter-fill.bad').forEach(n => {
+          if (getComputedStyle(n).backgroundImage === 'none') bad.push(route + ': toned bar with no texture');
+          const host = n.closest('[role="img"]');
+          const label = host ? (host.getAttribute('aria-label') || '') : '';
+          if (!/threshold/i.test(label)) bad.push(route + ': toned bar whose label omits the threshold');
+        });
+        // Pills: the existing rule, asserted rather than assumed.
+        document.querySelectorAll('.pill').forEach(n => {
+          if (!n.querySelector('.pill-glyph')) bad.push(route + ': pill with no glyph');
+        });
+        return bad;
+      }, r);
+      colourOnly.push(...found);
+    }
+    rec('GUARD', 'no status is conveyed by colour alone',
+      colourOnly.length === 0, colourOnly.slice(0, 6).join(' | '));
+  }
+
   // A deep link opens the tab it names.
   await goto(page, 'identity/grants');
   rec('GUARD', 'a deep link opens the tab it names',

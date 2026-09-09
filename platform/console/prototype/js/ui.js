@@ -577,12 +577,26 @@
   }
 
   /** A horizontal bar, used for utilisation and share-of-total. */
+  /**
+   * A horizontal bar.
+   *
+   * The tone says "this has crossed a threshold", and it said it in hue alone:
+   * the value beside the bar tells you it is 87%, not that 87% is over the
+   * line. Validated against the console's own status palette, `warn` and `bad`
+   * separate by a deuteranopic delta-E of 2.9 -- the two states that matter
+   * most in an operations console are close to indistinguishable by colour.
+   * So a toned fill now also carries a texture, and the tone is named in the
+   * accessible label rather than left to the eye.
+   */
+  var TONE_WORD = { warn: 'over the warning threshold', bad: 'over the critical threshold' };
   function bar(ratio, opts) {
     opts = opts || {};
     var pct = Math.max(0, Math.min(1, ratio)) * 100;
+    var base = opts.label || (Math.round(pct) + '%');
+    var word = TONE_WORD[opts.tone];
     return el('div.bar', {
       role: 'img',
-      'aria-label': opts.label || (Math.round(pct) + '%')
+      'aria-label': word ? base + ', ' + word : base
     }, el('div.bar-fill' + (opts.tone ? '.' + opts.tone : ''), { style: { width: pct.toFixed(1) + '%' } }));
   }
 

@@ -157,7 +157,7 @@ Everything above is already fixed in v2 and the suite is green. This is what rem
 | **Real keyboard-only walkthrough of the Connect flow** | Requesting elevation, connecting, and disconnecting without a mouse is the highest-stakes path in the product |
 | **Focus management for dialogs and the command palette** | Not built yet; focus trap, Escape, restore-focus-on-close |
 | **Loading, empty and error states for every screen** | The prototype only shows the happy path. Cloudscape's own guidance is that these behaviours are defined once as patterns, not per screen |
-| **Colour-blindness verification of the pill tones** against the Mills six-check dataviz script | Mills validated its chart palette this way; the console's status colours have not been |
+| ~~Colour-blindness verification of the pill tones~~ **Done, 9 Sep 2026.** See `12-CONSOLE-STRESS-AND-PERFORMANCE.md` Part 7 | The result: `bad` and `warn` separate by a deuteranopic delta-E of 2.9, so they are *not* distinguishable by hue. The glyph rule is what carries severity, and the two places that were breaking it (callouts, toned bars) are fixed |
 | **Test at 200% and 400% browser zoom** (WCAG 1.4.10 reflow) | Not covered by the viewport tests |
 
 ### Later: when there is a real backend
