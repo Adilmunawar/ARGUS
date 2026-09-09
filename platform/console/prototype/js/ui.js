@@ -1010,23 +1010,34 @@
   function revealRow(host, key, opts) {
     opts = opts || {};
     if (!host || !key) return false;
-    // Scanned rather than composed into a selector: a key may contain quotes,
-    // brackets or a slash (secret paths do), and building a selector out of
-    // one is how a valid key turns into a syntax error at runtime.
     var want = String(key);
-    var row = null;
-    var candidates = host.querySelectorAll('[data-key]');
-    for (var i = 0; i < candidates.length; i++) {
-      if (candidates[i].getAttribute('data-key') === want) { row = candidates[i]; break; }
-    }
-    if (!row) return false;
-    row.classList.add('is-linked');
-    row.setAttribute('tabindex', '-1');
-    // After paint, so the row has a box to scroll to.
+
+    /*
+     * The lookup is deferred, not just the scroll.
+     *
+     * ui.tabs selects its initial panel while the screen is still being built,
+     * so a deep link that names a tab AND a row -- which is every one of them,
+     * "#/security/alerts?id=al-9021" -- ran this before the panel was in the
+     * document. The row was never found and the highlight silently did
+     * nothing, which an end-to-end walk of the triage journey caught and no
+     * component test could: every part worked, the sequence did not.
+     */
     window.setTimeout(function () {
+      // Scanned rather than composed into a selector: a key may contain quotes,
+      // brackets or a slash (secret paths do), and building a selector out of
+      // one is how a valid key turns into a syntax error at runtime.
+      var scope = host && host.isConnected ? host : document;
+      var row = null;
+      var candidates = scope.querySelectorAll('[data-key]');
+      for (var i = 0; i < candidates.length; i++) {
+        if (candidates[i].getAttribute('data-key') === want) { row = candidates[i]; break; }
+      }
+      if (!row) return;
+      row.classList.add('is-linked');
+      row.setAttribute('tabindex', '-1');
       try { row.scrollIntoView({ block: 'center' }); } catch (e) { row.scrollIntoView(); }
       row.focus({ preventScroll: true });
-      if (opts.announce !== false && A.announce) A.announce(opts.label || (String(key) + ' is highlighted below'));
+      if (opts.announce !== false && A.announce) A.announce(opts.label || (want + ' is highlighted below'));
     }, 0);
     return true;
   }
