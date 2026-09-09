@@ -116,7 +116,12 @@
         })
       ]) : null,
       ui.card('Asset dependency graph',
-        ui.graph(nodes, edges, { label: 'Dagster asset graph, upstream assets on the left' }), { flush: true }),
+        // Edges are [upstream, downstream], which is what the drawing needs and
+        // the opposite of "depends on". The verb has to match the direction.
+        ui.graph(nodes, edges, {
+          label: 'Dagster asset graph, upstream assets on the left',
+          verb: 'feeds'
+        }), { flush: true }),
       ui.card('Assets', [
         ui.table(cols, d.pipelines, {
           caption: 'Dagster assets with freshness state, last run, duration and freshness SLA',
@@ -139,6 +144,12 @@
       match: m.run,
       environment: A.state.env,
       confirmLabel: 'Promote ' + m.run,
+      /* confirmDestructive otherwise states "This cannot be undone from the
+         console", which directly contradicts the detail below it: promotion is
+         the one action on this screen the code itself describes as reversible.
+         The ladder is still right -- it repoints live serving -- but the
+         sentence has to be true. */
+      reversible: 'The previous run stays in the registry, so this can be undone by promoting it back.',
       detail: 'Promoting ' + m.run + ' repoints the Ray Serve endpoint at it. Every prediction served after '
         + 'the swap comes from this run, including requests already in flight behind the gateway. The '
         + 'previous run stays in the registry, so rolling back is another promotion rather than a rebuild.',
@@ -334,7 +345,14 @@
             var q = stacInput.value.trim();
             // Deterministic from the query itself, so the same search always
             // reports the same count in a demo or a screenshot.
-            var n = 120 + q.length * 23;
+            /* The count was a function of the query LENGTH, so a narrower
+               query claimed more items: the placeholder's own bbox query
+               returned 1,270 against a whole-collection count of 120. It is
+               derived from the mirror's actual coverage now, and a filtered
+               query can only ever return a subset of it. */
+            var whole = 0;
+            for (var wi = 0; wi < 8; wi++) whole += 8 + ((wi * 5 + 3) % 7);
+            var n = q ? Math.max(1, Math.round(whole * 0.18)) : whole;
             A.flash('info', 'STAC search returned ' + fmt.num(n) + ' items',
               q ? 'Query: ' + q : 'Empty query, so the whole sentinel-2-l2a collection was counted.');
           }
@@ -352,7 +370,7 @@
   A.screen('ml', {
     title: 'ML & geospatial',
     crumb: 'ML & geospatial',
-    render: function (mount) {
+    render: function (mount, ctx) {
       var d = A.data;
 
       var tiles = el('div.tiles', d.gpu.cards.map(function (c) {
@@ -376,7 +394,14 @@
         { id: 'models', label: 'Models', render: modelsTab },
         { id: 'endpoints', label: 'Endpoints', render: endpointsTab },
         { id: 'imagery', label: 'Imagery', render: imageryTab }
-      ], { label: 'ML and geospatial sections' }));
+      ], {
+        label: 'ML and geospatial sections',
+        /* The breadcrumb and the document title already name the segment
+           (#/ops/cost read "Operations / cost" and titled itself "cost"),
+           so the panel has to match it. identity and security have always
+           read it; these three ignored it and opened tab zero. */
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+      }));
     }
   });
 })();

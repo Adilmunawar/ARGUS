@@ -205,10 +205,22 @@ async function axeOn(page, label) {
       const a = document.activeElement;
       if (!a || a === document.body) return null;
       if (!a.matches(':focus-visible')) return null;
+      /*
+       * The element is already focused by a real Tab press and has been checked
+       * against :focus-visible, so getComputedStyle(a) ALREADY reflects the
+       * focus styles. The third clause used to be
+       * `getComputedStyle(a, ':focus-visible').outlineStyle !== 'none'` --
+       * getComputedStyle takes a pseudo-ELEMENT and :focus-visible is a
+       * pseudo-class, so Chrome returns an empty declaration, outlineStyle is
+       * '', and '' !== 'none' is true for every element. That made this
+       * assertion unfailable: with every focus ring in both stylesheets
+       * replaced by `outline: none`, the suite still reported 241/241.
+       *
+       * A box-shadow is not accepted as a ring either -- almost every surface
+       * here carries --sh-card and would satisfy it focused or not.
+       */
       const s = getComputedStyle(a);
-      const has = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0)
-        || s.boxShadow !== 'none'
-        || getComputedStyle(a, ':focus-visible').outlineStyle !== 'none';
+      const has = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0;
       return has ? null : (a.tagName + '.' + (a.className || '')).slice(0, 60);
     });
     if (bad) noRing.push(bad);
@@ -686,37 +698,78 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const out = [];
-      const walk = document.createTreeWalker(document.getElementById('main'), NodeFilter.SHOW_TEXT);
+      /*
+       * Two holes made this far weaker than its name.
+       *
+       * It walked from #main, so the navigation rail, top bar, breadcrumb and
+       * every overlay were never checked -- about 28 text runs per route. And
+       * it bailed on the FIRST ancestor with any background-image, marking it
+       * 'gradient' and skipping it. Since `body` carries a radial-gradient
+       * wash, that exempted not just the gradient buttons but any text whose
+       * ancestors were otherwise transparent. Primary-button labels at 1.15:1
+       * passed this, passed the dark check, and passed axe too -- axe reports
+       * a gradient as "incomplete" rather than a violation.
+       *
+       * Gradients are resolved now: each colour stop is a candidate background,
+       * composited over what is behind it, and the worst stop is the verdict.
+       */
+      const parse = (v) => {
+        const m = String(v).match(/[\d.]+/g);
+        if (!m) return null;
+        const a = m.slice(0, 4).map(Number);
+        return [a[0], a[1], a[2], a.length > 3 ? a[3] : 1];
+      };
+      const over = (src, dst) => [
+        src[3] * src[0] + (1 - src[3]) * dst[0],
+        src[3] * src[1] + (1 - src[3]) * dst[1],
+        src[3] * src[2] + (1 - src[3]) * dst[2], 1
+      ];
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let n, seen = 0;
-      while ((n = walk.nextNode()) && seen < 400) {
+      while ((n = walk.nextNode()) && seen < 1200) {
         const txt = n.textContent.trim();
         if (!txt) continue;
         const p = n.parentElement;
         if (!p || p.closest('.sr') || p.classList.contains('sr')) continue;
+        if (!p.getClientRects().length) continue;
         const s = getComputedStyle(p);
-        if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) < 0.5) continue;
-        // Walk up for a real background; gradients count as their darkest stop.
-        let bg = null, e = p;
-        while (e && !bg) {
+        if (s.visibility === 'hidden' || parseFloat(s.opacity) < 0.5) continue;
+
+        const layers = [];
+        for (let e = p; e; e = e.parentElement) {
           const es = getComputedStyle(e);
-          if (es.backgroundImage && es.backgroundImage !== 'none') { bg = 'gradient'; break; }
-          if (es.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(es.backgroundColor)) bg = es.backgroundColor;
-          e = e.parentElement;
+          const col = parse(es.backgroundColor);
+          const img = es.backgroundImage && es.backgroundImage !== 'none' ? es.backgroundImage : '';
+          const stops = (img.match(/rgba?\([^)]+\)/g) || []).map(parse).filter(Boolean);
+          if ((col && col[3] > 0) || stops.length) layers.push({ col: col && col[3] > 0 ? col : null, stops });
+        }
+        let cands = [[255, 255, 255, 1]];
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const L = layers[i], next = [];
+          cands.forEach((base) => {
+            let b2 = L.col ? over(L.col, base) : base;
+            if (L.stops.length) L.stops.forEach((st) => next.push(over(st, b2)));
+            else next.push(b2);
+          });
+          cands = next.slice(0, 8);
         }
         seen++;
-        out.push({ fg: s.color, bg: bg, size: parseFloat(s.fontSize), weight: s.fontWeight, txt: txt.slice(0, 28) });
+        out.push({ fg: s.color, bgs: cands, size: parseFloat(s.fontSize), weight: s.fontWeight, txt: txt.slice(0, 28) });
       }
       return out;
     });
     for (const it of found) {
-      if (it.bg === 'gradient' || !it.bg) continue;  // gradients are checked visually, not numerically
-      const f = RGB(it.fg), b = RGB(it.bg);
-      if (!f || !b) continue;
-      const L1 = lum(f), L2 = lum(b);
-      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const f = RGB(it.fg);
+      if (!f || !it.bgs || !it.bgs.length) continue;
       const large = it.size >= 24 || (it.size >= 18.66 && Number(it.weight) >= 700);
       const need = large ? 3 : 4.5;
-      if (ratio < need - 0.01) lowContrast.push(`${r} "${it.txt}" ${ratio.toFixed(2)}:1 need ${need}`);
+      let worst = Infinity;
+      for (const b of it.bgs) {
+        const L1 = lum(f), L2 = lum(b);
+        const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+        if (ratio < worst) worst = ratio;
+      }
+      if (worst < need - 0.01) lowContrast.push(`${r} "${it.txt}" ${worst.toFixed(2)}:1 need ${need}`);
     }
   }
   rec('CON', 'all text meets WCAG AA contrast', lowContrast.length === 0, lowContrast.slice(0, 6).join(' | '));
@@ -1057,36 +1110,68 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const out = [];
-      const walk = document.createTreeWalker(document.getElementById('main'), NodeFilter.SHOW_TEXT);
+      /* The same scan as CON above -- full document, gradients composited
+         rather than skipped. This pass carried its own copy of the original
+         logic, so fixing the light one alone would have left dark scoped to
+         #main and exempting every gradient, which is exactly how a selected
+         tab at 1.24:1 survived here. */
+      const parse = (v) => {
+        const m = String(v).match(/[\d.]+/g);
+        if (!m) return null;
+        const a = m.slice(0, 4).map(Number);
+        return [a[0], a[1], a[2], a.length > 3 ? a[3] : 1];
+      };
+      const over = (src, dst) => [
+        src[3] * src[0] + (1 - src[3]) * dst[0],
+        src[3] * src[1] + (1 - src[3]) * dst[1],
+        src[3] * src[2] + (1 - src[3]) * dst[2], 1
+      ];
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let n, seen = 0;
-      while ((n = walk.nextNode()) && seen < 400) {
+      while ((n = walk.nextNode()) && seen < 1200) {
         const txt = n.textContent.trim();
         if (!txt) continue;
         const p = n.parentElement;
         if (!p || p.closest('.sr') || p.classList.contains('sr')) continue;
+        if (!p.getClientRects().length) continue;
         const st = getComputedStyle(p);
-        if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.5) continue;
-        let bg = null, e = p;
-        while (e && !bg) {
+        if (st.visibility === 'hidden' || parseFloat(st.opacity) < 0.5) continue;
+
+        const layers = [];
+        for (let e = p; e; e = e.parentElement) {
           const es = getComputedStyle(e);
-          if (es.backgroundImage && es.backgroundImage !== 'none') { bg = 'gradient'; break; }
-          if (es.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(es.backgroundColor)) bg = es.backgroundColor;
-          e = e.parentElement;
+          const col = parse(es.backgroundColor);
+          const img = es.backgroundImage && es.backgroundImage !== 'none' ? es.backgroundImage : '';
+          const stops = (img.match(/rgba?\([^)]+\)/g) || []).map(parse).filter(Boolean);
+          if ((col && col[3] > 0) || stops.length) layers.push({ col: col && col[3] > 0 ? col : null, stops });
+        }
+        let cands = [[255, 255, 255, 1]];
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const L = layers[i], next = [];
+          cands.forEach((base) => {
+            let b2 = L.col ? over(L.col, base) : base;
+            if (L.stops.length) L.stops.forEach((s2) => next.push(over(s2, b2)));
+            else next.push(b2);
+          });
+          cands = next.slice(0, 8);
         }
         seen++;
-        out.push({ fg: st.color, bg: bg, size: parseFloat(st.fontSize), weight: st.fontWeight, txt: txt.slice(0, 28) });
+        out.push({ fg: st.color, bgs: cands, size: parseFloat(st.fontSize), weight: st.fontWeight, txt: txt.slice(0, 28) });
       }
       return out;
     });
     for (const it of found) {
-      if (it.bg === 'gradient' || !it.bg) continue;
-      const f = RGB(it.fg), b = RGB(it.bg);
-      if (!f || !b) continue;
-      const L1 = lum(f), L2 = lum(b);
-      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const f = RGB(it.fg);
+      if (!f || !it.bgs || !it.bgs.length) continue;
       const large = it.size >= 24 || (it.size >= 18.66 && Number(it.weight) >= 700);
       const need = large ? 3 : 4.5;
-      if (ratio < need - 0.01) darkLowContrast.push(`${r} "${it.txt}" ${ratio.toFixed(2)}:1 need ${need}`);
+      let worst = Infinity;
+      for (const b of it.bgs) {
+        const L1 = lum(f), L2 = lum(b);
+        const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+        if (ratio < worst) worst = ratio;
+      }
+      if (worst < need - 0.01) darkLowContrast.push(`${r} "${it.txt}" ${worst.toFixed(2)}:1 need ${need}`);
     }
   }
   rec('THEME', 'all text meets WCAG AA contrast in the dark theme',

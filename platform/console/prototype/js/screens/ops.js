@@ -24,10 +24,23 @@
   function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-'); }
 
   /* Plausible PowerShell output per runbook. Each entry is a function of the
-   * parameter values so the transcript names the machine the operator chose. */
+   * parameter values so the transcript names the machine the operator chose.
+   *
+   * `v.Host || 'hv-01'` defeated that: clearing the field put a DIFFERENT
+   * machine's name into the transcript -- cert-01-renewal-failure read
+   * "-HostName caddy" for a host the operator had not chosen -- and
+   * dr-01-site-a-loss ships Reason with a default of '', so the fallback fired
+   * on the default value every time. A transcript that names the wrong machine
+   * is worse than one that admits nothing was given. */
+  var UNSET = '(not specified)';
+  function val(v, key) {
+    var x = v && v[key];
+    return (x === undefined || x === null || x === '') ? UNSET : x;
+  }
+
   var TRANSCRIPTS = {
     'hv-01-drain-node': function (v) {
-      var host = v.Host || 'hv-01';
+      var host = val(v, 'Host');
       return [
         'PS> Invoke-ArgusRunbook -Id hv-01-drain-node -HostName ' + host,
         'Suspend-ClusterNode -Name ' + host + ' -Drain -Wait',
@@ -41,7 +54,7 @@
       ];
     },
     'sql-01-restore-drill': function (v) {
-      var target = v.Target || 'sql-drill-01';
+      var target = val(v, 'Target');
       return [
         'PS> Invoke-ArgusRunbook -Id sql-01-restore-drill -Target ' + target,
         'Get-DbaBackupHistory -SqlInstance sql-01 -Database umairv3_db -Last',
@@ -55,7 +68,7 @@
       ];
     },
     'sql-02-ag-failover': function (v) {
-      var mode = v.Mode || 'planned';
+      var mode = val(v, 'Mode');
       return [
         'PS> Invoke-ArgusRunbook -Id sql-02-ag-failover -Mode ' + mode,
         'Get-DbaAgReplica -SqlInstance sql-01 -AvailabilityGroup argus-ag1',
@@ -83,7 +96,7 @@
       ];
     },
     'sec-01-suspected-compromise': function (v) {
-      var host = v.Host || 'hv-03';
+      var host = val(v, 'Host');
       return [
         'PS> Invoke-ArgusRunbook -Id sec-01-suspected-compromise -HostName ' + host,
         'Capturing volatile state before touching the network.',
@@ -109,7 +122,7 @@
     },
     'dr-01-site-a-loss': function (v) {
       return [
-        'PS> Invoke-ArgusRunbook -Id dr-01-site-a-loss -Reason "' + (v.Reason || 'unspecified') + '"',
+        'PS> Invoke-ArgusRunbook -Id dr-01-site-a-loss -Reason "' + val(v, 'Reason') + '"',
         'Confirming Site A is unreachable from both witness paths.',
         'Start-VMFailover on 9 replicated virtual machines at Site B',
         '  sql-02, pg-01-b, dc-03, adfs-02, guac-02, kuma-b01 online',
@@ -120,7 +133,7 @@
       ];
     },
     'cert-01-renewal-failure': function (v) {
-      var host = v.Host || 'caddy';
+      var host = val(v, 'Host');
       return [
         'PS> Invoke-ArgusRunbook -Id cert-01-renewal-failure -HostName ' + host,
         'Test-NetConnection acme-v02.api.letsencrypt.org -Port 443 : Succeeded',
@@ -271,10 +284,10 @@
       Object.keys(fields).forEach(function (k) { values[k] = fields[k].value; });
       var lines = transcriptFor(rb, values);
 
-      runOpts.disabled = true;
-      runBtn.disabled = true;
-      runBtn.classList.add('is-disabled');
-      runBtn.setAttribute('aria-disabled', 'true');
+      // setDisabled is the API. The native property drops the button out of
+      // the tab order and takes its title with it -- defect B7 -- for the whole
+      // length of the run, and `runOpts.disabled` was never read by anything.
+      runBtn.setDisabled(true);
 
       /* A transcript is capped and scrolled without reading layout.
        *
@@ -293,10 +306,7 @@
           logview.scrollTop = 1e9;
           if (i === lines.length - 1) {
             lastLine = line;
-            runOpts.disabled = false;
-            runBtn.disabled = false;
-            runBtn.classList.remove('is-disabled');
-            runBtn.setAttribute('aria-disabled', 'false');
+            runBtn.setDisabled(false);
             A.flash('ok', rb.id + ' finished', line);
           }
         }, 420 * (i + 1)));
@@ -351,7 +361,11 @@
   function backupsTab() {
     var d = A.data;
 
-    var oldest = d.backups.slice().sort(function (a, b) { return a.last - b.last; })[0];
+    // Guarded like its sibling three lines below. This was the one collection
+    // on the screen whose empty case threw -- inside a tab panel, so it left a
+    // blank rectangle rather than the "No backup store is configured." message
+    // the table beside it already declares.
+    var oldest = d.backups.slice().sort(function (a, b) { return a.last - b.last; })[0] || null;
     var passed = d.drills.filter(function (x) { return x.outcome === 'pass'; }).length;
     var restores = d.drills.filter(function (x) { return x.kind === 'Restore'; })
       .slice().sort(function (a, b) { return b.ran - a.ran; });
@@ -382,7 +396,9 @@
 
     return el('div.stack', [
       el('div.tiles', [
-        ui.statTile('Oldest backup', fmt.ago(oldest.last), { note: oldest.store + ', ' + oldest.cadence }),
+        ui.statTile('Oldest backup', oldest ? fmt.ago(oldest.last) : '-', {
+          note: oldest ? oldest.store + ', ' + oldest.cadence : 'No backup store is configured.'
+        }),
         ui.statTile('Drills passed', fmt.num(passed), {
           unit: 'of ' + fmt.num(d.drills.length),
           note: 'A backup nobody has restored is a hope, not a backup'
@@ -543,7 +559,14 @@
         { id: 'backups', label: 'Backups and drills', render: backupsTab },
         { id: 'maintenance', label: 'Maintenance', render: maintenanceTab },
         { id: 'cost', label: 'Capacity and cost', render: costTab }
-      ], { label: 'Operations sections' }));
+      ], {
+        label: 'Operations sections',
+        /* The breadcrumb and the document title already name the segment
+           (#/ops/cost read "Operations / cost" and titled itself "cost"),
+           so the panel has to match it. identity and security have always
+           read it; these three ignored it and opened tab zero. */
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+      }));
     }
   });
 })();

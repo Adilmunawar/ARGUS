@@ -511,12 +511,25 @@
       clear(panel);
       panel.setAttribute('aria-labelledby', listId + '-' + i);
 
-      if (A.scopeLeaveHooks) {
-        var built;
-        disposePanel = A.scopeLeaveHooks(function () { built = items[i].render(); });
-        append(panel, built);
-      } else {
-        append(panel, items[i].render());
+      /* A panel that throws gets an error state, not a blank rectangle.
+         app.js wraps `def.render` in a try/catch, but a tab panel is rendered
+         later, on click, outside that guard -- so one bad value left the
+         operator looking at an empty panel with nothing to say what happened
+         and no way to tell it apart from "there is nothing here". */
+      try {
+        if (A.scopeLeaveHooks) {
+          var built;
+          disposePanel = A.scopeLeaveHooks(function () { built = items[i].render(); });
+          append(panel, built);
+        } else {
+          append(panel, items[i].render());
+        }
+      } catch (err) {
+        append(panel, errorState(
+          'This section failed to render',
+          String(err && err.message ? err.message : err),
+          function () { select(i, false); }));
+        if (window.console && window.console.error) window.console.error(err);
       }
 
       if (focus) buttons[i].focus();
@@ -678,6 +691,16 @@
      * from the accessibility tree and this sentence is the only place they can
      * come back.
      */
+    /* The verb has to come from the caller, because the edge direction does.
+       apps.js pushes [dependent, dependency] and reads "depends on"; ml.js and
+       data.js push [upstream, downstream], where the same sentence is exactly
+       backwards -- the asset graph's text alternative claimed "parcels depends
+       on s2_periods" when parcels FEEDS s2_periods, and said so directly under
+       a label reading "upstream assets on the left". Since the graph is
+       role="img", that sentence is the only description a screen reader gets,
+       so it was reversing the blast radius of every action on the tab. */
+    var verb = opts.verb || 'depends on';
+
     var byId = Object.create(null);
     nodes.forEach(function (n) { byId[n.id] = n; });
 
@@ -687,7 +710,7 @@
       var a = byId[e[0]], b = byId[e[1]];
       if (!a || !b) return;
       mentioned[a.id] = true; mentioned[b.id] = true;
-      described.push(a.label + ' depends on ' + b.label);
+      described.push(a.label + ' ' + verb + ' ' + b.label);
     });
     nodes.forEach(function (n) {
       var kind = n.kind ? ' (' + n.kind + ')' : '';

@@ -177,7 +177,7 @@
     "suite": "NAV",
     "id": "clicking the \"data\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"data\",\"painted\":1088}"
+    "detail": "{\"route\":\"data\",\"painted\":1093}"
   },
   {
     "suite": "NAV",
@@ -189,7 +189,7 @@
     "suite": "NAV",
     "id": "clicking the \"ml\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"ml\",\"painted\":1845}"
+    "detail": "{\"route\":\"ml\",\"painted\":1810}"
   },
   {
     "suite": "NAV",
@@ -1167,7 +1167,7 @@
     "suite": "ROUTE",
     "id": "a percent at the end of a value does not crash the router",
     "pass": true,
-    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1088}"
+    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1093}"
   },
   {
     "suite": "ROUTE",

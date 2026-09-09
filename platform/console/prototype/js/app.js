@@ -326,7 +326,13 @@
           ]),
           el('label.fieldlabel', { for: 'confirm-name', text: 'Type ' + opts.match + ' to confirm' }),
           input,
-          el('p.hint', { id: 'confirm-help', text: 'This cannot be undone from the console.' })
+          /* The ladder is for anything that repoints live traffic, not only
+             for the irreversible -- so a caller that CAN undo its action says
+             so rather than being made to contradict its own detail text. */
+          el('p.hint', {
+            id: 'confirm-help',
+            text: opts.reversible || 'This cannot be undone from the console.'
+          })
         ];
       },
       actions: function (closeFn) {

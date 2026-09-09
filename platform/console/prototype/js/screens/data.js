@@ -94,7 +94,18 @@
       {
         key: 'lastLog', label: 'Last log backup',
         sort: function (r) { return r.lastLog ? r.lastLog.getTime() : 0; },
-        render: function (r) { return fmt.time(r.lastLog); }
+        // "not applicable" rather than "never": a SIMPLE database is not
+        // overdue a log backup, it cannot take one. lastDiff a few lines up
+        // already reads this way; lastLog did not.
+        render: function (r) {
+          if (r.lastLog) return fmt.time(r.lastLog);
+          return el('span.muted', {
+            text: 'not applicable',
+            title: r.recovery === 'SIMPLE'
+              ? 'SIMPLE recovery keeps no log chain, so there is no log backup to take.'
+              : 'No log backup has been recorded for this database.'
+          });
+        }
       },
       {
         key: 'rpoMin', label: 'RPO', align: 'right',
@@ -438,10 +449,55 @@
   // ... INTO writes a table in T-SQL, and several routines write through a call
   // that begins with SELECT, so both are refused: the editor is for reading and
   // the check has to mean it.
-  var WRITE_GRAMMAR = /\b(delete|update|drop|insert|alter|truncate|create|merge|exec|execute|grant|revoke|call|copy|vacuum|reindex|lock)\b/i;
+  var WRITE_GRAMMAR = /\b(delete|update|drop|insert|alter|truncate|create|merge|exec|execute|grant|revoke|call|copy|vacuum|reindex|refresh|analyze|cluster)\b/i;
   var SELECT_INTO = /\bselect\b[\s\S]*?\binto\b/i;
-  var WRITE_ROUTINE = /\b(pg_terminate_backend|pg_cancel_backend|pg_read_file|pg_write_file|pg_sleep|xp_cmdshell|sp_executesql|openrowset|openquery)\b/i;
+
+  /*
+   * Routines that write, lock, or reach outside the database -- every one of
+   * them callable through a statement that begins with SELECT.
+   *
+   * Three holes were found here by testing this check rather than reading it:
+   *
+   *   SELECT nextval('parcels_id_seq')      accepted -- advances a sequence
+   *   SELECT setval('parcels_id_seq', 1)    accepted -- rewinds one
+   *   SELECT lo_import('C:/secret.txt')     accepted -- reads a server file in
+   *   SELECT pg_advisory_lock(1)            accepted
+   *
+   * The last is the instructive one. `lock` WAS in the grammar list above, but
+   * \block\b finds no word boundary inside `pg_advisory_lock`, so a blocklist
+   * of bare words silently misses every function whose name merely contains
+   * one. Function names are matched in full here instead.
+   */
+  var WRITE_ROUTINE = new RegExp('\\b(' + [
+    'pg_terminate_backend', 'pg_cancel_backend',
+    'pg_read_file', 'pg_read_binary_file', 'pg_write_file', 'pg_ls_dir', 'pg_sleep',
+    'pg_advisory_lock', 'pg_advisory_xact_lock', 'pg_try_advisory_lock',
+    'pg_try_advisory_xact_lock', 'pg_advisory_unlock', 'pg_advisory_unlock_all',
+    'nextval', 'setval',
+    'lo_import', 'lo_export', 'lo_create', 'lo_unlink', 'lo_put',
+    'dblink', 'dblink_exec',
+    'pg_logical_emit_message', 'pg_create_restore_point', 'pg_switch_wal',
+    'pg_reload_conf', 'pg_rotate_logfile', 'pg_stat_reset', 'pg_stat_statements_reset',
+    'xp_cmdshell', 'sp_executesql', 'sp_configure',
+    'openrowset', 'openquery', 'opendatasource'
+  ].join('|') + ')\\b', 'i');
+
   var LEADING_SELECT = /^\s*(?:with\b[\s\S]*?)?select\b/i;
+
+  /**
+   * The statements in a batch, ignoring a single trailing semicolon.
+   *
+   * Only the FIRST statement's leading keyword was ever checked, so anything
+   * after a semicolon rode through untested unless it happened to use a
+   * blocklisted word. `SELECT 1; REFRESH MATERIALIZED VIEW mv_parcels`,
+   * `SELECT 1; ANALYZE parcels` and `SELECT 1; SET statement_timeout = 0` were
+   * all accepted, and each reported back "3 rows returned ... written to the
+   * audit". Refusing a batch outright closes the whole class, rather than
+   * chasing the keywords that might appear inside one.
+   */
+  function statementsIn(probe) {
+    return probe.split(';').map(function (x) { return x.trim(); }).filter(Boolean);
+  }
 
   /** Remove comments and string literals so they cannot hide a keyword. */
   function stripLiterals(sql) {
@@ -485,6 +541,11 @@
       var text = area.value;
       var probe = stripLiterals(text);
 
+      if (statementsIn(probe).length > 1) {
+        A.flash('bad', 'Statement rejected on ' + db.name,
+          'One statement at a time. A batch is refused outright rather than checked statement by statement, because everything after the first semicolon is exactly where a write hides.');
+        return;
+      }
       if (!LEADING_SELECT.test(probe)) {
         A.flash('bad', 'Statement rejected on ' + db.name,
           'Only a statement beginning with SELECT is accepted. This grammar is not available to the Operator role, and the console query editor is a read-only investigation tool, not a replacement for SSMS or psql.');
@@ -667,7 +728,12 @@
             { id: 'sql-02', label: 'sql-02', kind: 'async secondary, Site B' }
           ],
           [['sql-01', 'sql-02']],
-          { label: 'Availability group ' + db.ag + ': sql-01 is the primary at Site A and ships to sql-02, the asynchronous secondary at Site B' }
+          {
+            label: 'Availability group ' + db.ag + ': sql-01 is the primary at Site A and ships to sql-02, the asynchronous secondary at Site B',
+            // Same direction as the label and the hint below it: the primary
+            // ships TO the secondary. "sql-01 depends on sql-02" was backwards.
+            verb: 'ships to'
+          }
         ),
         el('p.hint', {
           text: 'sql-01 at Site A is the primary and ships to sql-02 at Site B asynchronously, currently ' +
@@ -695,7 +761,14 @@
       ['Recovery model', recoveryPill(db)],
       ['Last full backup', fmt.time(db.lastFull)],
       ['Last differential backup', db.lastDiff ? fmt.time(db.lastDiff) : el('span.muted', { text: 'not applicable' })],
-      ['Last log backup', fmt.time(db.lastLog)],
+      ['Last log backup', db.lastLog
+        ? fmt.time(db.lastLog)
+        : el('span.muted', {
+            text: 'not applicable',
+            title: db.recovery === 'SIMPLE'
+              ? 'SIMPLE recovery keeps no log chain, so there is no log backup to take.'
+              : 'No log backup has been recorded for this database.'
+          })],
       ['Last verified restore', fmt.time(db.lastVerified)]
     ])));
 
@@ -779,7 +852,7 @@
       mount.appendChild(el('div.callout.info', [
         el('strong', { text: 'Write-once for ' + fmt.num(b.lockDays) + ' days.' }),
         el('p', {
-          text: 'Object lock is in ' + b.lock + ' mode, so no identity can delete or overwrite an object before the retention period ends, including an administrator and including the account that wrote it. That is the property that makes this bucket survive ransomware, and it is why Delete is unavailable below.'
+          text: 'Object lock is in ' + b.lock + ' mode, so no identity can delete or overwrite an object before the retention period ends, including an administrator and including the account that wrote it. That is the property that makes this bucket survive ransomware, and it is why Delete is unavailable above.'
         })
       ]));
     }
@@ -832,7 +905,14 @@
         { id: 'buckets', label: 'Object storage', render: bucketsTab },
         { id: 'cache', label: 'Cache', render: cacheTab },
         { id: 'queues', label: 'Queues', render: queuesTab }
-      ], { label: 'Data stores' }));
+      ], {
+        label: 'Data stores',
+        /* The breadcrumb and the document title already name the segment
+           (#/ops/cost read "Operations / cost" and titled itself "cost"),
+           so the panel has to match it. identity and security have always
+           read it; these three ignored it and opened tab zero. */
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+      }));
     }
   });
 })();

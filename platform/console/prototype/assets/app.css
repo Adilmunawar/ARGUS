@@ -19,6 +19,37 @@
   --pine-rgb:12,43,31; --paper-rgb:255,254,250; --white-rgb:255,255,255;
   --shadow-rgb:22,48,38;
 
+  /* Three channels that were missing, and whose absence made the dark theme
+     paint light-theme hues onto dark surfaces:
+
+     --wash-rgb   every hover, highlight and selection wash. It was --leaf-rgb
+                  directly, and --leaf-rgb is identical in both themes -- so on
+                  a dark ground a 26% wash LIFTED the surface hard while the
+                  text token stayed put, and .muted fell to 3.16:1 on a hovered
+                  row, 2.51:1 on the active palette item.
+     --focus-rgb  the focus ring. It was --brand-rgb, which the dark block
+                  never overrode, so the ring was the light theme's dark green
+                  at 50% alpha on a dark surface: 1.59:1, against the 3:1 that
+                  WCAG 1.4.11 asks for. It failed in light too, at 2.21:1.
+     --scrim-rgb  the modal scrim. It was --pine-rgb, which becomes near-black
+                  in dark, leaving the scrim nothing to darken: 1.08:1 between
+                  a dialog and the page behind it. */
+  --wash-rgb:200,227,111;
+  --focus-rgb:30,111,74;
+  --scrim-rgb:12,43,31;
+
+  /* The surfaces that carry WHITE text. --brand lightens to #4aa87a in dark,
+     which puts white at 2.93:1 on the primary button, the avatar monogram and
+     the staging pill -- so these need a channel of their own that stays dark
+     enough for white in both themes, rather than following --brand. */
+  --on-white-from:#113a2b; --on-white-to:#1e6f4a;
+
+  /* The surfaces that carry WHITE text. --brand lightens to #4aa87a in dark,
+     which puts white at 2.93:1 on the primary button, the avatar and the
+     staging pill -- so these need a channel of their own that stays dark
+     enough for white in both themes, rather than following --brand. */
+  --on-white-from:#113a2b; --on-white-to:#1e6f4a;
+
   /* Status surfaces: background, softer background, border. */
   --ok-bg:#e3f3ec; --ok-bg-soft:#eef7f2; --ok-line:#bfe3d3; --ok-stroke:#7fc4a6;
   --ok-cell:#dcefe5; --ok-cell-ink:#05543d; --ok-soft:#9fd8bb; --ok-mid:#2f8f63;
@@ -64,6 +95,13 @@
   --ink-rgb:230,237,233; --pine-rgb:6,15,12; --paper-rgb:21,33,28;
   --shadow-rgb:0,0,0;
 
+  /* A wash that darkens rather than lifts, a ring bright enough to find on a
+     dark ground, and a scrim that still has somewhere to go. */
+  --wash-rgb:26,72,52;
+  --focus-rgb:200,227,111;
+  --scrim-rgb:0,0,0;
+  --on-white-from:#0d2f21; --on-white-to:#1f7350;
+
   --ok-bg:#13342a; --ok-bg-soft:#102b23; --ok-line:#245f49; --ok-stroke:#3f9b75;
   --ok-cell:#1a4536; --ok-cell-ink:#8fe3bd; --ok-soft:#2f7a5c; --ok-mid:#4fbf8b;
   --warn-bg:#3a2c12; --warn-bg-soft:#2e230f; --warn-line:#6d5422; --warn-stroke:#c9982f;
@@ -74,7 +112,10 @@
   --idle-bg:#1e2a25; --idle-ink:#a3b3aa; --idle-line:#31413a;
   --danger-fill:#a32f2f; --on-danger:#fff;
 
-  --sunk:#1c2722; --sunk-ink:#8a9a92; --na-ink:#94a59c; --ink-soft:#c2d0c8;
+  /* --sunk was #1c2722 against a #15211c card: delta-E 3.0, so an N/A heat
+     cell and an empty meter track were the same colour as the surface they sat
+     on. A zero-filled bar read as "no bar" rather than "zero". */
+  --sunk:#2b3a33; --sunk-ink:#9fb0a7; --na-ink:#a4b5ab; --ink-soft:#c2d0c8;
 
   --g-db:#16302a; --g-bucket:#2c2a1c; --g-cache:#241f33; --g-queue:#16283a; --g-dep:#1a221e;
 
@@ -103,7 +144,7 @@ body{
 }
 ::selection{background:var(--leaf);color:var(--pine)}
 h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:-.01em}
-:focus-visible{outline:3px solid rgba(var(--brand-rgb),.5);outline-offset:2px;border-radius:6px}
+:focus-visible{outline:3px solid rgba(var(--focus-rgb),.95);outline-offset:2px;border-radius:6px}
 .skip{position:absolute;left:-9999px;top:8px;z-index:200;background:var(--paper);border:1px solid var(--brand);
   border-radius:var(--field);padding:10px 15px;font-weight:600;color:var(--brand);text-decoration:none}
 .skip:focus{left:12px}
@@ -122,7 +163,7 @@ body.railed{--rail:66px}
 .navgroup{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:11px 8px 4px;font-weight:600}
 .nav{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:8px;color:var(--ink);cursor:pointer;
   border:none;background:none;width:100%;text-align:left;font:inherit;font-size:13px;min-height:32px}
-.nav:hover{background:rgba(var(--leaf-rgb),.26)}
+.nav:hover{background:rgba(var(--wash-rgb),.26)}
 .nav[aria-current="page"]{background:linear-gradient(120deg,var(--cane),var(--pine));color:#fff;font-weight:600}
 .nav .badge{margin-left:auto;background:var(--danger-fill);color:var(--on-danger);border-radius:999px;font-size:11px;
   min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
@@ -143,7 +184,7 @@ body.railed .navgroup,body.railed .mark .txt{display:none}
 body.railed .nav{justify-content:center;padding:9px 0}
 .railbtn{width:100%;margin-top:16px;border:1px solid rgba(var(--ink-rgb),.14);background:var(--cream);border-radius:10px;
   padding:8px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:12px;min-height:38px}
-.railbtn:hover{background:rgba(var(--leaf-rgb),.26)}
+.railbtn:hover{background:rgba(var(--wash-rgb),.26)}
 
 /* ── Top bar ── */
 .top{display:flex;align-items:center;gap:11px;padding:7px 18px;min-height:46px;
@@ -160,7 +201,7 @@ body.railed .nav{justify-content:center;padding:9px 0}
 .crumbs button{background:none;border:none;font:inherit;color:var(--muted);cursor:pointer;padding:5px 6px;margin:-5px -6px;border-radius:6px;min-height:26px}
 .crumbs button:hover{color:var(--brand);text-decoration:underline}
 .crumbs b{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.crumbs .sep{color:rgba(var(--ink-rgb),.35)}
+.crumbs .sep{color:rgba(var(--ink-rgb),.62)}
 .kbar{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--cream);border:1px solid rgba(var(--ink-rgb),.14);
   border-radius:var(--field);padding:8px 12px;color:var(--muted);cursor:pointer;min-width:210px;font:inherit;font-size:12px;min-height:32px}
 .kbar:hover{border-color:rgba(var(--brand-rgb),.45);color:var(--ink)}
@@ -170,12 +211,12 @@ body.railed .nav{justify-content:center;padding:9px 0}
 .envpill i{width:7px;height:7px;border-radius:50%;background:var(--leaf);display:block;flex:none}
 .iconbtn{border:1px solid rgba(var(--ink-rgb),.14);background:var(--paper);border-radius:10px;width:40px;height:40px;
   display:grid;place-items:center;cursor:pointer;color:var(--ink);position:relative;flex:none}
-.iconbtn:hover{background:rgba(var(--leaf-rgb),.26)}
+.iconbtn:hover{background:rgba(var(--wash-rgb),.26)}
 .iconbtn .n{position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border-radius:999px;font-size:11px;
   min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
 .who{display:flex;align-items:center;gap:8px;font-size:12px;background:none;border:none;cursor:pointer;font:inherit;
   padding:4px 7px 4px 4px;border-radius:999px;min-height:32px;flex:none}
-.who:hover{background:rgba(var(--leaf-rgb),.26)}
+.who:hover{background:rgba(var(--wash-rgb),.26)}
 .avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(140deg,var(--leaf),var(--brand));
   display:grid;place-items:center;color:var(--pine);font-weight:700;font-size:12px;flex:none}
 

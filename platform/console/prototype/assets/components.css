@@ -30,7 +30,7 @@
    inside every table cell. */
 .col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .main { padding: 18px 22px 64px; min-width: 0; flex: 1; outline: none; }
-.main:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: -3px; }
+.main:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: -3px; }
 
 .grid { display: grid; gap: 14px; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -53,7 +53,7 @@
 .pagehead { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; }
 .pagehead-text { min-width: 0; flex: 1; }
 .pagehead h1 { font-size: 19px; line-height: 1.25; outline: none; }
-.pagehead h1:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: 3px; border-radius: 6px; }
+.pagehead h1:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 3px; border-radius: 6px; }
 .pagehead-desc { color: var(--muted); font-size: 12.5px; margin-top: 4px; max-width: 72ch; }
 .pagehead-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -101,8 +101,13 @@
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 32px; padding: 6px 13px; border-radius: 10px; font: inherit; font-size: 12px; font-weight: 600;
   border: 1px solid rgba(var(--ink-rgb),.18); background: var(--paper); color: var(--ink); cursor: pointer; }
-.btn:hover { background: rgba(var(--leaf-rgb),.26); }
-.btn.primary { background: linear-gradient(120deg, var(--brand), var(--cane)); color: #fff; border-color: transparent; }
+.btn:hover { background: rgba(var(--wash-rgb),.26); }
+/* The gradient runs ACROSS the button, so a long label sits further into the
+   light stop -- and in dark --brand is #4aa87a, which put "Approve deployment
+   1847" at 3.24:1 in white. The consequential buttons were the least legible
+   words on the screen. Reversing the stops puts the dark end where the text
+   starts, and the light end at the trailing edge. */
+.btn.primary { background: linear-gradient(120deg, var(--on-white-from), var(--on-white-to)); color: #fff; border-color: transparent; }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.ghost { background: transparent; border-color: rgba(var(--ink-rgb),.16); }
 .btn.danger { background: var(--danger-fill); color: var(--on-danger); border-color: transparent; }
@@ -114,7 +119,7 @@
 .iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px;
   border-radius: 10px; border: 1px solid rgba(var(--ink-rgb),.14); background: var(--paper); color: var(--ink);
   cursor: pointer; position: relative; flex: none; }
-.iconbtn:hover { background: rgba(var(--leaf-rgb),.26); }
+.iconbtn:hover { background: rgba(var(--wash-rgb),.26); }
 .iconbtn svg { width: 17px; height: 17px; }
 .iconbtn .dot { position: absolute; top: 7px; right: 8px; width: 7px; height: 7px; border-radius: 50%;
   background: var(--bad); border: 1.5px solid var(--paper); }
@@ -128,7 +133,7 @@
 /* ------------------------------------------------------------- tables --- */
 
 .tablewrap { overflow-x: auto; border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px; background: var(--paper); }
-.tablewrap:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: 2px; }
+.tablewrap:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 2px; }
 .tablewrap table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tablewrap th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
   color: var(--muted); font-weight: 700; padding: 0; border-bottom: 1px solid rgba(var(--ink-rgb),.1);
@@ -146,13 +151,13 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .tablewrap tr:last-child td { border-bottom: none; }
 .tablewrap td.st { white-space: nowrap; }
 .tablewrap tr.is-clickable { cursor: pointer; }
-.tablewrap tr.is-clickable:hover td { background: rgba(var(--leaf-rgb),.16); }
-.tablewrap tr.is-clickable:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: -3px; }
+.tablewrap tr.is-clickable:hover td { background: rgba(var(--wash-rgb),.16); }
+.tablewrap tr.is-clickable:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: -3px; }
 /* The row a deep link named. Marked with a rule as well as a wash, so it does
    not depend on colour. */
-.tablewrap tr.is-linked td { background: rgba(var(--leaf-rgb),.22); }
+.tablewrap tr.is-linked td { background: rgba(var(--wash-rgb),.22); }
 .tablewrap tr.is-linked td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
-.tablewrap tr.is-linked:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: -3px; }
+.tablewrap tr.is-linked:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: -3px; }
 
 /* ------------------------------------------------------- empty, error --- */
 
@@ -181,9 +186,13 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .tab { min-height: 30px; padding: 8px 14px; border: none; background: none; font: inherit; font-size: 12.5px;
   font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--ink); }
-.tab.is-active { color: var(--cane); border-bottom-color: var(--brand); }
+/* --cane is a near-black green in dark (#123528) on a #162119 ground: the
+   SELECTED tab read at 1.24:1 while the tabs beside it read at 6.34:1, so you
+   could see that a tab was selected and not which one. --brand is the same
+   colour as the underline already beneath it, and passes in both themes. */
+.tab.is-active { color: var(--brand); border-bottom-color: var(--brand); }
 .tabpanels { padding-top: 16px; outline: none; }
-.tabpanels:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: 3px; border-radius: 8px; }
+.tabpanels:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 3px; border-radius: 8px; }
 
 /* ------------------------------------------------------------- charts --- */
 
@@ -300,16 +309,22 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
 
 /* ---------------------------------------------------- dialog, palette --- */
 
-.scrim { position: fixed; inset: 0; background: rgba(var(--pine-rgb),.42); z-index: 100; }
+.scrim { position: fixed; inset: 0; background: rgba(var(--scrim-rgb),.55); z-index: 100; }
 .scrim.is-dialog { display: flex; align-items: flex-start; justify-content: center; padding: 7vh 16px 16px;
   overflow-y: auto; }
 body.has-dialog { overflow: hidden; }
-.dialog { background: var(--paper); border-radius: 18px; box-shadow: var(--sh-pop); width: 100%; max-width: 520px;
+/* A border, because the other two things that separate a dialog from the page
+   both collapse in dark: --shadow-rgb becomes 0,0,0 so --sh-pop disappears on
+   a near-black ground, and the scrim had almost nothing left to darken -- the
+   measured edge between a dialog and the page behind it was 1.08:1. Cards and
+   menus survive on their 1px borders; the dialog had none. */
+.dialog { background: var(--paper); border: 1px solid rgba(var(--ink-rgb),.22);
+  border-radius: 18px; box-shadow: var(--sh-pop); width: 100%; max-width: 520px;
   display: flex; flex-direction: column; max-height: 86vh; }
 .dialog.wide { max-width: 680px; }
 .dialog-head { display: flex; align-items: center; gap: 10px; padding: 15px 18px 0; }
 .dialog-head h2 { font-size: 16px; flex: 1; outline: none; }
-.dialog-head h2:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: 3px; border-radius: 6px; }
+.dialog-head h2:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 3px; border-radius: 6px; }
 .dialog-body { padding: 13px 18px; overflow-y: auto; font-size: 12.5px; }
 .dialog-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px 16px;
   border-top: 1px solid rgba(var(--ink-rgb),.08); flex-wrap: wrap; }
@@ -327,7 +342,14 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .pal-list { list-style: none; max-height: 46vh; overflow-y: auto; margin: 0; padding: 0; }
 .pal-item { display: flex; align-items: baseline; gap: 9px; padding: 8px 10px; border-radius: 9px;
   cursor: pointer; min-height: 30px; }
-.pal-item.is-active { background: rgba(var(--leaf-rgb),.34); }
+.pal-item.is-active { background: rgba(var(--wash-rgb),.34); }
+/* --muted is chosen against the resting surface, so on the highlighted row --
+   the one Enter is about to run -- the category and the destination hint fell
+   to 3.97:1 in dark. The secondary text strengthens with the highlight instead
+   of the highlight being weakened to accommodate it. */
+.pal-item.is-active .pal-kind, .pal-item.is-active .pal-hint { color: var(--ink-soft); }
+.tablewrap tr.is-clickable:hover .muted,
+.tablewrap tr.is-linked .muted { color: var(--ink-soft); }
 .pal-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
   font-weight: 700; min-width: 92px; flex: none; }
 .pal-label { font-weight: 600; font-size: 12.5px; }
@@ -458,19 +480,7 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 
 /* ---------------------------------------------------- touch and print --- */
 
-/* WCAG 2.5.8 asks for 24px; a thumb wants 44. On touch widths, give it 44.
-   The comment said 44 and every value in this block said 30 -- and .btn and
-   .heatcell are 32px on the desktop, so the touch block was making the two
-   most-pressed controls in the console two pixels SMALLER on a phone than on
-   a mouse. The numbers now match the sentence. */
-@media (max-width: 768px) {
-  .btn, .iconbtn, .tab, .th-sort { min-height: 44px; }
-  .rlink { min-height: 44px; padding: 12px 0; line-height: 20px; }
-  .pf-token-x, .x { min-width: 44px; min-height: 44px; }
-  .heatcell { min-height: 44px; }
-  .menubtn { min-width: 44px; min-height: 44px; }
-  .scrubber input[type="range"] { min-height: 44px; }
-}
+
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (prefers-contrast: more) {
@@ -488,14 +498,14 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 .whopill { display: flex; align-items: center; gap: 8px; background: var(--paper);
   border: 1px solid rgba(var(--ink-rgb),.14); border-radius: 999px; padding: 5px 13px 5px 5px; cursor: pointer;
   font: inherit; color: var(--ink); min-height: 40px; flex: none; }
-.whopill:hover { background: rgba(var(--leaf-rgb),.26); }
+.whopill:hover { background: rgba(var(--wash-rgb),.26); }
 .avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex: none;
-  background: linear-gradient(140deg, var(--brand), var(--cane)); color: #fff; font-size: 11px; font-weight: 700; }
+  background: linear-gradient(140deg, var(--on-white-to), var(--on-white-from)); color: #fff; font-size: 11px; font-weight: 700; }
 .who-text { display: flex; flex-direction: column; line-height: 1.25; text-align: left; }
 .who-text b { font-size: 12px; }
 .who-text span { font-size: 11px; color: var(--muted); }
 .envpill .env-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--leaf); flex: none; }
-.envpill.is-staging { background: linear-gradient(120deg, var(--brand), var(--ok-mid)); }
+.envpill.is-staging { background: linear-gradient(120deg, var(--on-white-from), var(--on-white-to)); }
 
 @media (max-width: 900px) { .who-text { display: none; } .whopill { padding: 5px; } }
 @media (max-width: 620px) { .kbar span { display: none; } .kbar { min-width: 0; } }
@@ -538,9 +548,42 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 body.is-compact .tablewrap td { padding: 5px 10px; }
 body.is-compact .th-sort { min-height: 28px; padding: 5px 10px; }
 body.is-compact .tile { padding: 9px 11px; }
-body.is-compact .tile-value { font-size: 20px; }
-body.is-compact .card-body { padding: 10px 13px 12px; }
-body.is-compact .tiles { gap: 9px; }
+/* These three were LARGER than what the height blocks above already produce,
+   and being class selectors they won. On a 1280x720 bridge-room display,
+   turning compact on made the page one pixel taller with bigger tile values
+   and wider gaps -- the setting whose entire purpose is more rows per screen.
+   Compact now only ever subtracts. */
+body.is-compact .tile-value { font-size: 17px; }
+body.is-compact .card-body { padding: 9px 12px 11px; }
+body.is-compact .tiles { gap: 7px; margin-bottom: 9px; }
+body.is-compact .pagehead { margin-bottom: 10px; }
+body.is-compact .grid { gap: 9px; }
+
+/* The touch floor, last on purpose.
+ *
+ * It used to sit 41 lines ABOVE the height-keyed density block, at the same
+ * specificity, so `@media (max-height: 860px)` quietly undid it: a phone at
+ * 390x844 is inside that band, and .btn and .th-sort came out at 30px on
+ * exactly the device the 44px rule was written for. body.is-compact is a class
+ * selector and beat both, taking .th-sort to 28px at every touch width.
+ * Anything that has to win is stated here, after everything it must beat.
+ */
+/* WCAG 2.5.8 asks for 24px; a thumb wants 44. On touch widths, give it 44.
+   The comment said 44 and every value in this block said 30 -- and .btn and
+   .heatcell are 32px on the desktop, so the touch block was making the two
+   most-pressed controls in the console two pixels SMALLER on a phone than on
+   a mouse. The numbers now match the sentence. */
+@media (max-width: 768px) {
+  /* class selectors need answering in kind */
+  body.is-compact .th-sort, body.is-compact .btn { min-height: 44px; }
+  body.is-compact .tablewrap td { padding: 9px 11px; }
+  .btn, .iconbtn, .tab, .th-sort { min-height: 44px; }
+  .rlink { min-height: 44px; padding: 12px 0; line-height: 20px; }
+  .pf-token-x, .x { min-width: 44px; min-height: 44px; }
+  .heatcell { min-height: 44px; }
+  .menubtn { min-width: 44px; min-height: 44px; }
+  .scrubber input[type="range"] { min-height: 44px; }
+}
 
 /* ── Console preferences ─────────────────────────────────────────────────
    Radio groups, not switches: "System" is a third state a switch cannot
