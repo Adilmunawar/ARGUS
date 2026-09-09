@@ -137,16 +137,30 @@
 
       var tableHost = el('div');
       var visible = d.audit.slice();
+      var table = null;
 
+      /* One table instance for the life of the screen. Rebuilding it on every
+         token change threw away the sort the operator had chosen, because the
+         sort state lives on the instance. */
       function paint(tokens) {
         visible = ui.applyTokens(d.audit, tokens || [], accessors);
-        ui.clear(tableHost);
-        tableHost.appendChild(ui.table(cols, visible, {
+        if (table) { table.setRows(visible); return; }
+        table = ui.table(cols, visible, {
           caption: 'Audit events, newest first, with actor, role, action, target, pull request and source address',
           empty: 'No event matches every filter. Remove a token to widen the search.',
           sortKey: 'at', sortDir: 'desc',
           rowKey: function (r) { return r.at.toISOString() + r.action; }
-        }));
+        });
+        tableHost.appendChild(table);
+      }
+
+      /* The export claims to be "in the order it is sorted", and it was not:
+         it received the filter output in dataset order while ui.table sorted a
+         private copy, so sorting by Actor and exporting produced a CSV in a
+         different order from the table on screen. For a record an auditor is
+         handed, the sentence has to be true. */
+      function exportRows() {
+        return table && table.currentRows ? table.currentRows() : visible;
       }
 
       var filter = ui.propertyFilter([
@@ -162,7 +176,7 @@
         [ui.btn('Export as CSV', {
           variant: 'primary',
           title: 'Show the filtered audit events as CSV text',
-          onClick: function () { exportDialog(visible); }
+          onClick: function () { exportDialog(exportRows()); }
         })]));
 
       mount.appendChild(el('div.tiles', [

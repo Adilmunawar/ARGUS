@@ -129,7 +129,7 @@
     "suite": "NAV",
     "id": "clicking the \"overview\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"overview\",\"painted\":2196}"
+    "detail": "{\"route\":\"overview\",\"painted\":2200}"
   },
   {
     "suite": "NAV",
@@ -177,7 +177,7 @@
     "suite": "NAV",
     "id": "clicking the \"data\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"data\",\"painted\":1088}"
+    "detail": "{\"route\":\"data\",\"painted\":1093}"
   },
   {
     "suite": "NAV",
@@ -189,7 +189,7 @@
     "suite": "NAV",
     "id": "clicking the \"ml\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"ml\",\"painted\":1677}"
+    "detail": "{\"route\":\"ml\",\"painted\":1810}"
   },
   {
     "suite": "NAV",
@@ -883,6 +883,54 @@
   },
   {
     "suite": "GUARD",
+    "id": "a collapsed rail keeps an accessible name on every nav button",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the mobile navigation drawer is above its own scrim",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "a deployment can actually be rejected once a reason is given",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the waiver dialog reaches its own fields and can be submitted",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "the applications screen opens the tab its own links name",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "a duration never reads sixty minutes past the hour",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "rows with no value stay at the bottom in both sort directions",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
+    "id": "no status is conveyed by colour alone",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "GUARD",
     "id": "a deep link opens the tab it names",
     "pass": true,
     "detail": "Access grants"
@@ -1027,7 +1075,19 @@
   },
   {
     "suite": "ZOOM",
+    "id": "focus is never obscured at 200% zoom",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ZOOM",
     "id": "reflow at 400% zoom (320px equivalent)",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ZOOM",
+    "id": "focus is never obscured at 400% zoom",
     "pass": true,
     "detail": ""
   },
@@ -1107,7 +1167,7 @@
     "suite": "ROUTE",
     "id": "a percent at the end of a value does not crash the router",
     "pass": true,
-    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1088}"
+    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1093}"
   },
   {
     "suite": "ROUTE",

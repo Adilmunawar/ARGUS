@@ -309,10 +309,14 @@
           disabled: true,
           title: 'Give a reason first: it is written to the audit.'
         });
-        submit.disabled = true;
+        // aria-disabled via setDisabled, never the native property: a natively
+        // disabled button leaves the focus trap's FOCUSABLE list and takes its
+        // title -- the only statement of why it is unavailable -- out of reach
+        // of assistive technology. That is defect B7, reintroduced here alone.
+        submit.setDisabled(true);
 
         submit.addEventListener('click', function () {
-          if (submit.disabled) return;
+          if (submit.isDisabled()) return;
           var text = reason.value.trim();
           if (!text) return;
           var group = groupSel.value;
@@ -325,7 +329,7 @@
 
         reason.addEventListener('input', function () {
           var ok = reason.value.trim().length > 0;
-          submit.disabled = !ok;
+          submit.setDisabled(!ok);
           submit.classList.toggle('is-disabled', !ok);
           submit.setAttribute('aria-disabled', ok ? 'false' : 'true');
           if (ok) submit.removeAttribute('title');
@@ -384,7 +388,9 @@
       }));
     }
 
-    return el('div.grantcard', body);
+    // The same data-key a table row carries, so ui.revealRow can find the card
+    // a deep link names -- Overview links straight to "#/identity/grants?id=g-442".
+    return el('div.grantcard', { data: { key: g.id } }, body);
   }
 
   function grantsTab() {
@@ -486,9 +492,14 @@
           s.rotatedDays + ' days old.'
       });
     }
-    if (s.rotatedDays > s.policyDays - 10) {
+    // Proportional, not a fixed ten days. `rotatedDays > policyDays - 10` is
+    // `0 > -9` for a one-day policy, so the two dynamic credentials that
+    // rotate correctly every single day were the only rows flagged amber.
+    var soon = Math.max(1, Math.round(s.policyDays * 0.1));
+    if (s.rotatedDays > s.policyDays - soon) {
       return ui.pill(fmt.num(s.rotatedDays) + ' d', 'warn', {
-        title: 'Within ten days of the ' + s.policyDays + '-day rotation policy.'
+        title: 'Within ' + soon + (soon === 1 ? ' day' : ' days') + ' of the ' +
+          s.policyDays + '-day rotation policy.'
       });
     }
     return ui.pill(fmt.num(s.rotatedDays) + ' d', 'ok', {
@@ -551,6 +562,7 @@
       ui.card('Secret paths', ui.table(cols, d.secrets, {
         caption: 'Secret paths in OpenBao, with active leases, rotation age against policy and reads in the last 24 hours. Values are never shown.',
         sortKey: 'path',
+        rowKey: function (r) { return r.path; },
         empty: 'No secret paths are readable by your role.'
       }), { flush: true })
     ]);
@@ -572,12 +584,23 @@
           })
         ]));
 
+      /* Overview and the Config tab both build links that name a row --
+         "?id=g-442", "?path=kv/mills/jwt-signing-key" -- and until now the
+         right tab opened and the row was left for the operator to find. */
+      var wanted = (ctx && ctx.params) || {};
       mount.appendChild(ui.tabs([
         { id: 'people', label: 'People', render: peopleTab },
         { id: 'gmsas', label: 'Service accounts', render: gmsaTab },
         { id: 'grants', label: 'Access grants', render: grantsTab },
         { id: 'secrets', label: 'Secrets', render: secretsTab }
-      ], { label: 'Identity sections', initial: (ctx && ctx.rest && ctx.rest[0]) || null }));
+      ], {
+        label: 'Identity sections',
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+        onSelect: function (id) {
+          if (id === 'grants' && wanted.id) ui.revealRow(mount, wanted.id, { label: 'Grant ' + wanted.id + ' is highlighted' });
+          if (id === 'secrets' && wanted.path) ui.revealRow(mount, wanted.path, { label: wanted.path + ' is highlighted' });
+        }
+      }));
     }
   });
 })();

@@ -38,9 +38,29 @@
 
   function named(label, suffix) { return [label, el('span.sr', { text: ' ' + suffix })]; }
 
+  // Indexed rather than a scan per row: this is called once for every host in
+  // the table and re-run on every sort.
+  var siteIndex = null, siteIndexFor = null;
   function siteName(id) {
-    var s = d.sites.filter(function (x) { return x.id === id; })[0];
-    return s ? s.name : String(id);
+    if (siteIndexFor !== d.sites || !siteIndex) {
+      siteIndexFor = d.sites;
+      siteIndex = Object.create(null);
+      d.sites.forEach(function (x) { siteIndex[x.id] = x.name; });
+    }
+    return siteIndex[id] || String(id);
+  }
+
+  /**
+   * The virtual machines actually placed on a host, from the inventory.
+   *
+   * host.vms is a stored count that disagreed with the inventory on every
+   * host -- hv-01 claimed 7 against 4 placed, and the estate claimed 30
+   * against 14 -- so the tile contradicted the table directly beneath it and,
+   * worse, the drain and quarantine dialogs quoted the stored number as the
+   * blast radius an operator sizes the change against. One source of truth.
+   */
+  function vmsOn(hostName) {
+    return d.vms.filter(function (v) { return v.host === hostName; });
   }
 
   function statePill(state) {
@@ -95,7 +115,11 @@
       { key: 'role', label: 'Role' },
       { key: 'cpu', label: 'CPU', render: function (r) { return utilisation(r.name + ' CPU', r.cpu); } },
       { key: 'mem', label: 'Memory', render: function (r) { return utilisation(r.name + ' memory', r.mem); } },
-      { key: 'vms', label: 'VMs', align: 'right', render: function (r) { return fmt.num(r.vms); } },
+      // Derived, not the stored host.vms count, which disagreed with the
+      // inventory on every host. See vmsOn above.
+      { key: 'vms', label: 'VMs', align: 'right',
+        sort: function (r) { return vmsOn(r.name).length; },
+        render: function (r) { return fmt.num(vmsOn(r.name).length); } },
       {
         key: 'patchAgeDays', label: 'Patch age', align: 'right',
         render: function (r) {
@@ -136,7 +160,7 @@
       {
         key: 'checkpointAgeMin', label: 'Checkpoint age', align: 'right',
         render: function (r) {
-          return r.checkpointAgeMin
+          return (r.checkpointAgeMin !== null && r.checkpointAgeMin !== undefined)
             ? fmt.dur(r.checkpointAgeMin * 60)
             : el('span.muted', { text: 'no replica' });
         }
@@ -246,7 +270,7 @@
       detail: 'Every virtual machine on ' + host.name + ' is live-migrated to another host in the cluster, and ' + host.name + ' stops accepting new placements. The host itself stays up.',
       match: host.name,
       environment: ctx.env,
-      blast: fmt.num(host.vms) + ' virtual machines move to another host. Each one pauses for a few seconds as memory is handed over.',
+      blast: fmt.num(vmsOn(host.name).length) + ' virtual machines move to another host. Each one pauses for a few seconds as memory is handed over.',
       confirmLabel: 'Drain ' + host.name,
       onConfirm: function () {
         A.flash('warn', 'Drain requested for ' + host.name,
@@ -261,7 +285,7 @@
       detail: 'Quarantine moves the network adapters of every virtual machine on ' + host.name + ' to VLAN 90, which can reach only the SIEM and the update mirror, and pages the security on-call immediately. The workloads keep running, but they lose every other route off the host, including to each other.',
       match: host.name,
       environment: ctx.env,
-      blast: fmt.num(host.vms) + ' virtual machines lose all network access except the SIEM and the update mirror. Anything depending on them fails until the quarantine is lifted, and security is paged whether or not this was intended.',
+      blast: fmt.num(vmsOn(host.name).length) + ' virtual machines lose all network access except the SIEM and the update mirror. Anything depending on them fails until the quarantine is lifted, and security is paged whether or not this was intended.',
       confirmLabel: 'Quarantine ' + host.name,
       onConfirm: function () {
         A.flash('bad', 'Quarantine requested for ' + host.name,
@@ -300,7 +324,9 @@
     mount.appendChild(el('div.tiles', [
       ui.statTile('CPU', fmt.pct(host.cpu, 0)),
       ui.statTile('Memory', fmt.pct(host.mem, 0)),
-      ui.statTile('Virtual machines', fmt.num(host.vms)),
+      ui.statTile('Virtual machines', fmt.num(vmsOn(host.name).length), {
+        note: 'placed on this host'
+      }),
       ui.statTile('Uptime', fmt.num(host.uptimeDays), { unit: 'days' }),
       ui.statTile('Patch age', fmt.num(host.patchAgeDays), {
         unit: 'days',
@@ -317,7 +343,7 @@
         ['Role', host.role],
         ['CPU', utilisation(host.name + ' CPU', host.cpu)],
         ['Memory', utilisation(host.name + ' memory', host.mem)],
-        ['Virtual machines', fmt.num(host.vms)],
+        ['Virtual machines', fmt.num(vmsOn(host.name).length)],
         ['Uptime', fmt.num(host.uptimeDays) + ' days'],
         ['Patch age', fmt.num(host.patchAgeDays) + ' days'],
         ['WDAC mode', host.wdac],
@@ -416,7 +442,7 @@
       ]) : null,
       ui.card('Replication', ui.dl([
         ['Replica health', statePill(vm.replica)],
-        ['Checkpoint age', vm.checkpointAgeMin
+        ['Checkpoint age', (vm.checkpointAgeMin !== null && vm.checkpointAgeMin !== undefined)
           ? fmt.dur(vm.checkpointAgeMin * 60)
           : el('span.muted', { text: 'no checkpoint, replication is off' })],
         ['Replica site', unprotected || vm.replica === 'n/a' ? el('span.muted', { text: 'none' }) : siteName('b')],
@@ -475,7 +501,7 @@
       ['Network zone', vm.zone],
       ['State', statePill(vm.state)],
       ['Replica health', statePill(vm.replica)],
-      ['Checkpoint age', vm.checkpointAgeMin
+      ['Checkpoint age', (vm.checkpointAgeMin !== null && vm.checkpointAgeMin !== undefined)
         ? fmt.dur(vm.checkpointAgeMin * 60)
         : el('span.muted', { text: 'no replica' })],
       ['Ways in', vm.connect.map(function (p) { return modeFor(p).name; }).join(', ')]
@@ -503,7 +529,7 @@
       ui.statTile('Memory', fmt.num(vm.ram), { unit: 'GB' }),
       ui.statTile('Host', vm.host, { note: siteName(vm.site) }),
       ui.statTile('Replica', vm.replica === 'off' ? 'Off' : (vm.replica === 'n/a' ? 'Not applicable' : 'Healthy'), {
-        note: vm.checkpointAgeMin ? 'checkpoint ' + fmt.dur(vm.checkpointAgeMin * 60) + ' old' : 'no checkpoint'
+        note: (vm.checkpointAgeMin !== null && vm.checkpointAgeMin !== undefined) ? 'checkpoint ' + fmt.dur(vm.checkpointAgeMin * 60) + ' old' : 'no checkpoint'
       })
     ]));
 

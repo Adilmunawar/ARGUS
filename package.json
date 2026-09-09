@@ -7,7 +7,8 @@
   "scripts": {
     "test": "node platform/console/prototype/tests/run-tests.js",
     "test:sandbox": "node platform/console/prototype/tests/sandbox.js",
-    "test:all": "npm test && npm run test:sandbox"
+    "test:all": "npm test && npm run test:sandbox && npm run test:stress",
+    "test:stress": "node platform/console/prototype/tests/stress.js"
   },
   "devDependencies": {
     "axe-core": "^4.10.2",

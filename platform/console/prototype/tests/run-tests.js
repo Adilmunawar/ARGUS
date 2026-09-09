@@ -205,10 +205,22 @@ async function axeOn(page, label) {
       const a = document.activeElement;
       if (!a || a === document.body) return null;
       if (!a.matches(':focus-visible')) return null;
+      /*
+       * The element is already focused by a real Tab press and has been checked
+       * against :focus-visible, so getComputedStyle(a) ALREADY reflects the
+       * focus styles. The third clause used to be
+       * `getComputedStyle(a, ':focus-visible').outlineStyle !== 'none'` --
+       * getComputedStyle takes a pseudo-ELEMENT and :focus-visible is a
+       * pseudo-class, so Chrome returns an empty declaration, outlineStyle is
+       * '', and '' !== 'none' is true for every element. That made this
+       * assertion unfailable: with every focus ring in both stylesheets
+       * replaced by `outline: none`, the suite still reported 241/241.
+       *
+       * A box-shadow is not accepted as a ring either -- almost every surface
+       * here carries --sh-card and would satisfy it focused or not.
+       */
       const s = getComputedStyle(a);
-      const has = (s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0)
-        || s.boxShadow !== 'none'
-        || getComputedStyle(a, ':focus-visible').outlineStyle !== 'none';
+      const has = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0;
       return has ? null : (a.tagName + '.' + (a.className || '')).slice(0, 60);
     });
     if (bad) noRing.push(bad);
@@ -462,6 +474,158 @@ async function axeOn(page, label) {
       return count <= 2;
     }));
 
+  /* Regressions for the four defects that made the console unusable and that
+     every suite here passed straight over. Each one is exercised the way an
+     operator meets it, not by inspecting an attribute. */
+
+  // The rail collapses at 1200px and for anyone who ever pressed Collapse.
+  // display:none on the label left ten buttons with no accessible name.
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await goto(page, 'overview');
+  rec('GUARD', 'a collapsed rail keeps an accessible name on every nav button',
+    await page.evaluate(() => {
+      const names = [...document.querySelectorAll('.side .nav')]
+        .map(n => (n.textContent || '').trim() || n.getAttribute('aria-label') || '');
+      return names.length >= 10 && names.every(Boolean);
+    }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The scrim is z-index 100; the drawer was 95, in the same stacking context,
+  // so every tap on a nav item hit the scrim and closed it. Keyboard worked,
+  // which is why navigating by location.hash could never see it.
+  await page.setViewportSize({ width: 390, height: 800 });
+  await goto(page, 'overview');
+  rec('GUARD', 'the mobile navigation drawer is above its own scrim',
+    await page.evaluate(async () => {
+      document.getElementById('burger').click();
+      await new Promise(r => setTimeout(r, 250));
+      const nav = document.querySelector('.nav[data-go="apps"]');
+      const r = nav.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!hit && (hit === nav || nav.contains(hit));
+    }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // ui.btn captures disabled at construction; mutating opts.disabled made the
+  // button look enabled while the guard still swallowed the click, so a
+  // deployment could never be rejected.
+  await goto(page, 'deploys/1847');
+  rec('GUARD', 'a deployment can actually be rejected once a reason is given',
+    await page.evaluate(async () => {
+      const trigger = [...document.querySelectorAll('#main button')]
+        .find(b => /^Reject deployment/.test(b.textContent));
+      if (!trigger) return false;
+      trigger.click();
+      await new Promise(r => setTimeout(r, 120));
+      const dlg = document.querySelector('.dialog');
+      const area = dlg && dlg.querySelector('#reject-reason');
+      const go = dlg && [...dlg.querySelectorAll('button')]
+        .find(b => /^Reject deployment/.test(b.textContent));
+      if (!area || !go) return false;
+      if (go.getAttribute('aria-disabled') !== 'true') return false;
+      area.value = 'not during the freeze';
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      if (go.getAttribute('aria-disabled') !== 'false') return false;
+      const before = document.querySelectorAll('#flashes .flash').length;
+      go.click();
+      await new Promise(r => setTimeout(r, 120));
+      return document.querySelectorAll('#flashes .flash').length > before;
+    }));
+
+  // A.dialog builds body() and actions() before the panel is in the document,
+  // so getElementById returned null and no listener was ever attached.
+  await goto(page, 'security/vulns');
+  rec('GUARD', 'the waiver dialog reaches its own fields and can be submitted',
+    await page.evaluate(async () => {
+      const trigger = [...document.querySelectorAll('#main button')]
+        .find(b => /waiver/i.test(b.textContent));
+      if (!trigger) return false;
+      trigger.click();
+      await new Promise(r => setTimeout(r, 120));
+      const dlg = document.querySelector('.dialog');
+      if (!dlg) return false;
+      const owner = dlg.querySelector('#waiver-owner');
+      const reason = dlg.querySelector('#waiver-reason');
+      const expiry = dlg.querySelector('#waiver-expiry');
+      const go = [...dlg.querySelectorAll('button')].find(b => b.textContent.trim() === 'Add waiver');
+      if (!owner || !reason || !expiry || !go) return false;
+      if (go.disabled) return false;                       // must use aria-disabled
+      if (go.getAttribute('aria-disabled') !== 'true') return false;
+      owner.value = 'adil'; owner.dispatchEvent(new Event('input', { bubbles: true }));
+      reason.value = 'fix is queued'; reason.dispatchEvent(new Event('input', { bubbles: true }));
+      expiry.value = '2026-12-01'; expiry.dispatchEvent(new Event('change', { bubbles: true }));
+      return go.getAttribute('aria-disabled') === 'false';
+    }));
+
+  // Applications is the only screen that emits ?tab= and was the only one that
+  // never read it, so both of its own row-menu links landed on Overview.
+  await goto(page, 'apps/mills?tab=logs');
+  rec('GUARD', 'the applications screen opens the tab its own links name',
+    await page.evaluate(() => {
+      const sel = document.querySelector('#main .tab[aria-selected="true"]');
+      return !!sel && /logs/i.test(sel.textContent);
+    }));
+
+  // Math.floor for hours and Math.round for the remainder let the remainder
+  // reach 60, live on the elevation countdown.
+  rec('GUARD', 'a duration never reads sixty minutes past the hour',
+    await page.evaluate(() => {
+      const f = window.ARGUS.ui.fmt.dur;
+      for (let s = 0; s <= 90000; s += 7) {
+        const out = f(s);
+        if (/60 min/.test(out)) return false;
+      }
+      return true;
+    }));
+
+  // Descending sort used to be ascending.reverse(), which also reversed where
+  // the comparator deliberately sank rows with no value.
+  rec('GUARD', 'rows with no value stay at the bottom in both sort directions',
+    await page.evaluate(() => {
+      const ui = window.ARGUS.ui;
+      const rows = [{ n: 'a', v: 3 }, { n: 'b', v: null }, { n: 'c', v: 1 }, { n: 'd', v: 2 }];
+      const t = ui.table([{ key: 'n', label: 'N' }, { key: 'v', label: 'V' }],
+        rows, { caption: 'probe', sortKey: 'v', sortDir: 'desc' });
+      const order = t.currentRows().map(r => r.n).join('');
+      return order[order.length - 1] === 'b';
+    }));
+
+  /* Colour is never the only signal.
+   *
+   * Measured against this palette, `bad` and `warn` separate by a deuteranopic
+   * delta-E of 2.9 -- so the glyph rule is what actually carries severity, and
+   * an assertion is the only thing that keeps it true as screens are added. */
+  {
+    const colourOnly = [];
+    for (const r of ['overview', 'deploys', 'data/cache', 'security/posture', 'compute/host/hv-03', 'ml/pipelines']) {
+      await goto(page, r);
+      const found = await page.evaluate((route) => {
+        const bad = [];
+        // Callouts: a tone in background and border needs a glyph too.
+        document.querySelectorAll('.callout').forEach(n => {
+          const g = getComputedStyle(n, '::before').content;
+          if (!g || g === 'none' || g === 'normal') bad.push(route + ': callout with no glyph');
+        });
+        // Toned bars: the tone says "over a threshold", so it needs a texture
+        // and it needs to say so in the accessible name.
+        document.querySelectorAll('.bar-fill.warn, .bar-fill.bad, .meter-fill.warn, .meter-fill.bad').forEach(n => {
+          if (getComputedStyle(n).backgroundImage === 'none') bad.push(route + ': toned bar with no texture');
+          const host = n.closest('[role="img"]');
+          const label = host ? (host.getAttribute('aria-label') || '') : '';
+          if (!/threshold/i.test(label)) bad.push(route + ': toned bar whose label omits the threshold');
+        });
+        // Pills: the existing rule, asserted rather than assumed.
+        document.querySelectorAll('.pill').forEach(n => {
+          if (!n.querySelector('.pill-glyph')) bad.push(route + ': pill with no glyph');
+        });
+        return bad;
+      }, r);
+      colourOnly.push(...found);
+    }
+    rec('GUARD', 'no status is conveyed by colour alone',
+      colourOnly.length === 0, colourOnly.slice(0, 6).join(' | '));
+  }
+
   // A deep link opens the tab it names.
   await goto(page, 'identity/grants');
   rec('GUARD', 'a deep link opens the tab it names',
@@ -534,37 +698,78 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const out = [];
-      const walk = document.createTreeWalker(document.getElementById('main'), NodeFilter.SHOW_TEXT);
+      /*
+       * Two holes made this far weaker than its name.
+       *
+       * It walked from #main, so the navigation rail, top bar, breadcrumb and
+       * every overlay were never checked -- about 28 text runs per route. And
+       * it bailed on the FIRST ancestor with any background-image, marking it
+       * 'gradient' and skipping it. Since `body` carries a radial-gradient
+       * wash, that exempted not just the gradient buttons but any text whose
+       * ancestors were otherwise transparent. Primary-button labels at 1.15:1
+       * passed this, passed the dark check, and passed axe too -- axe reports
+       * a gradient as "incomplete" rather than a violation.
+       *
+       * Gradients are resolved now: each colour stop is a candidate background,
+       * composited over what is behind it, and the worst stop is the verdict.
+       */
+      const parse = (v) => {
+        const m = String(v).match(/[\d.]+/g);
+        if (!m) return null;
+        const a = m.slice(0, 4).map(Number);
+        return [a[0], a[1], a[2], a.length > 3 ? a[3] : 1];
+      };
+      const over = (src, dst) => [
+        src[3] * src[0] + (1 - src[3]) * dst[0],
+        src[3] * src[1] + (1 - src[3]) * dst[1],
+        src[3] * src[2] + (1 - src[3]) * dst[2], 1
+      ];
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let n, seen = 0;
-      while ((n = walk.nextNode()) && seen < 400) {
+      while ((n = walk.nextNode()) && seen < 1200) {
         const txt = n.textContent.trim();
         if (!txt) continue;
         const p = n.parentElement;
         if (!p || p.closest('.sr') || p.classList.contains('sr')) continue;
+        if (!p.getClientRects().length) continue;
         const s = getComputedStyle(p);
-        if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) < 0.5) continue;
-        // Walk up for a real background; gradients count as their darkest stop.
-        let bg = null, e = p;
-        while (e && !bg) {
+        if (s.visibility === 'hidden' || parseFloat(s.opacity) < 0.5) continue;
+
+        const layers = [];
+        for (let e = p; e; e = e.parentElement) {
           const es = getComputedStyle(e);
-          if (es.backgroundImage && es.backgroundImage !== 'none') { bg = 'gradient'; break; }
-          if (es.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(es.backgroundColor)) bg = es.backgroundColor;
-          e = e.parentElement;
+          const col = parse(es.backgroundColor);
+          const img = es.backgroundImage && es.backgroundImage !== 'none' ? es.backgroundImage : '';
+          const stops = (img.match(/rgba?\([^)]+\)/g) || []).map(parse).filter(Boolean);
+          if ((col && col[3] > 0) || stops.length) layers.push({ col: col && col[3] > 0 ? col : null, stops });
+        }
+        let cands = [[255, 255, 255, 1]];
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const L = layers[i], next = [];
+          cands.forEach((base) => {
+            let b2 = L.col ? over(L.col, base) : base;
+            if (L.stops.length) L.stops.forEach((st) => next.push(over(st, b2)));
+            else next.push(b2);
+          });
+          cands = next.slice(0, 8);
         }
         seen++;
-        out.push({ fg: s.color, bg: bg, size: parseFloat(s.fontSize), weight: s.fontWeight, txt: txt.slice(0, 28) });
+        out.push({ fg: s.color, bgs: cands, size: parseFloat(s.fontSize), weight: s.fontWeight, txt: txt.slice(0, 28) });
       }
       return out;
     });
     for (const it of found) {
-      if (it.bg === 'gradient' || !it.bg) continue;  // gradients are checked visually, not numerically
-      const f = RGB(it.fg), b = RGB(it.bg);
-      if (!f || !b) continue;
-      const L1 = lum(f), L2 = lum(b);
-      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const f = RGB(it.fg);
+      if (!f || !it.bgs || !it.bgs.length) continue;
       const large = it.size >= 24 || (it.size >= 18.66 && Number(it.weight) >= 700);
       const need = large ? 3 : 4.5;
-      if (ratio < need - 0.01) lowContrast.push(`${r} "${it.txt}" ${ratio.toFixed(2)}:1 need ${need}`);
+      let worst = Infinity;
+      for (const b of it.bgs) {
+        const L1 = lum(f), L2 = lum(b);
+        const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+        if (ratio < worst) worst = ratio;
+      }
+      if (worst < need - 0.01) lowContrast.push(`${r} "${it.txt}" ${worst.toFixed(2)}:1 need ${need}`);
     }
   }
   rec('CON', 'all text meets WCAG AA contrast', lowContrast.length === 0, lowContrast.slice(0, 6).join(' | '));
@@ -576,8 +781,21 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const small = [], clip = [];
-      document.querySelectorAll('#main *').forEach(n => {
-        if (n.closest('.sr') || !n.offsetParent) return;
+      /* The whole document, not just #main.
+       *
+       * Scoping to '#main *' meant this check could never see the navigation
+       * rail, the top bar, the flash bar, the session drawer or the command
+       * palette -- and the rail carried three 10.5px group headings and the
+       * palette a 10.5px category label on every row, live, for as long as the
+       * floor has existed.
+       *
+       * offsetParent is an HTMLElement property and is undefined on every
+       * SVGElement, so `!n.offsetParent` skipped all SVG text unconditionally,
+       * including the 10.5px type label under every dependency-graph node.
+       * getClientRects() answers the "is it rendered" question for both. */
+      document.querySelectorAll('body *').forEach(n => {
+        if (n.closest('.sr') || n.closest('#live')) return;
+        if (!n.getClientRects().length) return;
         if (!n.textContent.trim() || n.children.length) return;
         const s = getComputedStyle(n);
         const size = parseFloat(s.fontSize);
@@ -676,6 +894,34 @@ async function axeOn(page, label) {
       if (o.doc > o.view + 1) bad.push(`${r}: ${o.doc}>${o.view}`);
     }
     rec('ZOOM', `reflow at ${z.label} zoom (${z.w}px equivalent)`, bad.length === 0, bad.slice(0, 3).join(' | '));
+
+    /* WCAG 2.4.11: and nothing may cover the control that has focus.
+     *
+     * Reflow alone was not enough. At the 320px equivalent the top bar wraps
+     * to 162px against a 200px viewport, and while it was still sticky every
+     * control the browser scrolled focus to landed underneath it, on all ten
+     * routes. A fixed scroll-padding cannot track a height that depends on how
+     * the row wraps, so below 620px the bar stops being sticky -- and this
+     * asserts the outcome rather than the mechanism. */
+    let covered = [];
+    for (const r of ROUTES) {
+      await goto(page, r);
+      const n = await page.evaluate(() => {
+        const bar = document.querySelector('.top');
+        if (!bar || getComputedStyle(bar).position !== 'sticky') return 0;
+        const br = bar.getBoundingClientRect();
+        let hit = 0;
+        const targets = [...document.querySelectorAll('#main button, #main a[href], #main input')].slice(0, 25);
+        for (const f of targets) {
+          f.focus();
+          const rr = f.getBoundingClientRect();
+          if (rr.height && rr.top < br.bottom - 1 && rr.bottom > br.top) hit++;
+        }
+        return hit;
+      });
+      if (n) covered.push(`${r}: ${n}`);
+    }
+    rec('ZOOM', `focus is never obscured at ${z.label} zoom`, covered.length === 0, covered.slice(0, 3).join(' | '));
   }
   await ctx.pages()[0].setViewportSize({ width: 1440, height: 900 });
 
@@ -864,36 +1110,68 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const out = [];
-      const walk = document.createTreeWalker(document.getElementById('main'), NodeFilter.SHOW_TEXT);
+      /* The same scan as CON above -- full document, gradients composited
+         rather than skipped. This pass carried its own copy of the original
+         logic, so fixing the light one alone would have left dark scoped to
+         #main and exempting every gradient, which is exactly how a selected
+         tab at 1.24:1 survived here. */
+      const parse = (v) => {
+        const m = String(v).match(/[\d.]+/g);
+        if (!m) return null;
+        const a = m.slice(0, 4).map(Number);
+        return [a[0], a[1], a[2], a.length > 3 ? a[3] : 1];
+      };
+      const over = (src, dst) => [
+        src[3] * src[0] + (1 - src[3]) * dst[0],
+        src[3] * src[1] + (1 - src[3]) * dst[1],
+        src[3] * src[2] + (1 - src[3]) * dst[2], 1
+      ];
+      const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let n, seen = 0;
-      while ((n = walk.nextNode()) && seen < 400) {
+      while ((n = walk.nextNode()) && seen < 1200) {
         const txt = n.textContent.trim();
         if (!txt) continue;
         const p = n.parentElement;
         if (!p || p.closest('.sr') || p.classList.contains('sr')) continue;
+        if (!p.getClientRects().length) continue;
         const st = getComputedStyle(p);
-        if (st.visibility === 'hidden' || st.display === 'none' || parseFloat(st.opacity) < 0.5) continue;
-        let bg = null, e = p;
-        while (e && !bg) {
+        if (st.visibility === 'hidden' || parseFloat(st.opacity) < 0.5) continue;
+
+        const layers = [];
+        for (let e = p; e; e = e.parentElement) {
           const es = getComputedStyle(e);
-          if (es.backgroundImage && es.backgroundImage !== 'none') { bg = 'gradient'; break; }
-          if (es.backgroundColor && !/rgba\(0, 0, 0, 0\)|transparent/.test(es.backgroundColor)) bg = es.backgroundColor;
-          e = e.parentElement;
+          const col = parse(es.backgroundColor);
+          const img = es.backgroundImage && es.backgroundImage !== 'none' ? es.backgroundImage : '';
+          const stops = (img.match(/rgba?\([^)]+\)/g) || []).map(parse).filter(Boolean);
+          if ((col && col[3] > 0) || stops.length) layers.push({ col: col && col[3] > 0 ? col : null, stops });
+        }
+        let cands = [[255, 255, 255, 1]];
+        for (let i = layers.length - 1; i >= 0; i--) {
+          const L = layers[i], next = [];
+          cands.forEach((base) => {
+            let b2 = L.col ? over(L.col, base) : base;
+            if (L.stops.length) L.stops.forEach((s2) => next.push(over(s2, b2)));
+            else next.push(b2);
+          });
+          cands = next.slice(0, 8);
         }
         seen++;
-        out.push({ fg: st.color, bg: bg, size: parseFloat(st.fontSize), weight: st.fontWeight, txt: txt.slice(0, 28) });
+        out.push({ fg: st.color, bgs: cands, size: parseFloat(st.fontSize), weight: st.fontWeight, txt: txt.slice(0, 28) });
       }
       return out;
     });
     for (const it of found) {
-      if (it.bg === 'gradient' || !it.bg) continue;
-      const f = RGB(it.fg), b = RGB(it.bg);
-      if (!f || !b) continue;
-      const L1 = lum(f), L2 = lum(b);
-      const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+      const f = RGB(it.fg);
+      if (!f || !it.bgs || !it.bgs.length) continue;
       const large = it.size >= 24 || (it.size >= 18.66 && Number(it.weight) >= 700);
       const need = large ? 3 : 4.5;
-      if (ratio < need - 0.01) darkLowContrast.push(`${r} "${it.txt}" ${ratio.toFixed(2)}:1 need ${need}`);
+      let worst = Infinity;
+      for (const b of it.bgs) {
+        const L1 = lum(f), L2 = lum(b);
+        const ratio = (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
+        if (ratio < worst) worst = ratio;
+      }
+      if (worst < need - 0.01) darkLowContrast.push(`${r} "${it.txt}" ${worst.toFixed(2)}:1 need ${need}`);
     }
   }
   rec('THEME', 'all text meets WCAG AA contrast in the dark theme',
