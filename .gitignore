@@ -13,3 +13,8 @@ obj/
 # test output
 platform/console/prototype/tests/sandbox-last-run.json
 platform/console/prototype/tests/stress-last-run.json
+
+# Compose file-secrets: extensionless, so *.key and *.pem do not cover them.
+platform/compose/secrets/
+platform/compose/.env
+platform/compose/images.lock

@@ -1,0 +1,29 @@
+# Build context is platform/console. Keep it small and keep host state out.
+#
+# node_modules is the important one. It exists on the developer machine, it is
+# ~90 MB, and copying it in would (a) make every build upload it and (b) shadow
+# the clean `npm ci` tree from the deps stage with whatever happens to be on
+# that laptop -- including a package installed by hand and never committed. The
+# image must be reproducible from package-lock.json alone.
+**/node_modules
+**/npm-debug.log
+**/.npm
+
+# Test output written by the three harnesses. Regenerated, machine-specific,
+# and one of them records absolute paths from the machine that ran it.
+prototype/tests/sandbox-last-run.json
+prototype/tests/stress-last-run.json
+prototype/tests/*.png
+
+# Local dev leftovers
+**/.env
+**/.env.*
+**/*.log
+**/.DS_Store
+**/Thumbs.db
+
+# Nothing in the image needs git history or editor state.
+**/.git
+**/.gitignore
+**/.vscode
+**/.idea

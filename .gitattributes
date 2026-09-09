@@ -1,0 +1,56 @@
+# Line endings.
+#
+# This repository is developed on Windows and its scripts are executed inside
+# Linux containers. A shell script committed with CRLF fails there with
+# `/bin/sh: bad interpreter: No such file or directory` -- the carriage return
+# becomes part of the interpreter path -- and the error names neither the file
+# nor the cause. Postgres init SQL, nginx-style conf files and HCL are the same
+# story with quieter failures.
+#
+# This file governs what is written INTO commits, so it has to exist before the
+# first script does. It does not retroactively fix an already-checked-out tree:
+# after adding or changing it, run
+#     git add --renormalize .
+# and commit whatever that stages.
+
+* text=auto eol=lf
+
+# Explicit, because `text=auto` guesses from content and a file that begins with
+# a UTF-8 BOM or holds a stray 0x00 is guessed to be binary and passed through
+# unchanged -- CRLF and all.
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.sql       text eol=lf
+*.conf      text eol=lf
+*.hcl       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.toml      text eol=lf
+*.env       text eol=lf
+*.js        text eol=lf
+*.css       text eol=lf
+*.html      text eol=lf
+*.md        text eol=lf
+Dockerfile  text eol=lf
+*.Dockerfile text eol=lf
+
+# PowerShell runs on Windows and is never fed to a container shell. CRLF is what
+# every Windows editor and `Set-Content` produce; forcing LF here creates noisy
+# diffs for no gain.
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
+
+# Never touched.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.pdf       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary

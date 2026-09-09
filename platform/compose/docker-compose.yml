@@ -1,0 +1,1473 @@
+# ONE COMMAND:  pwsh -File ./bootstrap.ps1   (once)  then  docker compose up -d
+# Profiles:     --profile observability | connect | targets | compute | parity
+#
+# RULES THIS FILE KEEPS:
+#  * One network `argus` with an explicit name: and a pinned, overridable subnet.
+#    Compose otherwise creates <project>_argus and Guacamole's
+#    JSON_TRUSTED_NETWORKS / Nomad's network_mode cannot find it.
+#  * Named volumes for every byte of state. A bind mount to C:\ crosses
+#    9p/virtiofs where fsync and POSIX ownership are not honoured; leveldb and
+#    PGDATA corrupt there. Config bind-mounts are read-only and safe.
+#  * No credential in this file. Everything is ${VAR:?} from .env (gitignored)
+#    or a Compose file-secret under ./secrets/ (gitignored). Honest limit: env
+#    values ARE visible in `docker inspect`. On the real hosts: OpenBao.
+#  * depends_on uses service_healthy / service_completed_successfully only.
+#  * Every `$` inside command: is `$$`. A bare `($|/)` aborts
+#    `docker compose config` for the WHOLE project, not just that service.
+#  * Core never depends on a profiled service (Compose would auto-enable it).
+#
+# MEMORY (limits, not RSS). %UserProfile%\.wslconfig -> [wsl2] memory=9GB
+#   core 4.2 GB | +observability 7.6 GB | +connect 5.4 GB
+#   core+obs+connect = 8.8 GB -> DOES NOT FIT. Run two of the three.
+
+name: argus
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+x-hardening: &hardening
+  restart: unless-stopped
+  security_opt: ["no-new-privileges:true"]
+
+x-seaweed: &seaweed
+  image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-3.97}
+  restart: unless-stopped
+  networks: [argus]
+  logging: *logging
+
+networks:
+  argus:
+    name: argus
+    driver: bridge
+    ipam:
+      config:
+        # Overridable: a hardcoded 172.28/16 fails with "Pool overlaps" on any
+        # machine whose VPN routes it, and blackholes the VPN if it wins.
+        # Run `route print` before the first up.
+        - subnet: ${ARGUS_SUBNET:-172.28.0.0/16}
+
+secrets:
+  pg_superuser_password:  { file: ./secrets/pg_superuser_password }
+  pg_exporter_password:   { file: ./secrets/pg_exporter_password }
+  grafana_admin_password: { file: ./secrets/grafana_admin_password }
+  console_alert_token:    { file: ./secrets/console_alert_token }
+
+volumes:
+  argus_seaweed_master:    { name: argus_seaweed_master }
+  argus_seaweed_volume:    { name: argus_seaweed_volume }
+  argus_seaweed_filer:     { name: argus_seaweed_filer }
+  argus_seaweed_conf:      { name: argus_seaweed_conf }
+  argus_pg_data:           { name: argus_pg_data }
+  argus_garnet_data:       { name: argus_garnet_data }
+  argus_nats_data:         { name: argus_nats_data }
+  argus_openbao_data:      { name: argus_openbao_data }
+  argus_openbao_logs:      { name: argus_openbao_logs }
+  argus_openbao_seal:      { name: argus_openbao_seal }
+  argus_console_state:     { name: argus_console_state }
+  argus_prometheus_data:   { name: argus_prometheus_data }
+  argus_alertmanager_data: { name: argus_alertmanager_data }
+  argus_loki_data:         { name: argus_loki_data }
+  argus_alloy_data:        { name: argus_alloy_data }
+  argus_grafana_data:      { name: argus_grafana_data }
+  argus_guac_recordings:   { name: argus_guac_recordings }
+  argus_guac_drives:       { name: argus_guac_drives }
+  argus_azurite_data:      { name: argus_azurite_data }
+  argus_parity_results:    { name: argus_parity_results }
+
+services:
+
+  # ══════════════════════════════════════════════════ CORE: object storage (S3)
+  # defaultReplication MUST be 000: with 001 the master cannot place a second
+  # copy on one rack and every write fails "no writable volumes" -- reads like a
+  # bug, is a config error. docs/02 line 44 says 001; that is Site A, not this.
+
+  seaweed-config:
+    <<: *seaweed
+    restart: "no"
+    container_name: argus-seaweed-config
+    entrypoint: ["/bin/sh", "-euc"]
+    command:
+      - |
+        umask 077
+        : "$${ARGUS_S3_ADMIN_SECRET:?empty}"
+        cat > /etc/seaweedfs/filer.toml <<'TOML'
+        [leveldb2]
+        enabled = true
+        dir = "/data/filerldb2"
+        TOML
+        cat > /etc/seaweedfs/s3.json <<JSON
+        { "identities": [
+          { "name": "argus-admin",
+            "credentials": [{ "accessKey": "argus-admin", "secretKey": "$${ARGUS_S3_ADMIN_SECRET}" }],
+            "actions": ["Admin","Read","Write","List","Tagging"] },
+          { "name": "argus-console",
+            "credentials": [{ "accessKey": "argus-console", "secretKey": "$${ARGUS_S3_CONSOLE_SECRET}" }],
+            "actions": ["List",
+              "Read:argus-survey-pictures","List:argus-survey-pictures",
+              "Read:argus-rasters","List:argus-rasters",
+              "Read:argus-sentinel","List:argus-sentinel",
+              "Read:argus-ml","List:argus-ml",
+              "Read:argus-artifacts","List:argus-artifacts",
+              "Read:argus-backups","List:argus-backups",
+              "Read:argus-logs","List:argus-logs",
+              "Read:argus-sessions","List:argus-sessions"] },
+          { "name": "argus-app",
+            "credentials": [{ "accessKey": "argus-app", "secretKey": "$${ARGUS_S3_APP_SECRET}" }],
+            "actions": ["Read:argus-survey-pictures","Write:argus-survey-pictures","List:argus-survey-pictures",
+                        "Read:argus-rasters","Write:argus-rasters","List:argus-rasters",
+                        "Read:argus-ml","Write:argus-ml","List:argus-ml",
+                        "Read:argus-sentinel","Write:argus-sentinel","List:argus-sentinel",
+                        "Read:argus-artifacts","Write:argus-artifacts","List:argus-artifacts"] },
+          { "name": "argus-loki",
+            "credentials": [{ "accessKey": "argus-loki", "secretKey": "$${ARGUS_S3_LOKI_SECRET}" }],
+            "actions": ["Read:argus-logs","Write:argus-logs","List:argus-logs"] },
+          { "name": "argus-guacamole",
+            "credentials": [{ "accessKey": "argus-guacamole", "secretKey": "$${ARGUS_S3_GUAC_SECRET}" }],
+            "actions": ["Read:argus-sessions","Write:argus-sessions","List:argus-sessions"] },
+          { "name": "argus-parity",
+            "credentials": [{ "accessKey": "argus-parity", "secretKey": "$${ARGUS_S3_PARITY_SECRET}" }],
+            "actions": ["Read:argus-parity","Write:argus-parity","List:argus-parity","Tagging:argus-parity",
+                        "Read:argus-parity-worm","Write:argus-parity-worm","List:argus-parity-worm"] },
+          { "name": "argus-parity-deny",
+            "credentials": [{ "accessKey": "argus-parity-deny", "secretKey": "$${ARGUS_S3_PARITY_DENY_SECRET}" }],
+            "actions": ["Read:argus-parity","List:argus-parity"] }
+        ] }
+        JSON
+        echo "wrote filer.toml and s3.json"
+    environment:
+      # S3 access keys are IDENTIFIERS, not secrets, so only the secret half is
+      # generated. That halves what bootstrap has to manage and keeps s3.json
+      # readable. SeaweedFS ACLs are per-identity/per-bucket action lists --
+      # there are no IAM conditions, principals or AssumeRole here.
+      ARGUS_S3_ADMIN_SECRET:       ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_CONSOLE_SECRET:     ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_APP_SECRET:         ${ARGUS_S3_APP_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_LOKI_SECRET:        ${ARGUS_S3_LOKI_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_GUAC_SECRET:        ${ARGUS_S3_GUAC_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_PARITY_SECRET:      ${ARGUS_S3_PARITY_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_PARITY_DENY_SECRET: ${ARGUS_S3_PARITY_DENY_SECRET:?run bootstrap.ps1}
+    volumes:
+      - argus_seaweed_conf:/etc/seaweedfs
+    mem_limit: 64m
+
+  seaweed-master:
+    <<: *seaweed
+    container_name: argus-seaweed-master
+    command: >
+      master -ip=seaweed-master -ip.bind=0.0.0.0 -port=9333 -mdir=/data
+      -defaultReplication=000
+      -volumeSizeLimitMB=${ARGUS_S3_VOLUME_SIZE_MB:-1024}
+      -volumePreallocate=false -garbageThreshold=0.3 -metricsPort=9324
+    volumes: [argus_seaweed_master:/data]
+    ports: ["127.0.0.1:9333:9333"]
+    mem_limit: 256m
+    stop_grace_period: 30s
+    healthcheck:
+      # ONE probe, ONE meaning. No `|| /dir/status` fallback: a master that is
+      # up with NO LEADER answers 503 here and 200 there, so the `||` would
+      # turn the only probe that can detect that failure green.
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:9333/cluster/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  seaweed-volume:
+    <<: *seaweed
+    container_name: argus-seaweed-volume
+    command: >
+      volume -mserver=seaweed-master:9333 -ip=seaweed-volume -ip.bind=0.0.0.0
+      -port=8080 -dir=/data -max=${ARGUS_S3_MAX_VOLUMES:-60}
+      -index=leveldb -dataCenter=site-a -rack=compose -metricsPort=9325
+    volumes: [argus_seaweed_volume:/data]
+    # PUBLISHED so a host-side console can follow the container-internal node
+    # URLs the master hands out. -publicUrl is NOT used: it would change the URL
+    # the in-network filer gets too, and break writes.
+    ports: ["127.0.0.1:8080:8080"]
+    mem_limit: 512m
+    # leveldb must close cleanly. The 10s Compose default SIGKILLs a volume
+    # server mid-flush and costs an index rebuild on the next boot.
+    stop_grace_period: 60s
+    depends_on:
+      seaweed-master: { condition: service_healthy }
+    healthcheck:
+      # Proves the listener answers. NOT that the master registered this node
+      # or that a volume is assignable -- storage-init's /dir/assign proves
+      # that, and forces the first volume to exist.
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  seaweed-filer:
+    <<: *seaweed
+    container_name: argus-seaweed-filer
+    command: >
+      filer -master=seaweed-master:9333 -ip=seaweed-filer -ip.bind=0.0.0.0
+      -port=8888 -defaultStoreDir=/data -metricsPort=9326
+    volumes:
+      # /data/filerldb2 pinned by filer.toml. Un-pinned, the image's own
+      # VOLUME /data creates an ANONYMOUS volume: the bytes survive `down` and
+      # are unreachable, which is the same expensive outcome by another route.
+      - argus_seaweed_filer:/data
+      - argus_seaweed_conf:/etc/seaweedfs:ro
+    ports: ["127.0.0.1:8888:8888"]
+    mem_limit: 384m
+    stop_grace_period: 60s
+    depends_on:
+      seaweed-config: { condition: service_completed_successfully }
+      seaweed-volume: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null 'http://127.0.0.1:8888/?limit=1'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  seaweed-s3:
+    <<: *seaweed
+    container_name: argus-seaweed-s3
+    # Starts only after seaweed-config exited 0, so there is never a window in
+    # which 8333 answers with no identities loaded (`weed s3` with no -config
+    # allows ANONYMOUS FULL ACCESS).
+    command: >
+      s3 -filer=seaweed-filer:8888 -ip.bind=0.0.0.0 -port=8333
+      -config=/etc/seaweedfs/s3.json -metricsPort=9327
+    volumes:
+      - argus_seaweed_conf:/etc/seaweedfs:ro
+    ports: ["127.0.0.1:8333:8333"]
+    mem_limit: 256m
+    depends_on:
+      seaweed-filer:  { condition: service_healthy }
+      seaweed-config: { condition: service_completed_successfully }
+    healthcheck:
+      # LIVENESS ONLY, labelled as such. There is no unauthenticated S3 path
+      # meaning "ready": GET /status with identities loaded is a request for a
+      # bucket named "status" and returns 403. Readiness = storage-init's
+      # signed ListBuckets + /dir/assign + put/get/delete round trip.
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:9327/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
+
+  storage-init:
+    image: argus/console-api:${ARGUS_VERSION:-0.1.0}
+    build:
+      # Context is ../console, not ../console/server: the server SERVES the
+      # prototype (ARGUS_WEB_ROOT=../../prototype), and a context rooted at
+      # server/ cannot see it. The image would start, answer /api/health, and
+      # 404 the console itself.
+      context: ../console
+      dockerfile: server/Dockerfile
+      args:
+        NODE_TAG: ${NODE_TAG:-22-bookworm-slim}
+    container_name: argus-storage-init
+    restart: "no"
+    networks: [argus]
+    command: ["node", "/app/tools/init-object-storage.js"]
+    environment:
+      ARGUS_S3_ENDPOINT: http://seaweed-s3:8333
+      ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
+      ARGUS_SEAWEED_MASTER_URL: http://seaweed-master:9333
+      ARGUS_BUCKETS_FILE: /config/buckets.yaml
+      ARGUS_STATE_DIR: /state
+      AWS_ACCESS_KEY_ID: argus-admin
+      AWS_SECRET_ACCESS_KEY: ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
+      # The AWS SDK sends x-amz-checksum-* by default now and it breaks
+      # S3-compatible servers. Necessary but NOT sufficient: multipart still
+      # emits per-part CRC32C, which the acceptance test must assert on.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      ARGUS_PROFILE: ${ARGUS_PROFILE:-dev}
+      # dev collapses lock days to 1 AND mode to GOVERNANCE. Real 35-day
+      # COMPLIANCE on a laptop means a developer cannot delete their own test
+      # uploads for five weeks and the only escape destroys the volume.
+      ARGUS_OBJECT_LOCK_DAYS: ${ARGUS_OBJECT_LOCK_DAYS:-1}
+      ARGUS_DEV_LOCK_MODE: ${ARGUS_DEV_LOCK_MODE:-GOVERNANCE}
+      # The WORM enforcement probe writes into its OWN bucket, never into
+      # argus-backups: a 12-byte canary per boot under COMPLIANCE is an
+      # unbounded pile of undeletable junk inside the backup bucket.
+      ARGUS_WORM_PROBE_BUCKET: argus-worm-probe
+    volumes:
+      # The one deliberate bind mount in the storage path: a single small
+      # read-only text file, read once. buckets.yaml is the SINGLE SOURCE for
+      # names, versioning, lock and lifecycle, so init cannot diverge from
+      # committed config. On an EXISTING bucket it verifies lock state and
+      # exits non-zero if a bucket that should be locked is not -- object lock
+      # cannot be enabled after creation, so "on 200, skip" makes an unlocked
+      # bucket permanent while every boot reports success.
+      - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
+      - argus_console_state:/state
+    mem_limit: 192m
+    depends_on:
+      seaweed-s3: { condition: service_healthy }
+
+  # ══════════════════════════════════════════════════════ CORE: relational (RDS)
+  # ONE PostgreSQL for everything: argus_geo, argus_ml, argus_console_events,
+  # pgstac, guacamole_db, grafana, argus_parity. Site A runs separate clusters;
+  # on one laptop a second postgres is 300 MB that teaches nothing.
+
+  postgres:
+    <<: *hardening
+    image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
+    container_name: argus-postgres
+    hostname: postgres
+    networks: [argus]
+    logging: *logging
+    shm_size: 256m
+    stop_signal: SIGINT          # SIGTERM is smart shutdown and hangs to SIGKILL
+    stop_grace_period: 120s
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-256MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-768MB}
+      - -c
+      # work_mem is PER SORT NODE, not per connection. Keep the global low and
+      # raise it per role; a query with four sorts on fifty connections is how
+      # a well-tuned Postgres OOMs.
+      - work_mem=${PG_WORK_MEM:-8MB}
+      - -c
+      - max_connections=${PG_MAX_CONNECTIONS:-120}
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=1000
+      - -c
+      # WSL2 kernels support hugepages but do not preallocate them, so the
+      # default `try` fills the log with allocation warnings.
+      - huge_pages=off
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      # PGDATA is a SUBDIRECTORY of the volume so nothing the volume driver
+      # leaves at the mount root can make initdb refuse.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_superuser_password
+      # --data-checksums is IRREVERSIBLE and cannot be added later.
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8"
+    secrets: [pg_superuser_password]
+    volumes:
+      - argus_pg_data:/var/lib/postgresql/data
+    ports: ["127.0.0.1:${PG_PORT:-5432}:5432"]
+    mem_limit: 1024m
+    healthcheck:
+      # -h 127.0.0.1 is LOAD-BEARING. During initdb the entrypoint runs a
+      # TEMPORARY postmaster on the UNIX SOCKET ONLY, so a socket probe reports
+      # healthy seconds before that server is stopped -- and everything gated on
+      # service_healthy fires against a server about to shut down. A TCP probe
+      # cannot pass early. pg_isready also does not authenticate, which avoids
+      # the peer-auth trap: Docker runs healthchecks as the image's USER, this
+      # image declares none, so it runs as ROOT and `psql -U postgres` would
+      # fail `local all postgres peer` forever while pg_isready hid it.
+      test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  pg-init:
+    image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
+    container_name: argus-pg-init
+    restart: "no"
+    networks: [argus]
+    environment:
+      PGHOST: postgres
+      PGUSER: postgres
+      PGDATABASE: postgres
+      # Password via the environment, never on the psql command line: argv is
+      # visible in `ps` and lands in shell history.
+      PGPASSWORD_FILE: /run/secrets/pg_superuser_password
+      ARGUS_PG_APP_PASSWORD:      ${ARGUS_PG_APP_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_CONSOLE_PASSWORD:  ${ARGUS_PG_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_EXPORTER_PASSWORD: ${ARGUS_PG_EXPORTER_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_GUAC_PASSWORD:     ${ARGUS_PG_GUAC_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_GRAFANA_PASSWORD:  ${ARGUS_PG_GRAFANA_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_PARITY_PASSWORD:   ${ARGUS_PG_PARITY_PASSWORD:?run bootstrap.ps1}
+    secrets: [pg_superuser_password]
+    volumes:
+      # IDEMPOTENT BY CONSTRUCTION. `docker compose up -d` re-runs exited
+      # one-shots, so a bare CREATE ROLE / CREATE DATABASE fails on every second
+      # boot, the completed-successfully gate fails, and the console never
+      # starts again. 00-*.sql uses DO-blocks guarded on pg_roles and \gexec
+      # for CREATE DATABASE (which cannot run inside a transaction).
+      # 20-grants.sql grants argus_console pg_monitor AND explicit CONNECT on
+      # every database -- pg_monitor does NOT imply CONNECT, so without it the
+      # extension pass returns an empty list forever with no error.
+      - ./sql:/sql:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'export PGPASSWORD="$$(cat $$PGPASSWORD_FILE)"; psql -v ON_ERROR_STOP=1 -f /sql/00-roles-and-databases.sql && psql -v ON_ERROR_STOP=1 -f /sql/10-extensions.sql && psql -v ON_ERROR_STOP=1 -f /sql/20-grants.sql && echo "pg-init complete"'
+    mem_limit: 128m
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ══════════════════════════════════════════════ CORE: cache (ElastiCache)
+  # Garnet has NO eviction and NO maxmemory. Past its memory it SPILLS TO DISK.
+  # mem_limit is the only backstop and the pressure signal is SPILL RATIO, not
+  # memory percent. Do not build an Evictions tile: the metric does not exist.
+
+  garnet:
+    <<: *hardening
+    image: ghcr.io/microsoft/garnet:${GARNET_TAG:-2.1.5}
+    container_name: argus-garnet
+    hostname: garnet
+    networks: [argus]
+    logging: *logging
+    # Garnet reads NO environment variables: command line or --config-import-path
+    # only. A password on the command line is visible in `docker inspect` and
+    # `ps`, so credentials live in the ACL file alone.
+    command: ["--config-import-path=/etc/garnet/conf/garnet.conf"]
+    volumes:
+      - argus_garnet_data:/data
+      # DIRECTORY, not a single file. A Windows single-file bind mount pins an
+      # inode; an editor that saves by replace-and-rename leaves the container
+      # reading the old content, which presents as "my config change did nothing".
+      - ./services/cache:/etc/garnet/conf:ro
+      - ./secrets/garnet:/etc/garnet/secrets:ro
+    ports: ["127.0.0.1:${GARNET_PORT:-6379}:6379"]
+    # Keep in step with ARGUS_GARNET_MEM_LIMIT_BYTES: the console cannot read
+    # the cgroup and would have no denominator for its gauge. bootstrap
+    # generates both from one value.
+    mem_limit: ${GARNET_MEM_LIMIT:-768m}
+    ulimits:
+      memlock: -1
+      nofile: { soft: 65535, hard: 65535 }
+    healthcheck:
+      # CMD, not CMD-SHELL: CMD-SHELL is /bin/sh (dash on this .NET runtime
+      # base) and /dev/tcp is a bash builtin. SINGLE-quoted YAML, because a
+      # double-quoted scalar turns \r\n into real control characters before
+      # printf sees them. head -c 7 is exact: "+PONG\r\n" and "-NOAUTH" are both
+      # 7 bytes, so the read never blocks.
+      # LIMIT: this goes GREEN if authentication is off. garnet-init asserts an
+      # UNAUTHENTICATED PING returns NOAUTH -- the one case this cannot see.
+      test: ['CMD', 'bash', '-c', 'exec 3<>/dev/tcp/127.0.0.1/6379 && printf ''PING\r\n'' >&3 && head -c 7 <&3 | grep -qE "PONG|NOAUTH"']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  garnet-init:
+    image: valkey/valkey:${VALKEY_TAG:-9.1.2-alpine}
+    container_name: argus-garnet-init
+    restart: "no"
+    networks: [argus]
+    environment:
+      GARNET_CONSOLE_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
+    volumes:
+      # init.sh asserts: unauthenticated PING returns NOAUTH; the console user
+      # can PING; ACL LIST shows default=off; mills FLUSHALL returns NOPERM.
+      # It ALSO prints, loudly, that Garnet ACLs support only `~*` -- there is
+      # no per-prefix key isolation, only credential and command separation.
+      - ./services/cache/init.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    mem_limit: 64m
+    depends_on:
+      garnet: { condition: service_healthy }
+
+  # ═════════════════════════════════════ CORE: queues (SQS + SNS + EventBridge)
+  # ONE NATS node, not three. Three on one laptop is API parity, not
+  # availability, and costs 1 GB to teach nothing. Streams are created R1 here
+  # and MUST be re-created R3 at Site A -- an R1 stream looks perfectly healthy
+  # in the UI until a node dies.
+
+  nats:
+    <<: *hardening
+    # The -alpine suffix is LOAD-BEARING: the default tag is scratch-based with
+    # no shell and no busybox, so the wget healthcheck silently becomes a
+    # permanently-unhealthy container that blocks everything gated on it.
+    image: nats:${NATS_TAG:-2.11.4-alpine}
+    container_name: argus-nats
+    hostname: nats
+    networks: [argus]
+    logging: *logging
+    command: ["--config", "/etc/nats/nats-server.conf", "--name", "nats-1"]
+    environment:
+      # NATS expands $VAR from the process environment and REFUSES TO START if
+      # one is unset, which is the behaviour you want: no default password can
+      # exist. The committed conf holds only $VAR references.
+      NATS_ARGUS_PASSWORD: ${NATS_ARGUS_PASSWORD:?run bootstrap.ps1}
+      NATS_AGENT_PASSWORD: ${NATS_AGENT_PASSWORD:?run bootstrap.ps1}
+    volumes:
+      # conf pins jetstream max_memory_store/max_file_store and an ACCOUNT-level
+      # jetstream limit. Left unset, NATS sizes itself against the whole WSL2 VM
+      # and fills the VHDX.
+      - ./services/queues/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - argus_nats_data:/data
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:8222:8222"
+    mem_limit: 512m
+    stop_grace_period: 30s
+    healthcheck:
+      # LIVENESS: process up, JetStream enabled. NOT that a leader exists or
+      # that any stream exists -- nats-init's quorum wait covers that, and the
+      # console calls /healthz?details=true for the strict per-asset answer.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8222/healthz?js-server-only=true"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 30s
+
+  nats-init:
+    # The official `nats` image ships nats-server ONLY. The `nats` CLI lives in
+    # nats-box; `docker compose exec nats nats ...` fails "executable file not
+    # found", which reads as a network problem.
+    image: natsio/nats-box:${NATS_BOX_TAG:-0.17.0}
+    container_name: argus-nats-init
+    restart: "no"
+    networks: [argus]
+    environment:
+      NATS_URL: nats://nats:4222
+      NATS_USER: argus
+      NATS_PASSWORD: ${NATS_ARGUS_PASSWORD:?run bootstrap.ps1}
+      ARGUS_NATS_REPLICAS: "1"
+    volumes:
+      # apply.sh: streams are `stream info || stream add` (add errors if it
+      # exists, which fails the gate on every second boot); KV buckets are
+      # `kv status || kv add` for the same reason. Every stream sets an explicit
+      # max_bytes -- with only max_age, `discard: old` has nothing to discard
+      # against and one runaway publisher makes JetStream reject publishes to
+      # EVERY stream in the account.
+      - ./services/queues/init:/init:ro
+    # Strip CR before running. .gitattributes fixes the cause; this fixes the
+    # symptom for anyone who cloned before it landed. A guard INSIDE the script
+    # cannot work: sh chokes on the \r of `set -eu` first.
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /init/apply.sh > /tmp/apply.sh && exec /bin/sh /tmp/apply.sh"]
+    mem_limit: 128m
+    depends_on:
+      nats: { condition: service_healthy }
+
+  # ═════════════════════════════ CORE: secrets (Secrets Manager + KMS + IAM-ish)
+  # SEALED on a cold boot, so NOTHING may depend on openbao being healthy or the
+  # whole stack deadlocks waiting for a human.
+
+  openbao:
+    <<: *hardening
+    image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
+    container_name: argus-openbao
+    hostname: openbao
+    networks: [argus]
+    logging: *logging
+    # The default Cmd is `server -dev -dev-no-store-token`: an in-memory vault
+    # with a throwaway root token. Overriding it is not optional. Config lives
+    # at /etc/argus/config and NOT /openbao/config, because the entrypoint
+    # always appends -config=/openbao/config, multiple -config flags MERGE, and
+    # two listener stanzas on one port is a bind failure.
+    command: ["server", "-config=/etc/argus/config/openbao.hcl"]
+    environment:
+      BAO_ADDR: http://127.0.0.1:8200
+      # The entrypoint's `chown -R openbao /openbao/logs` has NO fallback and
+      # runs under `set -e` as a NON-ROOT user. Any volume it cannot chown kills
+      # the container before bao starts, with a bare chown error.
+      SKIP_CHOWN: "true"
+    volumes:
+      - argus_openbao_data:/openbao/file
+      - argus_openbao_logs:/openbao/logs
+      # openbao.hcl sets ui = true, which is MANDATORY not decorative: it is how
+      # a human seeds a kv value (the console is denied kv/data) and where the
+      # OIDC authorize endpoint logs the human in.
+      - ./services/secrets/config:/etc/argus/config:ro
+    ports: ["127.0.0.1:${OPENBAO_PORT:-8200}:8200"]
+    mem_limit: 256m
+    healthcheck:
+      # `bao status` exits 0 unsealed, 2 sealed-or-uninitialised, 1 unreachable.
+      # 2 counts as HEALTHY on purpose: the container IS working when sealed,
+      # and marking it unhealthy would stop dependents and hand the operator a
+      # blank page instead of the words "OpenBao is sealed".
+      test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 15s
+
+  bao-init:
+    image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
+    container_name: argus-bao-init
+    restart: "no"
+    user: "0:0"   # writes the seal file; deliberately does NOT mount /openbao/logs
+    networks: [argus]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      # sandbox = 1-of-1 auto-unseal, key on the same machine as the data.
+      # ceremony = 5-of-3, TWO-PASS, no key at rest. ADR-0013 wants ceremony;
+      # "one command gives a working system" wants sandbox. Both ship; the
+      # console renders a permanent red banner in sandbox mode, and the
+      # reconciler must refuse to apply sandbox mode to production.
+      ARGUS_UNSEAL_MODE: ${ARGUS_UNSEAL_MODE:-sandbox}
+    volumes:
+      - argus_openbao_seal:/run/argus/seal
+      # provision.sh is idempotent throughout: `bao operator init` only if
+      # Initialized=false (re-running it on a live vault destroys an estate);
+      # token creation gated on its own file (create is NOT idempotent and would
+      # mint a new long-lived token on every boot); the database engine
+      # configured only if database/config does not already exist -- rotate-root
+      # invalidates the bootstrap password, so an unconditional re-write fails
+      # and bricks the second boot. NO jq: this image has none, so the CLI's own
+      # -t '{{ .SecretID }}' template is used.
+      - ./services/secrets/init:/etc/argus/init:ro
+      - ../gitops/identity/openbao-policies:/etc/argus/policies:ro
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /etc/argus/init/provision.sh > /tmp/p.sh && exec /bin/sh /tmp/p.sh"]
+    mem_limit: 128m
+    depends_on:
+      openbao: { condition: service_started }
+
+  openbao-unseal:
+    # A LONG-RUNNING sidecar, not a one-shot. Docker restarts `openbao` after a
+    # Windows reboot but NEVER re-runs an exited init container, so without this
+    # the estate comes back permanently sealed. In ceremony mode it sleeps
+    # forever rather than exiting: with restart: unless-stopped, exit 0 is an
+    # infinite restart loop.
+    image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
+    container_name: argus-openbao-unseal
+    restart: unless-stopped
+    init: true
+    user: "0:0"
+    networks: [argus]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      ARGUS_UNSEAL_MODE: ${ARGUS_UNSEAL_MODE:-sandbox}
+    volumes:
+      - argus_openbao_seal:/run/argus/seal:ro
+      - ./services/secrets/init:/etc/argus/init:ro
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /etc/argus/init/unseal-loop.sh > /tmp/u.sh && exec /bin/sh /tmp/u.sh"]
+    mem_limit: 64m
+    depends_on:
+      openbao: { condition: service_started }
+
+  # ═════════════════════════════════════════════════════════ CORE: the console
+  # On the argus network, because that is the ONLY place the volume servers'
+  # /status, the filer and the internal DNS names are reachable.
+
+  console:
+    <<: *hardening
+    image: argus/console-api:${ARGUS_VERSION:-0.1.0}
+    build:
+      # Context is ../console, not ../console/server: the server SERVES the
+      # prototype (ARGUS_WEB_ROOT=../../prototype), and a context rooted at
+      # server/ cannot see it. The image would start, answer /api/health, and
+      # 404 the console itself.
+      context: ../console
+      dockerfile: server/Dockerfile
+      args:
+        NODE_TAG: ${NODE_TAG:-22-bookworm-slim}
+    container_name: argus-console
+    networks: [argus]
+    logging: *logging
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      # config.js defaults ARGUS_HOST to 127.0.0.1, which INSIDE a container
+      # means the published port answers nothing. Host exposure is confined by
+      # the loopback publish below, not by the bind address.
+      ARGUS_HOST: "0.0.0.0"
+      ARGUS_PORT: "8787"
+      # READ-ONLY BY DEFAULT. index.js refuses every non-GET/HEAD with 405
+      # BEFORE route lookup, so evaluating the console cannot rotate a database
+      # root password or replay a message by mis-click. Every write endpoint is
+      # therefore INERT until this is 1 -- the UI must render those buttons
+      # disabled with that reason, not let an operator click into a 405.
+      ARGUS_ALLOW_WRITES: ${ARGUS_ALLOW_WRITES:-0}
+      ARGUS_WEB_ROOT: ../../prototype
+      # --- storage
+      ARGUS_SEAWEED_MASTER_URL: http://seaweed-master:9333
+      ARGUS_SEAWEED_FILER_URL: http://seaweed-filer:8888
+      ARGUS_S3_ENDPOINT: http://seaweed-s3:8333
+      ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
+      ARGUS_BUCKETS_FILE: /config/buckets.yaml
+      ARGUS_STATE_DIR: /state
+      AWS_ACCESS_KEY_ID: argus-console
+      AWS_SECRET_ACCESS_KEY: ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      # --- postgres: DIRECT to 5432, so pg_stat_activity is the truth
+      ARGUS_PG_HOST: postgres
+      ARGUS_PG_USER: argus_console
+      ARGUS_PG_PASSWORD: ${ARGUS_PG_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      # --- cache
+      ARGUS_GARNET_HOST: garnet
+      ARGUS_GARNET_PORT: "6379"
+      ARGUS_GARNET_USER: console
+      ARGUS_GARNET_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      # The console cannot read Garnet's cgroup, so its memory gauge needs a
+      # denominator. bootstrap generates this and GARNET_MEM_LIMIT from ONE value.
+      ARGUS_GARNET_MEM_LIMIT_BYTES: ${ARGUS_GARNET_MEM_LIMIT_BYTES:-805306368}
+      # --- queues
+      ARGUS_NATS_MONITOR_URL: http://nats:8222
+      ARGUS_NATS_URL: nats://nats:4222
+      ARGUS_NATS_USER: agent
+      ARGUS_NATS_PASSWORD: ${NATS_AGENT_PASSWORD:?run bootstrap.ps1}
+      # --- secrets
+      ARGUS_OPENBAO_ADDR: http://openbao:8200
+      ARGUS_UNSEAL_MODE: ${ARGUS_UNSEAL_MODE:-sandbox}
+      # --- optional upstreams. Absent/unreachable means the panel renders
+      #     "not deployed" rather than an empty chart.
+      ARGUS_PROM_URL: ${ARGUS_PROM_URL:-http://prometheus:9090}
+      ARGUS_LOKI_URL: ${ARGUS_LOKI_URL:-http://loki:3100}
+      ARGUS_ALERTMANAGER_URL: ${ARGUS_ALERTMANAGER_URL:-http://alertmanager:9093}
+      ARGUS_GUACAMOLE_BASE: ${ARGUS_GUACAMOLE_BASE:-http://guacamole:8080/guacamole}
+      ARGUS_PARITY_URL: ${ARGUS_PARITY_URL:-http://parity:9781}
+      ARGUS_NOMAD_URL: ${ARGUS_NOMAD_URL:-http://nomad:4646}
+      ARGUS_UPSTREAM_TIMEOUT_MS: ${ARGUS_UPSTREAM_TIMEOUT_MS:-8000}
+    volumes:
+      - ../gitops:/config/gitops:ro
+      - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
+      # rw in storage-init, :ro here. Without this mount the WORM enforcement
+      # verdict is written to an ephemeral layer and destroyed on exit, and
+      # /api/storage/lock-status cannot return real data.
+      - argus_console_state:/state:ro
+    ports: ["127.0.0.1:${CONSOLE_PORT:-8787}:8787"]
+    mem_limit: 320m
+    depends_on:
+      seaweed-s3:   { condition: service_healthy }
+      storage-init: { condition: service_completed_successfully }
+      postgres:     { condition: service_healthy }
+      pg-init:      { condition: service_completed_successfully }
+      garnet:       { condition: service_healthy }
+      nats:         { condition: service_healthy }
+      openbao:      { condition: service_started }
+    healthcheck:
+      test: ["CMD", "node", "-e", "const h=require('node:http');const t=setTimeout(()=>process.exit(1),4000);t.unref();h.get('http://127.0.0.1:8787/api/health',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  # ══════════════════════════════════════════════════ PROFILE: observability
+  # docker compose --profile observability up -d          (+3.4 GB)
+
+  prometheus:
+    <<: *hardening
+    profiles: [observability]
+    image: prom/prometheus:${PROMETHEUS_TAG:-v3.5.0}
+    container_name: argus-prometheus
+    networks: [argus]
+    logging: *logging
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROM_RETENTION_TIME:-15d}
+      - --storage.tsdb.retention.size=${PROM_RETENTION_SIZE:-6GB}
+      - --storage.tsdb.wal-compression
+      - --web.listen-address=0.0.0.0:9090
+      - --web.enable-lifecycle
+      - --query.timeout=30s
+      # 5M samples is ~80 MB of query buffer. 20M inside a 1.5g limit is two
+      # concurrent heavy queries away from an OOM kill.
+      - --query.max-samples=5000000
+      - --enable-feature=expand-external-labels
+    environment:
+      ARGUS_SITE: ${ARGUS_SITE:-site-a}
+      ARGUS_ENVIRONMENT: ${ARGUS_ENVIRONMENT:-sandbox}
+    volumes:
+      - argus_prometheus_data:/prometheus
+      - ./services/observability/prometheus:/etc/prometheus:ro
+      # Alert rules straight from the GitOps tree (ADR-0021). NOTE: a malformed
+      # rule file is tolerated on reload but FATAL at startup, so a bad file
+      # plus any restart means Prometheus does not come back. The promtool
+      # check in CI is the whole mitigation.
+      - ../gitops:/etc/prometheus/gitops:ro
+    ports: ["127.0.0.1:9090:9090"]
+    mem_limit: 1536m
+    healthcheck:
+      # `check ready` (/-/ready), NOT `check healthy`. /-/healthy answers 200
+      # the instant the listener binds, BEFORE WAL replay -- and grafana gates
+      # on this condition, so a liveness probe here starts Grafana against a
+      # TSDB that cannot answer its datasource test.
+      test: ["CMD", "promtool", "check", "ready", "--url=http://127.0.0.1:9090"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  alertmanager:
+    <<: *hardening
+    profiles: [observability]
+    image: prom/alertmanager:${ALERTMANAGER_TAG:-v0.28.1}
+    container_name: argus-alertmanager
+    networks: [argus]
+    logging: *logging
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=0.0.0.0:9093
+    volumes:
+      - argus_alertmanager_data:/alertmanager
+      # RENDERED from alertmanager.yml.tmpl by bootstrap. Alertmanager has NO
+      # config env-var expansion -- no equivalent of Loki's -config.expand-env
+      # or Prometheus's expand-external-labels. A ${SMTP_HOST} in here is taken
+      # LITERALLY, amtool check-config passes, the stack boots green, and the
+      # one delivery leg that must survive the console being down fails at send
+      # time on an unresolvable host. CI greps the rendered file for '${'.
+      - ./secrets/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    secrets: [console_alert_token]
+    ports: ["127.0.0.1:9093:9093"]
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/ready >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  loki:
+    <<: *hardening
+    profiles: [observability]
+    image: grafana/loki:${LOKI_TAG:-3.5.0}
+    container_name: argus-loki
+    networks: [argus]
+    logging: *logging
+    command: ["-config.file=/etc/loki/loki.yaml", "-config.expand-env=true"]
+    environment:
+      LOKI_RETENTION_DEFAULT: ${LOKI_RETENTION_DEFAULT:-360h}
+    volumes:
+      # filesystem storage ON PURPOSE: Loki must not depend on the object store
+      # whose outage you are debugging. The SeaweedFS switch is a Phase 1 test,
+      # not a default.
+      - argus_loki_data:/loki
+      - ./services/observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+    mem_limit: 768m
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3100/ready | grep -q ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  alloy:
+    <<: *hardening
+    profiles: [observability]
+    image: grafana/alloy:${ALLOY_TAG:-v1.9.1}
+    container_name: argus-alloy
+    networks: [argus]
+    logging: *logging
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - --disable-reporting
+      - /etc/alloy/config.alloy
+    environment:
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+      LOKI_URL: http://loki:3100/loki/api/v1/push
+    volumes:
+      # The positions file. Without it every restart re-ships every container
+      # log from the beginning.
+      - argus_alloy_data:/var/lib/alloy/data
+      # config.alloy redacts CNIC-shaped strings and password=/token= pairs at
+      # WRITE time, and puts trace_id in structured metadata rather than a
+      # label (a label would be unbounded cardinality).
+      - ./services/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+    mem_limit: 256m
+    depends_on:
+      loki: { condition: service_healthy }
+      docker-socket-proxy: { condition: service_started }
+    healthcheck:
+      # This image is ubuntu:noble -- bash yes, wget/curl NOT guaranteed. Speak
+      # HTTP over bash's /dev/tcp and check /-/ready, so it proves the component
+      # graph loaded rather than that a port accepts.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345; printf \"GET /-/ready HTTP/1.0\\r\\n\\r\\n\" >&3; head -n 1 <&3 | grep -q \" 200 \"'"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  docker-socket-proxy:
+    <<: *hardening
+    profiles: [observability]
+    image: tecnativa/docker-socket-proxy:${SOCKET_PROXY_TAG:-v0.5.0}
+    container_name: argus-docker-socket-proxy
+    networks: [argus]
+    logging: *logging
+    environment:
+      CONTAINERS: "1"   # /containers/json, /containers/{id}/logs, /{id}/json
+      IMAGES: "1"
+      PING: "1"
+      VERSION: "1"
+      INFO: "1"
+      POST: "0"         # no create/exec/kill through this socket
+      EXEC: "0"
+      NETWORKS: "0"
+      VOLUMES: "0"
+    volumes:
+      # Root-equivalent on the host even :ro. Nothing else in this file touches
+      # the socket. CONTAINERS=1 still lets anything reaching this proxy read
+      # every container's ENV -- which is why the passwords that CAN be
+      # file-based (postgres, grafana, pg-exporter) are file-based.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 64m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2375/_ping >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  grafana:
+    <<: *hardening
+    profiles: [observability]
+    image: grafana/grafana-oss:${GRAFANA_TAG:-12.0.2}
+    container_name: argus-grafana
+    networks: [argus]
+    logging: *logging
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-argus-admin}
+      # __FILE, not the value: the socket proxy hands a container's env to
+      # anything that can read /containers/{id}/json.
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ALLOW_EMBEDDING: "false"
+      GF_SECURITY_COOKIE_SAMESITE: strict
+      # ONE alert engine. Prometheus rules -> Alertmanager. Two engines
+      # disagreeing about what is firing is worse than neither.
+      GF_UNIFIED_ALERTING_ENABLED: "false"
+      # No egress at boot (ADR-0027): no plugin fetch, no update ping, no
+      # telemetry, no news feed.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+      # Postgres, not sqlite: 02-MAP specifies Grafana x2 at Site A and two
+      # Grafanas cannot share a sqlite file. Same config here and there.
+      GF_DATABASE_TYPE: postgres
+      GF_DATABASE_HOST: postgres:5432
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: grafana
+      GF_DATABASE_PASSWORD: ${ARGUS_PG_GRAFANA_PASSWORD:?run bootstrap.ps1}
+      GF_DATABASE_SSL_MODE: disable
+    secrets: [grafana_admin_password]
+    volumes:
+      - argus_grafana_data:/var/lib/grafana
+      - ./services/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports: ["127.0.0.1:3000:3000"]
+    mem_limit: 384m
+    depends_on:
+      prometheus: { condition: service_healthy }
+      loki:       { condition: service_healthy }
+    healthcheck:
+      # curl IS apk-installed in this image; wget only via busybox. A plain 200
+      # is not enough -- Grafana answers 200 with database:"failed".
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/api/health | grep -q '\"database\": *\"ok\"' || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+  node-exporter:
+    <<: *hardening
+    profiles: [observability]
+    image: prom/node-exporter:${NODE_EXPORTER_TAG:-v1.9.1}
+    container_name: argus-node-exporter
+    networks: [argus]
+    logging: *logging
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      # Every `$` is `$$`. A bare `($|/)` here makes `docker compose config`
+      # fail for the ENTIRE project, not just this service.
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run|var/lib/docker/.+)($$|/)
+      - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|cgroup2?|devpts|overlay|proc|sysfs|tmpfs|tracefs|9p|virtiofs)$$
+      - --no-collector.wifi
+      - --no-collector.hwmon
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro,rslave
+    mem_limit: 64m
+    # NOTE: this measures the WSL2 UTILITY VM, not Windows. Label it
+    # host=docker-vm everywhere; real host metrics need windows_exporter on the
+    # Windows side plus an inbound firewall rule for the WSL vNIC.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9100/metrics >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  postgres-exporter:
+    <<: *hardening
+    profiles: [observability]
+    image: quay.io/prometheuscommunity/postgres-exporter:${PG_EXPORTER_TAG:-v0.17.1}
+    container_name: argus-postgres-exporter
+    networks: [argus]
+    logging: *logging
+    command:
+      - --auto-discover-databases
+      - --exclude-databases=template0,template1
+      - --collector.stat_statements
+    environment:
+      DATA_SOURCE_URI: "postgres:5432/postgres?sslmode=disable"
+      DATA_SOURCE_USER: argus_exporter
+      DATA_SOURCE_PASS_FILE: /run/secrets/pg_exporter_password
+    secrets: [pg_exporter_password]
+    mem_limit: 96m
+    healthcheck:
+      # The exporter serves /metrics happily while Postgres is unreachable, so
+      # liveness proves nothing. `pg_up 1` proves it actually connected.
+      # If this image turns out to be distroless, set `disable: true` rather
+      # than leave a permanently-red row people learn to ignore.
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9187/metrics | grep -q '^pg_up 1$$' || exit 1"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 20s
+
+  garnet-exporter:
+    <<: *hardening
+    profiles: [observability]
+    image: oliver006/redis_exporter:${REDIS_EXPORTER_TAG:-v1.69.0-alpine}
+    container_name: argus-garnet-exporter
+    networks: [argus]
+    logging: *logging
+    environment:
+      REDIS_ADDR: redis://garnet:6379
+      REDIS_USER: console
+      REDIS_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      # NEVER set REDIS_EXPORTER_CHECK_KEYS against Garnet: it issues SCAN and
+      # walks the keyspace on every scrape.
+      REDIS_EXPORTER_INCL_SYSTEM_METRICS: "false"
+    mem_limit: 96m
+    healthcheck:
+      # scratch-based, no shell. Proves the binary runs, nothing more; the true
+      # state is up{job="garnet"} in Prometheus. NOTE: redis_memory_used_bytes,
+      # keyspace_hits and evicted_keys will be ABSENT against Garnet -- do not
+      # build a Redis-shaped dashboard, it reads plausibly and is wrong.
+      test: ["CMD", "/redis_exporter", "-version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nats-exporter:
+    <<: *hardening
+    profiles: [observability]
+    image: natsio/prometheus-nats-exporter:${NATS_EXPORTER_TAG:-0.17.3}
+    container_name: argus-nats-exporter
+    networks: [argus]
+    logging: *logging
+    command: ["-port=7777", "-varz", "-connz", "-routez", "-healthz", "-jsz=all", "http://nats:8222"]
+    mem_limit: 96m
+    healthcheck:
+      # FROM scratch, no shell. An honest `disable` beats a check that cannot run.
+      disable: true
+
+  # ═══════════════════════════════════════════════════════════ PROFILE: connect
+  # docker compose --profile connect up -d                    (+1.3 GB)
+  # Guacamole's JDBC database is the SHARED postgres, not a second one.
+
+  guacd:
+    <<: *hardening
+    profiles: [connect]
+    image: guacamole/guacd:${GUAC_TAG:-1.5.5}
+    container_name: argus-guacd
+    networks: [argus]
+    logging: *logging
+    environment:
+      # "Creating recording ..." is logged at info. These lines ARE the
+      # independent audit record: guacamole_connection_history stays EMPTY for
+      # JSON-minted sessions, because the JDBC extension never sees a
+      # SimpleAuthenticationProvider connection.
+      GUACD_LOG_LEVEL: info
+    volumes:
+      - argus_guac_recordings:/recordings
+      - argus_guac_drives:/drives
+    mem_limit: 512m
+    # 4822 is NOT published, not even on loopback. The guacd protocol is
+    # UNAUTHENTICATED: anything that opens this socket gets RDP/SSH to anywhere
+    # guacd can route, with no credential and no logging. Most compose examples
+    # online publish it. Do not copy them.
+    expose: ["4822"]
+    depends_on:
+      guac-storage-init: { condition: service_completed_successfully }
+    healthcheck:
+      # A real protocol handshake: `select` must be answered with `args`.
+      # `timeout 3` is required -- without it head blocks on a short reply and a
+      # fast failure becomes a slow one.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4822 && printf '6.select,3.ssh;' >&3 && timeout 3 head -c 64 <&3 | grep -q args"]
+      interval: 15s
+      timeout: 8s
+      retries: 4
+      start_period: 15s
+
+  guac-storage-init:
+    profiles: [connect]
+    image: alpine:${ALPINE_TAG:-3.21}
+    container_name: argus-guac-storage-init
+    restart: "no"
+    networks: [argus]
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        # NO su-exec: it is a PACKAGE, not part of the alpine base image, so
+        # calling it makes this one-shot exit 1 on EVERY boot -- and through
+        # service_completed_successfully, guacd then never starts at all.
+        # This matters because Guacamole does NOT fail a connection when
+        # recording-path is unwritable: the session works perfectly and records
+        # nothing. Verify the uid first if you change the guacd tag:
+        #   docker run --rm --entrypoint id guacamole/guacd:$$TAG
+        for d in /recordings /drives; do
+          mkdir -p "$$d"; chown 1000:1000 "$$d"; chmod 0770 "$$d"
+          o=$$(stat -c %u "$$d"); [ "$$o" = "1000" ] || { echo "$$d is uid $$o, not 1000" >&2; exit 1; }
+        done
+        echo "recording volumes ready"
+    volumes:
+      - argus_guac_recordings:/recordings
+      - argus_guac_drives:/drives
+    mem_limit: 32m
+
+  guacamole:
+    <<: *hardening
+    profiles: [connect]
+    image: guacamole/guacamole:${GUAC_TAG:-1.5.5}
+    container_name: argus-guacamole
+    networks: [argus]
+    logging: *logging
+    environment:
+      GUACD_HOSTNAME: guacd
+      GUACD_PORT: "4822"
+      POSTGRESQL_HOSTNAME: postgres
+      POSTGRESQL_PORT: "5432"
+      POSTGRESQL_DATABASE: guacamole_db
+      POSTGRESQL_USER: guacamole_user
+      POSTGRESQL_PASSWORD: ${ARGUS_PG_GUAC_PASSWORD:?run bootstrap.ps1}
+      POSTGRESQL_AUTO_CREATE_ACCOUNTS: "false"
+      # TIER-0. Whoever holds this can mint a session as anyone to anything,
+      # bypassing every role and elevation check. Exactly 32 hex characters =
+      # 128 bits; Guacamole rejects any other length.
+      JSON_SECRET_KEY: ${GUAC_JSON_SECRET_KEY:?run bootstrap.ps1}
+      JSON_TRUSTED_NETWORKS: ${ARGUS_SUBNET:-172.28.0.0/16}
+      EXTENSION_PRIORITY: json
+      # Only meaningful because the console's tunnel proxy sets X-Forwarded-For
+      # itself. A raw byte pipe cannot, and then every session is audited as
+      # coming from the console -- the exact thing this prevents.
+      REMOTE_IP_VALVE_ENABLED: "true"
+      PROXY_ALLOWED_IPS_REGEX: ^172\.28\..*$$
+      # RECORDING_SEARCH_PATH is deliberately ABSENT and /recordings is
+      # deliberately NOT mounted here: the webapp's history player finds
+      # recordings by connection-history UUID, and JSON-minted sessions write no
+      # history row, so it would list nothing while coupling two containers'
+      # uids. Break-glass playback is guacenc on the host, in the runbook.
+    mem_limit: 768m
+    # NO ports. The debug publish lives in docker-compose.debug.yml, because
+    # "remember to remove it before production" is not a security control:
+    # reaching 8080 directly bypasses the console proxy, and the proxy close is
+    # the ONLY thing that actually terminates a session at expiry --
+    # PATCH activeConnections cannot see a JSON-data-source connection at all.
+    expose: ["8080"]
+    depends_on:
+      postgres:  { condition: service_healthy }
+      guac-init: { condition: service_completed_successfully }
+      guacd:     { condition: service_started }
+    healthcheck:
+      # Tomcat 8.5+ OMITS the HTTP reason phrase, so the status line is
+      # "HTTP/1.1 200" with no "OK". A grep for '200 OK' can NEVER match: the
+      # container sits unhealthy forever, nothing gated on it starts, and the
+      # failure presents as "Guacamole is broken".
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /guacamole/api/languages HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && timeout 8 head -c 256 <&3 | grep -qm1 '^HTTP/1\\.[01] 200'"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      # Tomcat + extension load on WSL2 with a cold page cache regularly exceeds
+      # 90s, and the resulting restart loop looks like a real fault.
+      start_period: 120s
+
+  guac-init:
+    profiles: [connect]
+    image: guacamole/guacamole:${GUAC_TAG:-1.5.5}
+    container_name: argus-guac-init
+    restart: "no"
+    networks: [argus]
+    environment:
+      PGHOST: postgres
+      PGUSER: guacamole_user
+      PGDATABASE: guacamole_db
+      PGPASSWORD: ${ARGUS_PG_GUAC_PASSWORD:?run bootstrap.ps1}
+      BREAKGLASS_USER: ${GUAC_BREAKGLASS_USER:-argus-breakglass}
+      # SHA256(password_utf8 + UPPERCASE_HEX(salt)) -- the salt appended as
+      # uppercase hex TEXT, not raw bytes. Computed in bootstrap so no plaintext
+      # reaches a SQL file or a log.
+      BREAKGLASS_SALT_HEX: ${GUAC_BREAKGLASS_SALT_HEX:?run bootstrap.ps1}
+      BREAKGLASS_HASH_HEX: ${GUAC_BREAKGLASS_HASH_HEX:?run bootstrap.ps1}
+    volumes:
+      # init.sh: exports the JDBC schema to a TEMP file then mv's it (a straight
+      # redirect truncates first, so a half-failed export leaves a non-empty
+      # partial SQL that `test -s` passes and psql applies); applies it only if
+      # guacamole_connection is absent; renames the publicly-known
+      # guacadmin/guacadmin default ONLY when it performed the rename (an
+      # unconditional disable re-revokes break-glass mid-incident); and seeds
+      # connections with WHERE NOT EXISTS -- plain INSERTs hit
+      # UNIQUE(connection_name, parent_id) on the second boot, which fails the
+      # gate and bricks the stack after one run.
+      - ./services/connect/sql:/seed:ro
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /seed/init.sh > /tmp/i.sh && exec /bin/sh /tmp/i.sh"]
+    mem_limit: 256m
+    depends_on:
+      postgres: { condition: service_healthy }
+      pg-init:  { condition: service_completed_successfully }
+
+  # ═══════════════════════════════════════════════════════════ PROFILE: targets
+  # docker compose --profile connect --profile targets up -d   (+1.2 GB)
+  # Something for Guacamole to connect TO. There is no Windows target and there
+  # cannot be one -- see honestLimits.
+
+  target-ssh:
+    <<: *hardening
+    profiles: [targets]
+    image: lscr.io/linuxserver/openssh-server:${OPENSSH_TAG:-version-9.9_p2-r0}
+    container_name: argus-target-ssh
+    networks: [argus]
+    logging: *logging
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-Asia/Karachi}
+      USER_NAME: argusops
+      SUDO_ACCESS: "false"
+      # TRUE on purpose. The acceptance test is "OpenBao mints a one-time
+      # PASSWORD and the operator never types it"; with key-only auth the
+      # credential-injection path this domain exists to prove is never
+      # exercised. Production stays key/Kerberos only.
+      PASSWORD_ACCESS: "true"
+      USER_PASSWORD: ${TARGET_SSH_PASSWORD:?run bootstrap.ps1}
+    mem_limit: 128m
+    expose: ["2222"]
+
+  target-rdp:
+    <<: *hardening
+    profiles: [targets]
+    image: lscr.io/linuxserver/rdesktop:${RDESKTOP_TAG:-ubuntu-xfce}
+    container_name: argus-target-rdp
+    networks: [argus]
+    logging: *logging
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: ${TZ:-Asia/Karachi}
+    # The most expensive thing in the stack, which is why it is profiled.
+    mem_limit: 1024m
+    shm_size: 512m
+    expose: ["3389"]
+
+  # ═══════════════════════════════════════════════════════════ PROFILE: compute
+  # docker compose --profile compute up -d                     (+1.0 GB)
+  #
+  # !! REQUIRES DOCKER ENGINE INSTALLED NATIVELY INSIDE THE WSL2 DISTRO.
+  # It does NOT work under Docker Desktop. Nomad's docker driver asks the host
+  # daemon to bind-mount alloc dirs BY HOST PATH; under Docker Desktop that
+  # daemon lives in the docker-desktop VM -- a different filesystem namespace --
+  # so the mounts land on paths nothing created and every task gets empty
+  # alloc/local/secrets dirs. dispatch_payload and template silently deliver
+  # nothing and no error mentions mounts. Prove the substrate first:
+  #   mkdir -p /opt/argus/probe && echo ok > /opt/argus/probe/f \
+  #     && docker run --rm -v /opt/argus/probe:/probe alpine cat /probe/f
+
+  nomad:
+    profiles: [compute]
+    image: hashicorp/nomad:${NOMAD_TAG:-1.11.3}
+    container_name: argus-nomad
+    restart: unless-stopped
+    networks: [argus]
+    logging: *logging
+    command: ["agent", "-config=/etc/nomad.d"]
+    environment:
+      NOMAD_ADDR: http://127.0.0.1:4646
+    volumes:
+      # LEFT SIDE MUST EQUAL RIGHT SIDE, absolute, on the distro's own ext4.
+      - ${ARGUS_NOMAD_DATA:-/opt/argus/nomad/data}:${ARGUS_NOMAD_DATA:-/opt/argus/nomad/data}
+      # nomad.hcl sets acl{enabled=true}, allow_privileged=false,
+      # volumes{enabled=false}, and client{reserved{}} -- the correct primitive
+      # for "leave room for the platform", rather than the console subtracting
+      # by hand on every capacity call.
+      - ./services/compute/nomad.d:/etc/nomad.d:ro
+      # `cgroup: host` shares the namespace but Docker still mounts this
+      # read-only; Nomad's cpuset manager writes here and refuses to start.
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # Root-equivalent on the host. The single largest security trade in this
+      # file and not mitigable while the docker driver is used.
+      - /var/run/docker.sock:/var/run/docker.sock
+    cgroup: host
+    pid: host
+    cap_add: ["SYS_ADMIN"]
+    security_opt: ["apparmor:unconfined"]
+    # Deliberately NO mem_limit: a cgroup limit here starves the scheduler first
+    # under pressure AND makes Nomad fingerprint the container's limit as the
+    # machine's memory.
+    ports: ["127.0.0.1:4646:4646"]
+    stop_grace_period: 60s
+    healthcheck:
+      # LIVENESS. /v1/agent/health needs NO ACL token, so it survives ACL
+      # bootstrap, and returns 500 with no leader. It does NOT prove the docker
+      # driver fingerprinted -- the likeliest failure of a containerised client,
+      # where this stays green and every alloc sits in `pending` forever with no
+      # user-visible reason. nomad-init asserts Drivers.docker.Healthy.
+      test: ["CMD-SHELL", "nomad operator api /v1/agent/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  azurite:
+    <<: *hardening
+    profiles: [compute]
+    image: mcr.microsoft.com/azure-storage/azurite:${AZURITE_TAG:-3.37.0}
+    container_name: argus-azurite
+    networks: [argus]
+    logging: *logging
+    command: ["azurite", "--location=/data", "--blobHost=0.0.0.0", "--queueHost=0.0.0.0", "--tableHost=0.0.0.0"]
+    environment:
+      # A generated account, not the well-known devstoreaccount1 key. The `:?`
+      # is not decoration: a plain ${...} interpolates to EMPTY, Azurite starts
+      # with a keyless account, and the failure surfaces much later as an opaque
+      # auth error. NOTE: Azurite is Microsoft's DEVELOPMENT EMULATOR with an
+      # explicit not-for-production stance -- it is the one genuinely fake thing
+      # in this stack, and it is here only because the Azure Functions host
+      # requires AzureWebJobsStorage.
+      AZURITE_ACCOUNTS: "argus:${AZURITE_ACCOUNT_KEY:?run bootstrap.ps1}"
+    volumes:
+      # The image declares VOLUME /data. Without this mount Docker creates an
+      # ANONYMOUS volume that `docker compose down -v` deletes.
+      - argus_azurite_data:/data
+    mem_limit: 512m
+    healthcheck:
+      # NOT `nc -z`: BusyBox nc has no -z flag, so that probe fails permanently
+      # on this Node/Alpine base and pins the container unhealthy forever.
+      # node(1) is guaranteed -- this image IS a Node app. All three endpoints
+      # including table, which the connection string uses.
+      test: ["CMD-SHELL", "node -e \"const n=require('net');let l=3;for(const p of [10000,10001,10002]){const s=n.connect(p,'127.0.0.1');s.on('connect',()=>{s.end();if(--l===0)process.exit(0)});s.on('error',()=>process.exit(1))}\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # ════════════════════════════════════════════════════════════ PROFILE: parity
+  # docker compose --profile parity up -d                      (+0.5 GB)
+  # The proving harness: persistence canaries across a real restart, negative
+  # authorisation tests, and a genuine-AWS-SDK cross-check against the
+  # hand-rolled signer. Deliberately NO Docker socket: it observes, it cannot act.
+
+  parity:
+    <<: *hardening
+    profiles: [parity]
+    image: node:${NODE_TAG:-22-bookworm-slim}
+    container_name: argus-parity
+    hostname: parity
+    networks: [argus]
+    logging: *logging
+    init: true
+    user: "1000:1000"
+    working_dir: /opt/argus/parity
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
+    cap_drop: [ALL]
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      NODE_PATH: /opt/argus/sdk
+      # 0.0.0.0 INSIDE the container. A loopback bind here would make the
+      # service unreachable from the console; host exposure is confined by the
+      # 127.0.0.1 publish below.
+      ARGUS_PARITY_BIND: "0.0.0.0"
+      ARGUS_PARITY_PORT: "9781"
+      ARGUS_PARITY_INTERVAL_MS: "900000"
+      ARGUS_PARITY_RESULTS_DIR: /var/lib/argus/parity
+      # A SKIPPED SDK leg is `degraded`, never a silent pass: node_modules is
+      # gitignored, so on a fresh clone the mount is empty and the ONE check
+      # that proves the genuine AWS SDK works against SeaweedFS -- LocalStack's
+      # entire value proposition -- would quietly never run.
+      ARGUS_PARITY_SDK_REQUIRED: "1"
+      ARGUS_S3_ENDPOINT: http://seaweed-s3:8333
+      ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
+      ARGUS_S3_BUCKET: argus-parity
+      ARGUS_S3_WORM_BUCKET: argus-parity-worm
+      # Per-OBJECT retain-until of now+120s, NOT a bucket default of
+      # COMPLIANCE/1day: a canary every cycle under COMPLIANCE is an unbounded
+      # pile of permanently undeletable objects, on the very volume the harness
+      # exists to prove is durable, with `down -v` as the only exit.
+      ARGUS_S3_WORM_RETAIN_SECONDS: "120"
+      # A DEDICATED decoy, never argus-backups. The premise of the test is that
+      # the ACL might not be enforced; if it is not, pointing it at the real
+      # backups means the FAILING TEST DAMAGES PRODUCTION BACKUPS. The deny leg
+      # attempts non-mutating operations only.
+      ARGUS_S3_FORBIDDEN_BUCKET: argus-parity-forbidden
+      ARGUS_PARITY_ACCESS_KEY: argus-parity
+      ARGUS_PARITY_SECRET_KEY: ${ARGUS_S3_PARITY_SECRET:?run bootstrap.ps1}
+      ARGUS_PARITY_DENY_ACCESS_KEY: argus-parity-deny
+      ARGUS_PARITY_DENY_SECRET_KEY: ${ARGUS_S3_PARITY_DENY_SECRET:?run bootstrap.ps1}
+      ARGUS_NATS_URL: nats://nats:4222
+      ARGUS_OPENBAO_ADDR: http://openbao:8200
+    volumes:
+      - ./services/parity:/opt/argus/parity:ro
+      # REQUIRED, not optional: run `npm ci` in platform/console/server first.
+      - ../console/server/node_modules:/opt/argus/sdk:ro
+      - argus_parity_results:/var/lib/argus/parity
+    ports: ["127.0.0.1:9781:9781"]
+    command: ["node", "src/runner.js"]
+    mem_limit: 384m
+    depends_on:
+      seaweed-s3: { condition: service_healthy }
+      nats:       { condition: service_healthy }
+      openbao:    { condition: service_started }
+    healthcheck:
+      # HEALTHY MEANS THE PROVER IS WORKING, not that the platform is green. A
+      # run where the WORM check FAILED is a SUCCESSFUL run. Conflating the two
+      # makes the one container whose job is to report bad news go dark exactly
+      # when there is bad news. The verdict lives in latest.json, not here.
+      test: ["CMD", "node", "-e", "const h=require('node:http');const t=setTimeout(()=>process.exit(1),4000);t.unref();h.get('http://127.0.0.1:9781/healthz',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # NOT 20s: the first run does real I/O across four stores on a cold WSL2
+      # boot, and an unhealthy container blocks everything gated on it.
+      start_period: 180s
+
+  parity-pg:
+    <<: *hardening
+    profiles: [parity]
+    image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
+    container_name: argus-parity-pg
+    networks: [argus]
+    logging: *logging
+    init: true
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      PGHOST: postgres
+      PGDATABASE: argus_parity
+      PGUSER: argus_parity
+      # Real psql against real SCRAM-SHA-256. A hand-rolled Postgres wire client
+      # is 400-600 lines with no cross-check leg, in the one place where a
+      # prover bug reads as a platform defect.
+      PGPASSWORD: ${ARGUS_PG_PARITY_PASSWORD:?run bootstrap.ps1}
+      PGCONNECT_TIMEOUT: "10"
+      ARGUS_PARITY_INTERVAL_S: "900"
+    volumes:
+      - ./services/parity/pg:/opt/argus/pg:ro
+      - argus_parity_results:/var/lib/argus/parity
+    entrypoint: ["/bin/sh", "-c"]
+    # Writes to .tmp and mv's: latest.json is rewritten while the console reads
+    # it, and rename() is atomic within a volume.
+    command:
+      - 'while true; do psql -v ON_ERROR_STOP=1 -qtAX -f /opt/argus/pg/canary.sql > /var/lib/argus/parity/pg/latest.json.tmp 2>/var/lib/argus/parity/pg/last-error.txt && mv -f /var/lib/argus/parity/pg/latest.json.tmp /var/lib/argus/parity/pg/latest.json; sleep "$$ARGUS_PARITY_INTERVAL_S"; done'
+    mem_limit: 128m
+    depends_on:
+      postgres: { condition: service_healthy }
+      pg-init:  { condition: service_completed_successfully }
+    healthcheck:
+      # A sidecar whose only job is to write a file is healthy exactly when that
+      # file is fresh (3x its interval). Checking psql exists would prove nothing.
+      test: ["CMD-SHELL", "test -f /var/lib/argus/parity/pg/latest.json && test $$(( $$(date +%s) - $$(stat -c %Y /var/lib/argus/parity/pg/latest.json) )) -lt 2700"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
