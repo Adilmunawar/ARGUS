@@ -25,7 +25,7 @@
   /* ------------------------------------------------------------ helpers --- */
 
   function personName(upn) {
-    var p = d.people.filter(function (x) { return x.upn === upn; })[0];
+    var p = d.personByUpn(upn);
     return p ? p.name : (upn || 'unknown');
   }
 
@@ -298,11 +298,13 @@
         var go = ui.btn('Reject deployment ' + dep.id, rejectOpts);
         var close = null;
 
+        // ui.btn captures opts.disabled as a boolean at construction and only
+        // setDisabled moves it. Mutating rejectOpts.disabled and painting the
+        // class by hand made the button *look* enabled -- correct class,
+        // aria-disabled="false" -- while the click stayed swallowed by the
+        // guard, so no deployment could ever be rejected.
         area.addEventListener('input', function () {
-          var ok = area.value.trim().length > 0;
-          rejectOpts.disabled = !ok;
-          go.classList.toggle('is-disabled', !ok);
-          go.setAttribute('aria-disabled', ok ? 'false' : 'true');
+          go.setDisabled(area.value.trim().length === 0);
         });
 
         var dlg = A.dialog({

@@ -148,6 +148,11 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .tablewrap tr.is-clickable { cursor: pointer; }
 .tablewrap tr.is-clickable:hover td { background: rgba(var(--leaf-rgb),.16); }
 .tablewrap tr.is-clickable:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: -3px; }
+/* The row a deep link named. Marked with a rule as well as a wash, so it does
+   not depend on colour. */
+.tablewrap tr.is-linked td { background: rgba(var(--leaf-rgb),.22); }
+.tablewrap tr.is-linked td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+.tablewrap tr.is-linked:focus-visible { outline: 3px solid rgba(var(--brand-rgb),.5); outline-offset: -3px; }
 
 /* ------------------------------------------------------- empty, error --- */
 
@@ -192,7 +197,7 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .graph { display: block; min-width: 100%; height: auto; }
 .gnode rect { fill: var(--paper); stroke: rgba(var(--ink-rgb),.18); }
 .gnode-label { font: 600 11.5px var(--sans); fill: var(--ink); }
-.gnode-kind { font: 500 10.5px var(--sans); fill: var(--muted); }
+.gnode-kind { font: 500 11px var(--sans); fill: var(--muted); }
 /* Node kinds. Freshness carries a stroke treatment as well as a fill, because
    colour on its own is not a signal a colour-blind operator can read. */
 .gnode-database rect, .gnode-primary-site-a rect, .gnode-async-secondary-site-b rect { fill: var(--g-db); }
@@ -245,7 +250,19 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
 
 /* ---------------------------------------------------------- callouts --- */
 
-.callout { border-radius: 12px; padding: 11px 14px; font-size: 12.5px; border: 1px solid; margin-bottom: 14px; }
+/* Every pill in the console carries a glyph so that colour is never the only
+   signal; callouts did not, so a `bad` callout and an `info` callout were
+   identical in greyscale, on a projector, and to a deuteranope -- including the
+   rolled-back-deployment banner. The glyph is the same vocabulary the pills
+   use, and it is decorative to assistive technology because the sentence
+   beside it already says what happened. */
+.callout { border-radius: 12px; padding: 11px 14px; font-size: 12.5px; border: 1px solid; margin-bottom: 14px;
+  position: relative; padding-left: 34px; }
+.callout::before { position: absolute; left: 13px; top: 11px; font-size: 11px; font-weight: 700; line-height: 1.5; }
+.callout.ok::before { content: "CF"; color: var(--ok); }
+.callout.warn::before { content: "B2"; color: var(--warn); }
+.callout.bad::before { content: "A0"; color: var(--bad); }
+.callout.info::before { content: "C6"; color: var(--info); }
 .callout.ok { background: var(--ok-bg-soft); border-color: var(--ok-line); }
 .callout.warn { background: var(--warn-bg-soft); border-color: var(--warn-line); }
 .callout.bad { background: var(--bad-bg-soft); border-color: var(--bad-line); }
@@ -305,7 +322,7 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .pal-item { display: flex; align-items: baseline; gap: 9px; padding: 8px 10px; border-radius: 9px;
   cursor: pointer; min-height: 30px; }
 .pal-item.is-active { background: rgba(var(--leaf-rgb),.34); }
-.pal-kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+.pal-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
   font-weight: 700; min-width: 92px; flex: none; }
 .pal-label { font-weight: 600; font-size: 12.5px; }
 .pal-hint { font-size: 11px; color: var(--muted); margin-left: auto; text-align: right; }
@@ -315,7 +332,13 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 
 /* ------------------------------------------------------------ drawer --- */
 
-.drawer { position: fixed; left: 0; right: 0; bottom: 0; height: 46vh; min-height: 260px; z-index: 90;
+/* The reservation below tracks 46vh, but the drawer's real height was
+   max(46vh, 260px) -- so below about 565px of viewport the min-height won and
+   the reserved space fell short by up to 118px. At 400% zoom the recorded
+   session covered the entire viewport including whatever held focus, which is
+   the WCAG 2.4.11 failure the sticky rules elsewhere are careful to avoid.
+   Both now use the same expression. */
+.drawer { position: fixed; left: 0; right: 0; bottom: 0; height: max(46vh, 260px); z-index: 90;
   background: var(--pine); color: var(--term-ink); border-top: 3px solid var(--brand); display: flex; flex-direction: column;
   box-shadow: 0 -8px 32px rgba(var(--pine-rgb),.28); }
 .drawer-head { display: flex; align-items: center; gap: 10px; padding: 9px 16px; font-size: 12.5px;
@@ -324,7 +347,7 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .drawer-head .x:hover { background: rgba(var(--white-rgb),.14); color: #fff; }
 .drawer-body { flex: 1; overflow: auto; }
 /* The drawer must not cover whatever has focus (WCAG 2.4.11). */
-body.has-drawer .main { padding-bottom: calc(46vh + 24px); }
+body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 
 .term { display: flex; flex-direction: column; height: 100%; }
 .term-banner { display: flex; align-items: center; gap: 9px; padding: 8px 16px; background: var(--bad-deep); color: #fff;
@@ -408,7 +431,12 @@ body.has-drawer .main { padding-bottom: calc(46vh + 24px); }
 .secretrow { display: flex; align-items: center; gap: 10px; }
 
 .sessionplayer { border: 1px solid rgba(var(--ink-rgb),.12); border-radius: 14px; padding: 14px 16px; background: var(--paper); }
+/* The playhead is the only keyboard-seekable control on a recording, and it
+   had no sizing rule at all: a bare input[type=range] renders about 16px tall,
+   under the 24px WCAG 2.5.8 floor the comment above the markup claims it meets.
+   The touch block takes it to 44. */
 .scrubber { width: 100%; margin: 10px 0; }
+.scrubber input[type="range"] { display: block; width: 100%; min-height: 24px; margin: 0; }
 .scrubber-track { position: relative; height: 9px; background: var(--sunk); border-radius: 999px; margin: 10px 0; }
 .scrubber-marker { position: absolute; top: -3px; width: 3px; height: 15px; background: var(--c2); border-radius: 2px; }
 .alertrow { display: flex; align-items: center; gap: 10px; }
@@ -424,12 +452,18 @@ body.has-drawer .main { padding-bottom: calc(46vh + 24px); }
 
 /* ---------------------------------------------------- touch and print --- */
 
-/* WCAG 2.5.8 asks for 24px; a thumb wants 44. On touch widths, give it 44. */
+/* WCAG 2.5.8 asks for 24px; a thumb wants 44. On touch widths, give it 44.
+   The comment said 44 and every value in this block said 30 -- and .btn and
+   .heatcell are 32px on the desktop, so the touch block was making the two
+   most-pressed controls in the console two pixels SMALLER on a phone than on
+   a mouse. The numbers now match the sentence. */
 @media (max-width: 768px) {
-  .btn, .iconbtn, .tab, .th-sort { min-height: 30px; }
-  .rlink { min-height: 30px; padding: 12px 0; line-height: 20px; }
-  .pf-token-x, .x { min-width: 36px; min-height: 30px; }
-  .heatcell { min-height: 30px; }
+  .btn, .iconbtn, .tab, .th-sort { min-height: 44px; }
+  .rlink { min-height: 44px; padding: 12px 0; line-height: 20px; }
+  .pf-token-x, .x { min-width: 44px; min-height: 44px; }
+  .heatcell { min-height: 44px; }
+  .menubtn { min-width: 44px; min-height: 44px; }
+  .scrubber input[type="range"] { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

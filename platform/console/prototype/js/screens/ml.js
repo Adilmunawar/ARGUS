@@ -13,19 +13,47 @@
 
   /* ------------------------------------------------------------ helpers --- */
 
-  /** Everything that would have to re-run after this asset, transitively. */
-  function downstreamOf(asset) {
-    var d = A.data, found = {}, changed = true;
-    found[asset] = true;
-    while (changed) {
-      changed = false;
-      d.pipelines.forEach(function (p) {
-        if (found[p.asset]) return;
-        var hit = p.upstream.some(function (u) { return found[u]; });
-        if (hit) { found[p.asset] = true; changed = true; }
+  /**
+   * Everything that would have to re-run after this asset, transitively.
+   *
+   * This was a fixpoint relaxation: an outer loop that rescanned every pipeline
+   * and every one of its upstreams until nothing changed, which for a chain --
+   * and asset graphs are mostly chains -- is O(assets squared x upstreams).
+   * It is called once per failed asset when rendering the failure banner.
+   *
+   * A reverse adjacency map built once, then one breadth-first walk, is
+   * O(assets + edges) and gives the same answer. The map is rebuilt only when
+   * the pipeline collection is replaced.
+   */
+  var reverseEdges = null, reverseFor = null;
+  function downstreamMap() {
+    var d = A.data;
+    if (reverseFor === d.pipelines && reverseEdges) return reverseEdges;
+    reverseFor = d.pipelines;
+    reverseEdges = Object.create(null);
+    d.pipelines.forEach(function (p) {
+      (p.upstream || []).forEach(function (u) {
+        (reverseEdges[u] = reverseEdges[u] || []).push(p.asset);
       });
+    });
+    return reverseEdges;
+  }
+
+  function downstreamOf(asset) {
+    var edges = downstreamMap();
+    var seen = Object.create(null);
+    var queue = [asset], out = [];
+    seen[asset] = true;
+    while (queue.length) {
+      var next = edges[queue.shift()] || [];
+      for (var i = 0; i < next.length; i++) {
+        if (seen[next[i]]) continue;
+        seen[next[i]] = true;
+        out.push(next[i]);
+        queue.push(next[i]);
+      }
     }
-    return Object.keys(found).filter(function (k) { return k !== asset; });
+    return out;
   }
 
   /* ---------------------------------------------------------- pipelines --- */
@@ -72,7 +100,9 @@
     ];
 
     return el('div.stack', [
-      failed.length ? el('div.callout.warn', [
+      // The table below maps failed -> 'bad'. The banner said the same thing
+      // in amber, so the worst state on the screen read as the milder one.
+      failed.length ? el('div.callout.bad', [
         el('strong', { text: failed.map(function (p) { return p.asset; }).join(', ') + ' failed' }),
         el('p', {
           text: failed.map(function (p) {

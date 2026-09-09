@@ -276,10 +276,21 @@
       runBtn.classList.add('is-disabled');
       runBtn.setAttribute('aria-disabled', 'true');
 
+      /* A transcript is capped and scrolled without reading layout.
+       *
+       * `scrollTop = scrollHeight` reads a layout-forcing property immediately
+       * after mutating the same element, and the cost of that read grows with
+       * everything already in the container -- so a long transcript pays
+       * O(lines squared) in forced layout. Assigning a large number scrolls to
+       * the end just as well and reads nothing. The cap is what stops a real
+       * streaming transcript from growing without bound, which is the same
+       * rule the log tail now follows. */
+      var TRANSCRIPT_CAP = 500;
       lines.forEach(function (line, i) {
         timers.push(window.setTimeout(function () {
           logview.appendChild(el('div.logline', { text: line }));
-          logview.scrollTop = logview.scrollHeight;
+          while (logview.childElementCount > TRANSCRIPT_CAP) logview.removeChild(logview.firstChild);
+          logview.scrollTop = 1e9;
           if (i === lines.length - 1) {
             lastLine = line;
             runOpts.disabled = false;

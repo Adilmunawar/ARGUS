@@ -152,14 +152,22 @@
     var filterHost = el('div');
     var tableHost = el('div');
 
+    var appTable = null;
+
     function paint() {
-      ui.clear(tableHost);
       /* Four table states, and three of them are wrong if they share wording.
        * There is no loading state here because the dataset ships with the
        * console, but "nothing exists yet", "nothing matches your filters" and a
        * populated table ask the operator to do completely different things, so
-       * they never reuse a sentence. */
+       * they never reuse a sentence.
+       *
+       * The host is only cleared when an empty state genuinely replaces the
+       * table. Clearing it unconditionally detached the instance on every token
+       * change, so the rebuild below always ran and the operator's sort was
+       * lost every time they touched a filter. */
       if (!d.apps.length) {
+        appTable = null;
+        ui.clear(tableHost);
         tableHost.appendChild(ui.emptyState(
           'No applications',
           'Nothing is registered in this environment. An application appears here after the reconciler applies its first declaration.'));
@@ -167,18 +175,23 @@
       }
       var rows = ui.applyTokens(d.apps, tokens, FILTER_ACCESSORS);
       if (!rows.length) {
+        appTable = null;
+        ui.clear(tableHost);
         tableHost.appendChild(ui.emptyState(
           'No application matches these filters',
           'Try removing a filter.',
           ui.btn('Clear filters', { variant: 'primary', onClick: clearFilters })));
         return;
       }
-      tableHost.appendChild(ui.table(listColumns(), rows, {
+      if (appTable && appTable.isConnected) { appTable.setRows(rows); return; }
+      ui.clear(tableHost);
+      appTable = ui.table(listColumns(), rows, {
         caption: 'Applications, showing ' + rows.length + ' of ' + d.apps.length,
         sortKey: 'name',
         rowKey: function (r) { return r.name; },
         onRow: function (r) { A.go('apps', [r.name]); }
-      }));
+      });
+      tableHost.appendChild(appTable);
     }
 
     function mountFilter() {
@@ -317,9 +330,17 @@
   /** Prefer a Service Fabric node that actually lists the service; otherwise
    *  round-robin the cluster. Placement has to be plausible and identical on
    *  every run, because the tests compare rendered output. */
+  var poolCache = null, poolCacheFor = null;
   function nodeForService(serviceName, index) {
-    var hosting = d.sfNodes.filter(function (n) { return n.apps.indexOf(serviceName) !== -1; });
-    var pool = hosting.length ? hosting : d.sfNodes;
+    // Memoised per service. This is a filter containing an indexOf, called once
+    // per instance, and it recomputed the identical pool for every instance of
+    // the same service on every render of the Instances tab.
+    if (poolCacheFor !== d.sfNodes) { poolCacheFor = d.sfNodes; poolCache = Object.create(null); }
+    var pool = poolCache[serviceName];
+    if (!pool) {
+      var hosting = d.sfNodes.filter(function (n) { return n.apps.indexOf(serviceName) !== -1; });
+      pool = poolCache[serviceName] = hosting.length ? hosting : d.sfNodes;
+    }
     return pool[index % pool.length];
   }
 
@@ -470,6 +491,42 @@
       A.announce(visible().length + ' log lines at level ' + levelSel.value);
     });
 
+    /* The tail.
+     *
+     * `live` used to be flipped, rendered into the button label and announced
+     * to a screen reader -- and never read again. The control reported a state
+     * the code did not implement, which is worse than not offering it.
+     *
+     * Two properties matter more than the animation. The buffer is CAPPED: a
+     * tail that appends without bound is the classic way a console that has
+     * been open since Monday runs out of memory, and the cap is what the
+     * eventual real stream will need too. And the interval is registered with
+     * A.onLeave, so leaving the screen stops the work it started.
+     */
+    var TAIL_CAP = 500;
+    var tailTimer = null;
+    var tailSeq = 0;
+
+    function stopTail() {
+      if (tailTimer) { window.clearInterval(tailTimer); tailTimer = null; }
+    }
+
+    function tick() {
+      // The node is gone once the operator switches tab; a tab switch does not
+      // go through the router, so the leave hook has not fired yet.
+      if (!document.body.contains(view)) { stopTail(); return; }
+      var seed = entries[tailSeq % entries.length];
+      tailSeq += 1;
+      entries.push({
+        at: new Date(A.data.now.getTime() + tailSeq * 2000),
+        level: seed.level,
+        text: seed.text
+      });
+      if (entries.length > TAIL_CAP) entries.splice(0, entries.length - TAIL_CAP);
+      paint();
+      view.scrollTop = 1e9;   // no scrollHeight read, so no forced layout
+    }
+
     var toggle = ui.btn('Paused', {
       variant: 'ghost',
       title: 'Tailing is paused by default so the view does not move under the pointer',
@@ -477,10 +534,15 @@
         live = !live;
         toggle.textContent = live ? 'Live' : 'Paused';
         toggle.setAttribute('aria-pressed', live ? 'true' : 'false');
-        A.announce(live ? 'Log view is live' : 'Log view is paused');
+        if (live) { stopTail(); tailTimer = window.setInterval(tick, 2000); }
+        else stopTail();
+        A.announce(live
+          ? 'Log view is live, new lines every two seconds, ' + TAIL_CAP + ' lines kept'
+          : 'Log view is paused');
       }
     });
     toggle.setAttribute('aria-pressed', 'false');
+    A.onLeave(stopTail);
 
     var announceBtn = ui.btn(named('Announce latest line', 'of ' + app.display), {
       onClick: function () {
@@ -523,7 +585,9 @@
 
   function tracesTab(app) {
     var spans = traceSpans(app);
-    var total = spans[0].dur || 1;
+    // Same shape: a divisor guard, not a default. An instantaneous root span
+    // would otherwise divide by zero and render every bar at Infinity percent.
+    var total = spans[0].dur > 0 ? spans[0].dur : 1;
     var slowest = spans.slice(1).reduce(function (a, b) { return b.dur > a.dur ? b : a; }, spans[1]);
 
     var waterfall = el('div.stack', {
@@ -755,7 +819,15 @@
       { id: 'traces', label: 'Traces', render: function () { return tracesTab(app); } },
       { id: 'config', label: 'Config', render: function () { return configTab(app); } },
       { id: 'deploys', label: 'Deploy history', render: function () { return deployTab(app, ctx); } }
-    ], { label: 'Sections of ' + app.display }));
+    ], {
+      label: 'Sections of ' + app.display,
+      // This screen is the only one that emits ?tab= (from the row overflow
+      // menu, which offers "Logs" and "Deploy history") and it was the only one
+      // that never read it back, so both of its own links landed on Overview.
+      // The second path segment is accepted too, so #/apps/mills/logs works
+      // like every other detail screen in the console.
+      initial: (ctx && ctx.params && ctx.params.tab) || (ctx && ctx.rest && ctx.rest[1]) || null
+    }));
   }
 
   /* ----------------------------------------------------------- register --- */

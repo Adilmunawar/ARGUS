@@ -95,7 +95,9 @@
     if (PREF_VALUES.timezone.indexOf(tz) === -1) return;
     prefs.timezone = tz; savePrefs();
     A.announce('Timestamps now shown in ' + (tz === 'utc' ? 'UTC' : 'local time'));
-    render();
+    // Timestamps are formatted at build time by ui.fmt, so the screen does have
+    // to be rebuilt -- but the dialog this was chosen in stays open.
+    render({ keepOverlays: true });
   };
 
   /* ------------------------------------------------------- live region --- */
@@ -111,6 +113,26 @@
   /* ---------------------------------------------------------- flashbar --- */
 
   var flashHost = null;
+
+  /*
+   * Notifications expire, and the bar has a ceiling.
+   *
+   * Neither was true before, and the stress harness put a number on it: one
+   * notification kept per navigation, 60 still on screen after 60 navigations,
+   * 677 live nodes added. render() clears the mount and the breadcrumb and
+   * never touched the flash host, and 38 of the 41 call sites omit the
+   * optional timeout -- so every confirmation an operator triggered stayed on
+   * screen for the life of the tab, above every screen, pushing the content
+   * down. It is the plainest answer to "why does this get worse the longer I
+   * leave it open".
+   *
+   * A default expiry rather than clearing on navigation, because an action
+   * that navigates should still be able to tell you it worked. Bad news gets
+   * longer than good news; anything that must persist passes sticky.
+   */
+  var FLASH_MAX = 5;
+  var FLASH_TIMEOUT = { ok: 9000, info: 12000, warn: 20000, bad: 30000 };
+
   /** kind: ok | warn | bad | info. Returns a handle with .remove(). */
   A.flash = function (kind, title, detail, opts) {
     opts = opts || {};
@@ -123,12 +145,29 @@
       opts.action || null,
       el('button.x', {
         type: 'button', 'aria-label': 'Dismiss: ' + title,
-        on: { click: function () { node.remove(); } }
+        on: { click: function () { drop(node); } }
       }, '×')
     ]);
+
+    // A pending expiry timer holds a reference to its node, so a notification
+    // dismissed by hand or pushed out by the ceiling stayed alive in memory
+    // until its timeout fired anyway -- up to half a minute of detached DOM per
+    // notification. Cancelling the timer on removal releases it immediately.
+    function drop(n) {
+      if (n.__flashTimer) { window.clearTimeout(n.__flashTimer); n.__flashTimer = null; }
+      n.remove();
+    }
+
     flashHost.appendChild(node);
+
+    // Oldest first, so the bar never grows past the ceiling however many
+    // actions an operator fires during an incident.
+    while (flashHost.children.length > FLASH_MAX) drop(flashHost.firstChild);
+
     A.announce(title + (detail ? '. ' + detail : ''));
-    if (opts.timeout) window.setTimeout(function () { node.remove(); }, opts.timeout);
+
+    var ttl = opts.timeout || (opts.sticky ? 0 : FLASH_TIMEOUT[kind] || FLASH_TIMEOUT.info);
+    if (ttl) node.__flashTimer = window.setTimeout(function () { drop(node); }, ttl);
     return node;
   };
 
@@ -138,7 +177,12 @@
 
   function trapFocus(container, onEscape) {
     function onKey(e) {
-      if (e.key === 'Escape') { e.preventDefault(); onEscape(); return; }
+      // stopPropagation matters as much as preventDefault here. Without it the
+      // same keydown reached the document handler, which reads Escape as
+      // "close the recorded session" -- so dismissing a confirm dialog also
+      // tore down the operator's live RDP session, the exact failure the
+      // never-unmounted drawer exists to prevent.
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onEscape(); return; }
       if (e.key !== 'Tab') return;
       var items = Array.prototype.filter.call(container.querySelectorAll(FOCUSABLE), function (n) {
         return n.offsetParent !== null || n === document.activeElement;
@@ -160,12 +204,25 @@
   var openerStack = [];
   var openDialogs = [];
   A.dialog = function (opts) {
-    // A dialog opened from inside another dialog would otherwise capture <body>
-    // as its opener, because the first dialog has already returned focus.
-    var opener = openerStack.length
-      ? openerStack[openerStack.length - 1]
-      : document.activeElement;
-    if (opener === document.body && openerStack.length === 0) opener = null;
+    /*
+     * The opener is whatever actually held focus, always.
+     *
+     * Inheriting the outer dialog's opener instead was wrong whenever the outer
+     * dialog stays open: Ctrl+K and ? are not suppressed while a dialog is up,
+     * so opening the palette over the preferences dialog inherited the gear
+     * button, and closing the palette threw focus to a control *behind* the
+     * still-open modal. Focus was then outside the trap, so Tab walked the page
+     * behind the scrim and Escape no longer reached the dialog at all -- it
+     * became unclosable by keyboard.
+     *
+     * Capturing the real activeElement handles both shapes. Focus returns into
+     * whatever is still on screen; and when a dialog was genuinely opened from
+     * a button inside another dialog that has since closed, that button is gone
+     * from the document, so close() falls back down the stack to the nearest
+     * opener that survived.
+     */
+    var opener = document.activeElement;
+    if (!opener || opener === document.body) opener = null;
     openerStack.push(opener);
     var titleId = 'dlg-title-' + Math.random().toString(36).slice(2, 8);
 
@@ -182,7 +239,17 @@
       var ix = openDialogs.indexOf(handle);
       if (ix !== -1) openDialogs.splice(ix, 1);
       if (!openerStack.length) document.body.classList.remove('has-dialog');
-      if (opener && opener.focus && document.contains(opener)) opener.focus();
+
+      // Restore to this dialog's own opener when it is still in the document.
+      // When it is not -- because the dialog that held it has itself closed --
+      // walk down the remaining stack to the nearest opener that survived,
+      // rather than dropping focus on <body>.
+      var target = (opener && opener.focus && document.contains(opener)) ? opener : null;
+      for (var i = openerStack.length - 1; !target && i >= 0; i--) {
+        var candidate = openerStack[i];
+        if (candidate && candidate.focus && document.contains(candidate)) target = candidate;
+      }
+      if (target) target.focus();
     }
 
     var panel = el('div.dialog' + (opts.wide ? '.wide' : ''), {
@@ -310,13 +377,38 @@
   // detached node and flashed its result over whatever screen you had moved to.
   var leaveHooks = [];
   A.onLeave = function (fn) { if (typeof fn === 'function') leaveHooks.push(fn); };
-  function runLeaveHooks() {
-    var hooks = leaveHooks;
-    leaveHooks = [];
+  function drain(hooks) {
     hooks.forEach(function (fn) {
       try { fn(); } catch (e) { if (window.console) window.console.warn('leave hook failed', e); }
     });
   }
+  function runLeaveHooks() {
+    var hooks = leaveHooks;
+    leaveHooks = [];
+    drain(hooks);
+  }
+
+  /**
+   * Run fn, capturing anything it registers with onLeave, and hand back a
+   * teardown for just that work.
+   *
+   * Navigation was the only thing that drained the hooks, and switching a tab
+   * does not navigate -- so a tab panel's timers and listeners accumulated for
+   * as long as the operator stayed on the screen. Measured at 50x the dataset:
+   * 60 switches on Security retained 39,412 live DOM nodes and 2,961
+   * listeners, stable across five forced collections and released only when
+   * the route finally changed. Panels can now tear down their own work.
+   */
+  A.scopeLeaveHooks = function (fn) {
+    var outer = leaveHooks;
+    leaveHooks = [];
+    var captured;
+    try { fn(); } finally {
+      captured = leaveHooks;
+      leaveHooks = outer;
+    }
+    return function () { drain(captured); captured = []; };
+  };
 
   /**
    * decodeURIComponent throws URIError on a malformed escape such as "%" or
@@ -372,12 +464,23 @@
 
   var mount, crumbHost, titleHost;
 
-  function render() {
+  /**
+   * Build the screen the hash names.
+   *
+   * opts.keepOverlays re-renders in place without dismissing what is open.
+   * A preference change is not a navigation: setTimezone called render(),
+   * render() called dismissOverlays(), and so flipping one radio closed the
+   * preferences dialog the operator was standing in, threw focus to the page
+   * heading and scrolled to the top. Its two siblings in the same dialog,
+   * setTheme and setDensity, each change one attribute and cost nothing.
+   */
+  function render(opts) {
+    opts = opts || {};
     // An in-page anchor such as the skip link sets a hash that is not a route.
     // Treating it as one used to blank the page and announce "that screen does
     // not exist" to exactly the keyboard users the skip link exists for.
     if (window.location.hash && !/^#\//.test(window.location.hash)) return;
-    A.dismissOverlays();
+    if (!opts.keepOverlays) A.dismissOverlays();
     runLeaveHooks();
     var r = parseHash();
     A.state.route = r.route; A.state.rest = r.rest; A.state.params = r.params;
@@ -390,11 +493,23 @@
 
     clear(mount);
     if (!def) {
+      /* This used to return here, skipping everything below: the breadcrumb
+         still read "Applications / mills" above a page saying the screen does
+         not exist, nothing was announced, focus stayed wherever it was, and on
+         a phone an open navigation drawer stayed open over the message. The
+         not-found state gets the same treatment as any other screen. */
+      clear(crumbHost);
+      crumbHost.appendChild(el('b', { text: 'Not found' }));
       mount.appendChild(ui.emptyState(
         'That screen does not exist',
         'The link may be from an older version of the console.',
         ui.btn('Go to Overview', { variant: 'primary', onClick: function () { A.go('overview'); } })));
       document.title = 'Not found - Argus Console';
+      var missTitle = mount.querySelector('.empty-title');
+      if (missTitle) { missTitle.tabIndex = -1; missTitle.focus({ preventScroll: true }); }
+      window.scrollTo(0, 0);
+      A.announce('That screen does not exist');
+      closeDrawerNav();
       return;
     }
 
@@ -467,9 +582,11 @@
   }
 
   /** Subsequence match, the behaviour people expect from a palette. */
-  function fuzzy(needle, hay) {
-    if (!needle) return 0;
-    var n = needle.toLowerCase(), h = hay.toLowerCase();
+  /* `hay` arrives already lowercased. It used to be lowercased here, which
+     allocated a fresh string for every item on every keystroke -- 100,000
+     allocations per keypress against a 50,000-item inventory. */
+  function fuzzy(n, h) {
+    if (!n) return 0;
     var direct = h.indexOf(n);
     if (direct !== -1) return 1000 - direct;
     var hi = 0, score = 0;
@@ -484,6 +601,11 @@
 
   A.palette = function () {
     var items = paletteItems();
+    // One lowercased haystack per item, built once per open instead of twice
+    // per item per keystroke.
+    items.forEach(function (it) {
+      it.hay = (it.label + ' ' + (it.hint || '')).toLowerCase();
+    });
     var results = [], active = 0;
 
     var input = el('input.pal-input', {
@@ -496,14 +618,42 @@
 
     function paint() {
       var q = input.value.trim();
-      results = items.map(function (it) { return { it: it, s: q ? fuzzy(q, it.label + ' ' + it.hint) : 0 }; })
-        .filter(function (r) { return r.s >= 0; })
-        .sort(function (a, b) { return b.s - a.s; })
-        .slice(0, 40).map(function (r) { return r.it; });
+      /*
+       * Score, keep the best forty, and never sort the whole inventory.
+       *
+       * This ran on every keystroke and did, for every item: a string
+       * concatenation, two toLowerCase allocations inside fuzzy, an
+       * intermediate wrapper object, a filter allocation, and then a full
+       * Array.sort over EVERY item -- before slicing to the forty that are
+       * actually shown. Against a production inventory of a few thousand
+       * resources that is the difference between a palette that keeps up with
+       * typing and one that does not.
+       *
+       * The haystack is precomputed once per open (see paletteItems), and the
+       * top forty are kept by insertion into a small ordered list, so the cost
+       * is one pass and a bounded insert rather than an n log n sort.
+       */
+      var LIMIT = 40;
+      var best = [];
+      var lowest = -Infinity;
+      for (var ix = 0; ix < items.length; ix++) {
+        var sc = q ? fuzzy(q, items[ix].hay) : 0;
+        if (sc < 0) continue;
+        if (best.length === LIMIT && sc <= lowest) continue;
+        var at = best.length;
+        while (at > 0 && best[at - 1].s < sc) at--;
+        best.splice(at, 0, { it: items[ix], s: sc });
+        if (best.length > LIMIT) best.pop();
+        lowest = best[best.length - 1].s;
+      }
+      results = best.map(function (r) { return r.it; });
+
       active = 0;
       clear(list);
+      // Built detached and attached once, rather than forty live insertions.
+      var palFrag = document.createDocumentFragment();
       results.forEach(function (it, i) {
-        list.appendChild(el('li.pal-item', {
+        palFrag.appendChild(el('li.pal-item', {
           role: 'option', id: 'pal-opt-' + i, 'aria-selected': i === 0 ? 'true' : 'false',
           on: { click: function () { run(i); }, mousemove: function () { setActive(i); } }
         }, [
@@ -512,6 +662,7 @@
           it.hint ? el('span.pal-hint', { text: it.hint }) : null
         ]));
       });
+      list.appendChild(palFrag);
       if (!results.length) list.appendChild(el('li.pal-empty', { text: 'Nothing matches ' + q }));
       count.textContent = results.length + ' result' + (results.length === 1 ? '' : 's');
       setActive(0);
@@ -632,7 +783,13 @@
 
     host.appendChild(el('span.elev-glyph', { 'aria-hidden': 'true', text: '▲' }));
     host.appendChild(el('span', [el('strong', { text: e.group }), ' · ', e.reason]));
-    host.appendChild(el('span.elev-time', { text: '' }));
+    /* The banner is role="status", so anything that rewrites its text is
+       re-announced. The countdown changes once a minute for hours and then
+       once a second for the final minute, which reads the whole banner over
+       whatever the operator is doing. aria-hidden on the ticking part leaves
+       the grant and the group announced once, as intended, and the remaining
+       time reachable visually and from the Release button's own label. */
+    host.appendChild(el('span.elev-time', { text: '', 'aria-hidden': 'true' }));
     host.appendChild(ui.btn('Release now', { variant: 'ghost', onClick: A.dropElevation }));
 
     if (elevationTimer) { clearInterval(elevationTimer); elevationTimer = null; }
@@ -821,12 +978,20 @@
 
   /* -------------------------------------------------------- drawer nav --- */
 
-  function closeDrawerNav() {
+  function closeDrawerNav(restoreFocus) {
+    var wasOpen = document.body.classList.contains('navopen');
     document.body.classList.remove('navopen');
     var s = document.getElementById('scrim');
     if (s) s.hidden = true;
     var b = document.getElementById('burger');
     if (b) b.setAttribute('aria-expanded', 'false');
+    /* Off-canvas is a transform, not display:none, so the nav items stay in
+       the tab order and focus was being left on an invisible button off the
+       left edge of the screen with no visible ring. Hand it back to the
+       control that opened the drawer -- but only when the drawer is being
+       dismissed, not when a navigation closed it, because render() has already
+       moved focus to the new page heading by then. */
+    if (wasOpen && restoreFocus && b && document.contains(b)) b.focus();
   }
   function openDrawerNav() {
     document.body.classList.add('navopen');
@@ -905,10 +1070,18 @@
       A.setEnv(A.state.env === 'production' ? 'staging' : 'production');
     });
     document.getElementById('burger').addEventListener('click', function () {
-      document.body.classList.contains('navopen') ? closeDrawerNav() : openDrawerNav();
+      document.body.classList.contains('navopen') ? closeDrawerNav(true) : openDrawerNav();
     });
-    document.getElementById('scrim').addEventListener('click', closeDrawerNav);
-    document.getElementById('railbtn').addEventListener('click', function () {
+    // Not `addEventListener('click', closeDrawerNav)`: the listener would hand
+    // the MouseEvent in as restoreFocus, which is truthy, and the argument
+    // would work only by accident.
+    document.getElementById('scrim').addEventListener('click', function () { closeDrawerNav(true); });
+    /* The label has to be right on boot too, not only after a click. The rail
+       preference persists, so someone who collapsed it last week was told the
+       button collapses a navigation that is already collapsed. */
+    var railBtn = document.getElementById('railbtn');
+    railBtn.setAttribute('aria-label', prefs.rail ? 'Expand navigation' : 'Collapse navigation');
+    railBtn.addEventListener('click', function () {
       prefs.rail = document.body.classList.toggle('railed');
       savePrefs();
       this.setAttribute('aria-label', prefs.rail ? 'Expand navigation' : 'Collapse navigation');
@@ -930,7 +1103,7 @@
         return;
       }
       // Innermost surface first: a recorded session, then the mobile nav.
-      if (e.key === 'Escape') { if (!A.closeSession()) closeDrawerNav(); return; }
+      if (e.key === 'Escape') { if (!A.closeSession()) closeDrawerNav(true); return; }
       if (goArmed && e.key === ',') { e.preventDefault(); goArmed = false; A.settings(); return; }
       if (goArmed && GO_KEYS[e.key]) { e.preventDefault(); goArmed = false; A.go(GO_KEYS[e.key]); return; }
       if (e.key === 'g') {
@@ -940,7 +1113,9 @@
       }
     });
 
-    window.addEventListener('hashchange', render);
+    // Wrapped: passing render directly hands it the HashChangeEvent as its
+    // options object, and any future option would read as truthy off an event.
+    window.addEventListener('hashchange', function () { render(); });
     A.setEnv('production', true);
     paintElevation();
     render();

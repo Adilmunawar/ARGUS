@@ -82,6 +82,28 @@ jobs:
       - name: Full-scale sandbox
         run: node platform/console/prototype/tests/sandbox.js
 
+      # Neither suite above ever inflates the dataset or reads a performance
+      # counter, so a screen that costs 5 ms against seven fixture rows and
+      # 500 ms against five thousand real ones passes both identically. The
+      # stress harness asserts budgets for render cost, retention across a long
+      # tour, sustained use of one screen, and interaction latency.
+      - name: Stress and performance budgets
+        run: node platform/console/prototype/tests/stress.js
+        env:
+          STRESS_CYCLES: '160'
+          STRESS_SCALES: '1,10,50'
+          STRESS_WORKERS: '2'
+          STRESS_SOAK_MS: '8000'
+
+      - name: Keep the last stress report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: console-stress-report
+          path: platform/console/prototype/tests/stress-last-run.json
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Keep the screenshots from both suites
         if: always()
         uses: actions/upload-artifact@v4

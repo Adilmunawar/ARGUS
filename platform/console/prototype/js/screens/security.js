@@ -129,13 +129,12 @@
     return 'Nothing else in the inventory is recorded as running on ' + name + '.';
   }
 
-  /** ui.btn captures its options object, so flipping opts.disabled works. */
-  function setEnabled(node, opts, on) {
-    opts.disabled = !on;
-    node.disabled = !on;
-    node.classList.toggle('is-disabled', !on);
-    node.setAttribute('aria-disabled', on ? 'false' : 'true');
-  }
+  /* setEnabled used to live here, on the premise recorded in its own comment:
+     "ui.btn captures its options object, so flipping opts.disabled works."
+     It does not -- ui.btn captures the boolean, and only setDisabled moves it.
+     It also set the native `disabled` property, which drops the control out of
+     the tab order and hides the title explaining why it is unavailable, the
+     exact defect recorded as B7. Callers now use button.setDisabled(). */
 
   /* ------------------------------------------------------------ posture --- */
 
@@ -179,6 +178,12 @@
     ]);
 
     var grid = ui.heatgrid(p.hosts, p.families, function (host, colIndex) {
+      // ui.heatgrid renders null as the not-applicable tone. Passing the raw
+      // score meant the two hosts with no Microsoft Defender to configure
+      // scored 0 and painted as red failures -- contradicting both this
+      // screen's own footnote and the dialog behind the cell, and inventing
+      // two criticals on the most-read grid in the console.
+      if (!isApplicable(d, host, colIndex)) return null;
       return p.scores[host][colIndex];
     }, {
       caption: 'CIS and Microsoft baseline score by host and control family',
@@ -355,16 +360,20 @@
     ];
 
     var tableHost = el('div');
+    var alertTable = null;
 
+    /* The table is built once and re-fed. Constructing a new one per token
+       change discarded the operator's chosen sort along with the thead. */
     function paint(tokens) {
       var rows = ui.applyTokens(d.alerts, tokens || [], accessors);
-      ui.clear(tableHost);
-      tableHost.appendChild(ui.table(cols, rows, {
+      if (alertTable) { alertTable.setRows(rows); return; }
+      alertTable = ui.table(cols, rows, {
         caption: 'Open and recent security alerts, by severity, source, host and state',
         empty: 'No alert matches every filter. Remove a token to widen the search.',
         sortKey: 'severity', sortDir: 'asc',
         rowKey: function (r) { return r.id; }
-      }));
+      });
+      tableHost.appendChild(alertTable);
     }
 
     var filter = ui.propertyFilter([
@@ -408,7 +417,21 @@
     });
   }
 
+  /**
+   * Add a waiver.
+   *
+   * The fields are built once, here, and held. The previous version created
+   * them inside body() and then looked them up with getElementById from
+   * actions() -- but A.dialog evaluates body() and actions() as siblings of one
+   * element tree and appends the panel to the document afterwards, so every
+   * lookup returned null, no listener was ever attached, and the submit could
+   * never be enabled. Holding the nodes removes the ordering question entirely.
+   */
   function addWaiverDialog() {
+    var owner = el('input.field', { type: 'text', id: 'waiver-owner', autocomplete: 'off', spellcheck: 'false' });
+    var reason = el('textarea.field', { id: 'waiver-reason', rows: '3', spellcheck: 'false' });
+    var expiry = el('input.field', { type: 'date', id: 'waiver-expiry' });
+
     A.dialog({
       title: 'Add a waiver',
       body: function () {
@@ -417,46 +440,32 @@
             text: 'A waiver says a named person accepted this risk until a named date. All three fields are '
               + 'required, because a waiver without an owner or an expiry is just a suppressed finding.'
           }),
-          el('div.formrow', [
-            el('label.fieldlabel', { for: 'waiver-owner', text: 'Owner' }),
-            el('input.field', { type: 'text', id: 'waiver-owner', autocomplete: 'off', spellcheck: 'false' })
-          ]),
-          el('div.formrow', [
-            el('label.fieldlabel', { for: 'waiver-reason', text: 'Reason' }),
-            el('textarea.field', { id: 'waiver-reason', rows: '3', spellcheck: 'false' })
-          ]),
-          el('div.formrow', [
-            el('label.fieldlabel', { for: 'waiver-expiry', text: 'Expires on' }),
-            el('input.field', { type: 'date', id: 'waiver-expiry' })
-          ]),
+          el('div.formrow', [el('label.fieldlabel', { for: 'waiver-owner', text: 'Owner' }), owner]),
+          el('div.formrow', [el('label.fieldlabel', { for: 'waiver-reason', text: 'Reason' }), reason]),
+          el('div.formrow', [el('label.fieldlabel', { for: 'waiver-expiry', text: 'Expires on' }), expiry]),
           el('p.hint', { text: 'The waiver expires on its own. Nothing renews it quietly.' })
         ];
       },
       actions: function (close) {
-        var opts = {
-          variant: 'primary', disabled: true,
+        var submit = ui.btn('Add waiver', {
+          variant: 'primary',
+          disabled: true,
+          title: 'An owner, a reason and an expiry date are all required.',
           onClick: function () {
-            var owner = document.getElementById('waiver-owner').value.trim();
-            var until = document.getElementById('waiver-expiry').value;
+            var who = owner.value.trim(), until = expiry.value;
             close();
             A.flash('ok', 'Waiver recorded',
-              'Owner ' + owner + ', expiring ' + until + '. It will reappear as an alert on that date.');
+              'Owner ' + who + ', expiring ' + until + '. It will reappear as an alert on that date.',
+              { timeout: 12000 });
           }
-        };
-        var submit = ui.btn('Add waiver', opts);
-        setEnabled(submit, opts, false);
+        });
 
         function check() {
-          var owner = document.getElementById('waiver-owner');
-          var reason = document.getElementById('waiver-reason');
-          var expiry = document.getElementById('waiver-expiry');
-          var ready = !!(owner && owner.value.trim() && reason && reason.value.trim() && expiry && expiry.value);
-          setEnabled(submit, opts, ready);
+          submit.setDisabled(!(owner.value.trim() && reason.value.trim() && expiry.value));
         }
-
-        ['waiver-owner', 'waiver-reason', 'waiver-expiry'].forEach(function (id) {
-          var node = document.getElementById(id);
-          if (node) { node.addEventListener('input', check); node.addEventListener('change', check); }
+        [owner, reason, expiry].forEach(function (node) {
+          node.addEventListener('input', check);
+          node.addEventListener('change', check);
         });
 
         return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), submit];
@@ -504,7 +513,9 @@
 
   function buildPlayer(session) {
     var keys = (KEYSTROKES[session.id] || []).slice();
-    var duration = session.duration || 1;
+    // Guarding the divisor, deliberately: a zero-length recording has nothing
+    // to scrub through, and 1 keeps the arithmetic finite rather than pretending.
+    var duration = session.duration > 0 ? session.duration : 1;
     var playTimer = null;
     var speed = 1;
 
@@ -519,14 +530,33 @@
     var statusNode = el('p.hint', { role: 'status', text: 'Paused at the start.' });
     var posNode = el('span.mono', { text: offsetLabel(0) + ' / ' + offsetLabel(duration) });
 
-    var track = el('div.scrubber-track');
-    var markers = keys.map(function (k) {
+    /*
+     * Markers live INSIDE the track.
+     *
+     * They were siblings of it, so `left: N%` on an absolutely positioned span
+     * resolved against the nearest positioned ancestor -- which was not the
+     * track -- and every marker rendered somewhere else entirely, outside the
+     * card. The keystroke marks on a session recording pointed nowhere.
+     *
+     * They are also capped. One absolutely positioned span per keystroke is
+     * fine for six and meaningless for two thousand: past the cap the track is
+     * sampled evenly, so the shape of the activity survives without asking the
+     * compositor to place a marker every half pixel.
+     */
+    var MARKER_CAP = 160;
+    var markerKeys = keys;
+    if (keys.length > MARKER_CAP) {
+      markerKeys = [];
+      var stride = keys.length / MARKER_CAP;
+      for (var mi = 0; mi < MARKER_CAP; mi++) markerKeys.push(keys[Math.floor(mi * stride)]);
+    }
+    var track = el('div.scrubber-track', markerKeys.map(function (k) {
       return el('span.scrubber-marker', {
         'aria-hidden': 'true',
         title: offsetLabel(k.at) + '  ' + k.text,
         style: { left: ((k.at / duration) * 100).toFixed(2) + '%' }
       });
-    });
+    }));
 
     /* The scrubber is an input[type=range]: a div you can only drag fails
      * WCAG 2.5.7 Dragging Movements, and an operator on a keyboard cannot seek. */
@@ -537,7 +567,7 @@
       'aria-valuetext': offsetLabel(0)
     });
 
-    var scrubber = el('div.scrubber', [track].concat(markers).concat([range]));
+    var scrubber = el('div.scrubber', [track, range]);
 
     var logHost = el('div.logview', {
       tabindex: '0', role: 'group',
@@ -548,34 +578,59 @@
       placeholder: 'Filter keystrokes'
     });
 
+    /*
+     * The keystroke track is sorted by offset, so the last entry at or before a
+     * position is a binary search, not a scan of the whole track with no early
+     * exit. This runs twice per position change, and a position change happens
+     * on every tick of playback and on every pointer move while scrubbing.
+     */
     function currentIndex(at) {
-      var idx = -1;
-      keys.forEach(function (k, i) { if (k.at <= at) idx = i; });
+      var lo = 0, hi = keys.length - 1, idx = -1;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (keys[mid].at <= at) { idx = mid; lo = mid + 1; }
+        else hi = mid - 1;
+      }
       return idx;
     }
 
+    // The lowercased haystack is computed once per track rather than once per
+    // line per keystroke of the filter.
+    var haystack = keys.map(function (k) { return k.text.toLowerCase(); });
+
     function paintLog() {
       var q = search.value.trim().toLowerCase();
-      var shown = keys.filter(function (k) {
-        return !q || k.text.toLowerCase().indexOf(q) !== -1;
-      });
       ui.clear(logHost);
-      if (!shown.length) {
+
+      var at = Number(range.value);
+      var idx = currentIndex(at);
+
+      /*
+       * `keys.indexOf(k)` used to sit inside this loop, making the repaint
+       * O(K squared) -- 4 million comparisons for a 2,000-keystroke track,
+       * on every frame of a scrubber drag. Walking the track by index gives
+       * the same answer for free, and the rows are built detached and
+       * attached once.
+       */
+      var frag = document.createDocumentFragment();
+      var shown = 0;
+      for (var i = 0; i < keys.length; i++) {
+        if (q && haystack[i].indexOf(q) === -1) continue;
+        shown += 1;
+        frag.appendChild(el('div.logline', {
+          title: fmt.stamp(new Date(session.started.getTime() + keys[i].at * 1000)),
+          'aria-current': i === idx ? 'true' : null
+        }, [
+          el('span.mono', { text: offsetLabel(keys[i].at) + '  ' }),
+          el('span', { text: keys[i].text })
+        ]));
+      }
+
+      if (!shown) {
         logHost.appendChild(el('div.logline', { text: 'No keystroke in this recording matches ' + search.value }));
         return;
       }
-      var at = Number(range.value);
-      var idx = currentIndex(at);
-      shown.forEach(function (k) {
-        var line = el('div.logline', {
-          title: fmt.stamp(new Date(session.started.getTime() + k.at * 1000)),
-          'aria-current': (keys.indexOf(k) === idx) ? 'true' : null
-        }, [
-          el('span.mono', { text: offsetLabel(k.at) + '  ' }),
-          el('span', { text: k.text })
-        ]);
-        logHost.appendChild(line);
-      });
+      logHost.appendChild(frag);
     }
 
     function setPosition(at, announce) {
@@ -809,7 +864,13 @@
       // depending on how you arrived.
       mount.appendChild(ui.tabs(items, {
         label: 'Security sections',
-        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+        /* Overview links to "#/security/alerts?id=al-9021". The tab opened and
+           then the operator was handed an unfiltered list to search by eye. */
+        onSelect: function (id) {
+          var want = ctx && ctx.params && ctx.params.id;
+          if (id === 'alerts' && want) ui.revealRow(mount, want, { label: 'Alert ' + want + ' is highlighted' });
+        }
       }));
     }
   });

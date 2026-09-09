@@ -22,9 +22,14 @@
 
   // Ordered worst-first so "the worst thing open" is just the head of the list.
   var SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
-  function bySeverity(a, b) {
-    return (SEVERITY_RANK[a.severity] || 9) - (SEVERITY_RANK[b.severity] || 9);
+  /* rank() rather than `RANK[x] || 9`: critical is rank 0, and `0 || 9` is 9,
+     so the falsy fallback ranked the worst severity in the estate BELOW low.
+     The tile reported "worst severity: high" with a critical alert open, and
+     Needs you listed the critical one under the high one. */
+  function rank(sev) {
+    return Object.prototype.hasOwnProperty.call(SEVERITY_RANK, sev) ? SEVERITY_RANK[sev] : 9;
   }
+  function bySeverity(a, b) { return rank(a.severity) - rank(b.severity); }
 
   function oldestBackup() {
     return d.backups.slice().sort(function (a, b) { return a.last - b.last; })[0];
@@ -45,7 +50,7 @@
   }
 
   function personName(upn) {
-    var p = d.people.filter(function (x) { return x.upn === upn; })[0];
+    var p = d.personByUpn(upn);
     if (p) return p.name;
     if (upn === 'reconciler') return 'The reconciler';
     if (upn === 'system') return 'The monitoring system';
@@ -84,7 +89,9 @@
       var more = critical.length > 1
         ? ' ' + fmt.num(critical.length - 1) + ' other critical alert' + (critical.length === 2 ? ' is' : 's are') + ' also open.'
         : '';
-      return el('div.callout.warn', [
+      // A critical alert reads in the critical tone. The same fact is already
+      // red in the Security table; amber here contradicted it.
+      return el('div.callout.bad', [
         el('strong', { text: 'A critical alert is open on ' + a.host + '.' }),
         el('p', {
           text: a.source + ' reported "' + a.rule + '" on ' + a.host + '. It has fired ' +

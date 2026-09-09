@@ -353,9 +353,40 @@
     exitProgress: { phase: 2, phases: 7, percent: 34, awsRemaining: ['1 Windows EC2 instance', '1 S3 bucket (read-only)'] }
   };
 
-  // Convenience lookups the screens rely on.
-  data.appByName = function (n) { return data.apps.filter(function (a) { return a.name === n; })[0]; };
-  data.vmByName = function (n) { return data.vms.filter(function (v) { return v.name === n; })[0]; };
+  /*
+   * Convenience lookups the screens rely on.
+   *
+   * These were `.filter(...)[0]`: a full scan of the collection, with an array
+   * allocated per call, and no early exit. That is invisible against seven
+   * apps and is not invisible in the places they are actually used -- the
+   * deployment queue calls appByName and personName once per card, which is
+   * O(cards x (apps + people)) with two allocations per card.
+   *
+   * An index is built on first use and rebuilt whenever the underlying array
+   * is replaced. Comparing the array identity rather than caching once matters:
+   * the stress harness swaps whole collections in to inflate the dataset, and a
+   * stale index would have quietly hidden the very cost being measured.
+   */
+  function indexBy(getArray, key) {
+    var indexed = null, map = null;
+    return function (value) {
+      var arr = getArray();
+      if (!arr) return undefined;
+      if (arr !== indexed) {
+        indexed = arr;
+        map = Object.create(null);
+        for (var i = 0; i < arr.length; i++) {
+          var k = arr[i] && arr[i][key];
+          if (k !== undefined && k !== null && !(k in map)) map[k] = arr[i];
+        }
+      }
+      return map[value];
+    };
+  }
+
+  data.appByName = indexBy(function () { return data.apps; }, 'name');
+  data.vmByName = indexBy(function () { return data.vms; }, 'name');
+  data.personByUpn = indexBy(function () { return data.people; }, 'upn');
 
   A.data = data;
   A.time = { NOW: NOW, minutesAgo: minutesAgo, hoursAgo: hoursAgo, daysAgo: daysAgo, series: series };

@@ -12,3 +12,4 @@ obj/
 
 # test output
 platform/console/prototype/tests/sandbox-last-run.json
+platform/console/prototype/tests/stress-last-run.json

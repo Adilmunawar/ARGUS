@@ -615,8 +615,18 @@
             ' is queued on ' + db.host + '. It does not disturb the scheduled chain, and it is recorded in the audit.');
         }
       }),
+      /* A forced failover needs somewhere to fail over TO. The PostgreSQL
+         databases have no availability group -- this screen's own callout says
+         so, a few centimetres below -- so the action is offered but refused,
+         with the reason, rather than promising to move a role that does not
+         exist to a SQL Server host that does not hold it. */
       ui.btn('Fail over ' + db.name, {
         variant: 'danger',
+        disabled: !db.ag,
+        title: db.ag
+          ? 'Move the primary role for ' + db.ag + ' to Site B'
+          : db.name + ' has no availability group. ' + db.engine + ' protects it with '
+            + 'continuous WAL archiving, so there is no synchronous replica to fail over to.',
         onClick: function () {
           A.confirmDestructive({
             title: 'Fail over ' + db.name + ' to Site B',

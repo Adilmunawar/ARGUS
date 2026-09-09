@@ -462,6 +462,122 @@ async function axeOn(page, label) {
       return count <= 2;
     }));
 
+  /* Regressions for the four defects that made the console unusable and that
+     every suite here passed straight over. Each one is exercised the way an
+     operator meets it, not by inspecting an attribute. */
+
+  // The rail collapses at 1200px and for anyone who ever pressed Collapse.
+  // display:none on the label left ten buttons with no accessible name.
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await goto(page, 'overview');
+  rec('GUARD', 'a collapsed rail keeps an accessible name on every nav button',
+    await page.evaluate(() => {
+      const names = [...document.querySelectorAll('.side .nav')]
+        .map(n => (n.textContent || '').trim() || n.getAttribute('aria-label') || '');
+      return names.length >= 10 && names.every(Boolean);
+    }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // The scrim is z-index 100; the drawer was 95, in the same stacking context,
+  // so every tap on a nav item hit the scrim and closed it. Keyboard worked,
+  // which is why navigating by location.hash could never see it.
+  await page.setViewportSize({ width: 390, height: 800 });
+  await goto(page, 'overview');
+  rec('GUARD', 'the mobile navigation drawer is above its own scrim',
+    await page.evaluate(async () => {
+      document.getElementById('burger').click();
+      await new Promise(r => setTimeout(r, 250));
+      const nav = document.querySelector('.nav[data-go="apps"]');
+      const r = nav.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return !!hit && (hit === nav || nav.contains(hit));
+    }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // ui.btn captures disabled at construction; mutating opts.disabled made the
+  // button look enabled while the guard still swallowed the click, so a
+  // deployment could never be rejected.
+  await goto(page, 'deploys/1847');
+  rec('GUARD', 'a deployment can actually be rejected once a reason is given',
+    await page.evaluate(async () => {
+      const trigger = [...document.querySelectorAll('#main button')]
+        .find(b => /^Reject deployment/.test(b.textContent));
+      if (!trigger) return false;
+      trigger.click();
+      await new Promise(r => setTimeout(r, 120));
+      const dlg = document.querySelector('.dialog');
+      const area = dlg && dlg.querySelector('#reject-reason');
+      const go = dlg && [...dlg.querySelectorAll('button')]
+        .find(b => /^Reject deployment/.test(b.textContent));
+      if (!area || !go) return false;
+      if (go.getAttribute('aria-disabled') !== 'true') return false;
+      area.value = 'not during the freeze';
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+      if (go.getAttribute('aria-disabled') !== 'false') return false;
+      const before = document.querySelectorAll('#flashes .flash').length;
+      go.click();
+      await new Promise(r => setTimeout(r, 120));
+      return document.querySelectorAll('#flashes .flash').length > before;
+    }));
+
+  // A.dialog builds body() and actions() before the panel is in the document,
+  // so getElementById returned null and no listener was ever attached.
+  await goto(page, 'security/vulns');
+  rec('GUARD', 'the waiver dialog reaches its own fields and can be submitted',
+    await page.evaluate(async () => {
+      const trigger = [...document.querySelectorAll('#main button')]
+        .find(b => /waiver/i.test(b.textContent));
+      if (!trigger) return false;
+      trigger.click();
+      await new Promise(r => setTimeout(r, 120));
+      const dlg = document.querySelector('.dialog');
+      if (!dlg) return false;
+      const owner = dlg.querySelector('#waiver-owner');
+      const reason = dlg.querySelector('#waiver-reason');
+      const expiry = dlg.querySelector('#waiver-expiry');
+      const go = [...dlg.querySelectorAll('button')].find(b => b.textContent.trim() === 'Add waiver');
+      if (!owner || !reason || !expiry || !go) return false;
+      if (go.disabled) return false;                       // must use aria-disabled
+      if (go.getAttribute('aria-disabled') !== 'true') return false;
+      owner.value = 'adil'; owner.dispatchEvent(new Event('input', { bubbles: true }));
+      reason.value = 'fix is queued'; reason.dispatchEvent(new Event('input', { bubbles: true }));
+      expiry.value = '2026-12-01'; expiry.dispatchEvent(new Event('change', { bubbles: true }));
+      return go.getAttribute('aria-disabled') === 'false';
+    }));
+
+  // Applications is the only screen that emits ?tab= and was the only one that
+  // never read it, so both of its own row-menu links landed on Overview.
+  await goto(page, 'apps/mills?tab=logs');
+  rec('GUARD', 'the applications screen opens the tab its own links name',
+    await page.evaluate(() => {
+      const sel = document.querySelector('#main .tab[aria-selected="true"]');
+      return !!sel && /logs/i.test(sel.textContent);
+    }));
+
+  // Math.floor for hours and Math.round for the remainder let the remainder
+  // reach 60, live on the elevation countdown.
+  rec('GUARD', 'a duration never reads sixty minutes past the hour',
+    await page.evaluate(() => {
+      const f = window.ARGUS.ui.fmt.dur;
+      for (let s = 0; s <= 90000; s += 7) {
+        const out = f(s);
+        if (/60 min/.test(out)) return false;
+      }
+      return true;
+    }));
+
+  // Descending sort used to be ascending.reverse(), which also reversed where
+  // the comparator deliberately sank rows with no value.
+  rec('GUARD', 'rows with no value stay at the bottom in both sort directions',
+    await page.evaluate(() => {
+      const ui = window.ARGUS.ui;
+      const rows = [{ n: 'a', v: 3 }, { n: 'b', v: null }, { n: 'c', v: 1 }, { n: 'd', v: 2 }];
+      const t = ui.table([{ key: 'n', label: 'N' }, { key: 'v', label: 'V' }],
+        rows, { caption: 'probe', sortKey: 'v', sortDir: 'desc' });
+      const order = t.currentRows().map(r => r.n).join('');
+      return order[order.length - 1] === 'b';
+    }));
+
   // A deep link opens the tab it names.
   await goto(page, 'identity/grants');
   rec('GUARD', 'a deep link opens the tab it names',
@@ -576,8 +692,21 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const small = [], clip = [];
-      document.querySelectorAll('#main *').forEach(n => {
-        if (n.closest('.sr') || !n.offsetParent) return;
+      /* The whole document, not just #main.
+       *
+       * Scoping to '#main *' meant this check could never see the navigation
+       * rail, the top bar, the flash bar, the session drawer or the command
+       * palette -- and the rail carried three 10.5px group headings and the
+       * palette a 10.5px category label on every row, live, for as long as the
+       * floor has existed.
+       *
+       * offsetParent is an HTMLElement property and is undefined on every
+       * SVGElement, so `!n.offsetParent` skipped all SVG text unconditionally,
+       * including the 10.5px type label under every dependency-graph node.
+       * getClientRects() answers the "is it rendered" question for both. */
+      document.querySelectorAll('body *').forEach(n => {
+        if (n.closest('.sr') || n.closest('#live')) return;
+        if (!n.getClientRects().length) return;
         if (!n.textContent.trim() || n.children.length) return;
         const s = getComputedStyle(n);
         const size = parseFloat(s.fontSize);

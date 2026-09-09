@@ -81,13 +81,36 @@
 
   /* ------------------------------------------------------------ format --- */
 
+  /* Intl objects are expensive to construct and cheap to reuse, and both of
+     these sit on hot paths: the collator runs n log n times per sort, and
+     fmt.num runs several times per row per paint. toLocaleString with an
+     options bag rebuilds a formatter on essentially every call. One instance
+     per distinct shape, built on first use, is the whole optimisation. */
+  /* numeric:true is the one deliberate behaviour change: it sorts hv-2 before
+     hv-10 rather than after it, which is what an operator reading a host list
+     expects. Everything else is left at the default so the ordering matches
+     what localeCompare produced before. */
+  var collator = new Intl.Collator('en-GB', { numeric: true });
+  var numFormats = {};
+  function numFormat(dp) {
+    if (!numFormats[dp]) {
+      numFormats[dp] = new Intl.NumberFormat('en-GB', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+    }
+    return numFormats[dp];
+  }
+
   var fmt = {
     num: function (n, dp) {
       if (n === null || n === undefined) return '-';
-      return Number(n).toLocaleString('en-GB', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp === undefined ? 0 : dp });
+      return numFormat(dp === undefined ? 0 : dp).format(Number(n));
     },
     pct: function (n, dp) { return (n === null || n === undefined) ? '-' : Number(n).toFixed(dp === undefined ? 1 : dp) + '%'; },
-    ratioPct: function (n, dp) { return fmt.pct(Number(n) * 100, dp); },
+    // Guarded here rather than relying on pct: Number(null) * 100 is 0, so a
+    // missing ratio printed a confident "0.0%" where every sibling formatter
+    // prints "-", and Number(undefined) * 100 printed "NaN%".
+    ratioPct: function (n, dp) {
+      return (n === null || n === undefined) ? '-' : fmt.pct(Number(n) * 100, dp);
+    },
     bytesTB: function (tb) {
       if (tb === null || tb === undefined) return '-';
       if (tb < 0.001) return fmt.num(tb * 1024 * 1024, 0) + ' MB';
@@ -98,8 +121,13 @@
     dur: function (s) {
       if (s === null || s === undefined) return '-';
       if (s < 60) return Math.round(s) + ' s';
-      if (s < 3600) return Math.round(s / 60) + ' min';
-      var h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+      // Round to whole minutes FIRST, then split. Flooring the hours while
+      // rounding the remainder independently let the remainder reach 60, so
+      // the elevation countdown read "1 h 60 min left" for the ~30 seconds
+      // either side of the two-hour mark, and "60 min" just under one hour.
+      var mins = Math.round(s / 60);
+      if (mins < 60) return mins + ' min';
+      var h = Math.floor(mins / 60), m = mins % 60;
       return h + ' h' + (m ? ' ' + m + ' min' : '');
     },
     /** Relative time, always with an absolute title so nothing is ambiguous. */
@@ -213,7 +241,12 @@
         opts.unit ? el('span.tile-unit', { text: ' ' + opts.unit }) : null
       ]),
       opts.delta ? el('div.delta.' + (opts.delta.good ? 'up' : 'down'), [
+        /* The arrow shows DIRECTION and the class shows whether that is good,
+           so a good-but-falling metric renders as a green down arrow and the
+           only thing carrying "good" was the colour. The word makes it
+           readable in greyscale and to a screen reader. */
         el('span', { 'aria-hidden': 'true', text: opts.delta.dir === 'up' ? '↑' : '↓' }),
+        el('span.sr', { text: (opts.delta.dir === 'up' ? 'up, ' : 'down, ') + (opts.delta.good ? 'good' : 'bad') + ': ' }),
         ' ' + opts.delta.value
       ]) : null,
       opts.note ? el('div.tile-note', { text: opts.note }) : null
@@ -240,6 +273,7 @@
     opts = opts || {};
     var state = { key: opts.sortKey || null, dir: opts.sortDir || 'asc' };
     var announceNext = false;
+    var current = rows.slice();
 
     var wrap = el('div.tablewrap', { tabindex: '0', role: 'region', 'aria-label': opts.caption });
     var t = el('table');
@@ -248,16 +282,70 @@
     var headRow = el('tr');
     var tbody = el('tbody');
 
-    function comparator(col) {
-      return function (a, b) {
-        var av = col.sort ? col.sort(a) : (a[col.key]);
-        var bv = col.sort ? col.sort(b) : (b[col.key]);
-        if (av === bv) return 0;
-        if (av === null || av === undefined) return 1;
+    /**
+     * Sort, decorate-sort-undecorate, in the requested direction.
+     *
+     * Two things were wrong with sorting a row list directly and reversing it
+     * for descending order:
+     *
+     *   - The comparator called col.sort() on both operands, so the key was
+     *     recomputed 2 n log n times instead of n. Extracting it once per row
+     *     up front is the whole of the decorate-sort-undecorate idiom.
+     *   - Reversing an ascending sort also reverses where the comparator
+     *     deliberately put rows with no value. They are sunk to the bottom on
+     *     purpose; reversed, every blank row floated to the top of a
+     *     "largest first" sort. Descending negates the comparator instead, so
+     *     missing values stay at the bottom in both directions.
+     *
+     * String comparison goes through one cached Intl.Collator. localeCompare
+     * builds a collator per call, and at n log n comparisons that was the
+     * single most expensive thing in a sort click.
+     */
+    function sortRows(list, col, dir) {
+      var decorated = list.map(function (row, i) {
+        return { row: row, k: col.sort ? col.sort(row) : row[col.key], i: i };
+      });
+      var sign = dir === 'desc' ? -1 : 1;
+      decorated.sort(function (a, b) {
+        var av = a.k, bv = b.k;
+        if (av === bv) return a.i - b.i;                       // stable
+        if (av === null || av === undefined) return 1;         // blanks last, both ways
         if (bv === null || bv === undefined) return -1;
-        if (typeof av === 'number' && typeof bv === 'number') return av - bv;
-        return String(av).localeCompare(String(bv));
-      };
+        if (typeof av === 'number' && typeof bv === 'number') return sign * (av - bv);
+        return sign * collator.compare(String(av), String(bv));
+      });
+      return decorated.map(function (d) { return d.row; });
+    }
+
+    /*
+     * Row activation is delegated to the tbody rather than bound per row.
+     *
+     * Two listeners on every row, each a closure over the row object, were
+     * registered and thrown away on every paint -- 10,000 registrations for a
+     * 5,000-row table, redone on every sort click. One pair on the container
+     * is O(1) and survives repaints, and `rowIndex` maps the event back to the
+     * row it came from without holding a reference to anything.
+     */
+    var rowsShown = [];
+    function rowFromEvent(e) {
+      var tr = e.target && e.target.closest ? e.target.closest('tr') : null;
+      if (!tr || !tbody.contains(tr) || tr.dataset.rowIndex === undefined) return null;
+      return rowsShown[Number(tr.dataset.rowIndex)];
+    }
+    if (opts.onRow) {
+      tbody.addEventListener('click', function (e) {
+        // A control inside the row handles its own click; the row is only the
+        // fallback target.
+        if (e.target.closest('button, a, input, select, textarea')) return;
+        var row = rowFromEvent(e);
+        if (row) opts.onRow(row);
+      });
+      tbody.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        if (e.target.tagName !== 'TR') return;
+        var row = rowFromEvent(e);
+        if (row) { e.preventDefault(); opts.onRow(row); }
+      });
     }
 
     function paint() {
@@ -265,14 +353,25 @@
       var list = rows.slice();
       if (state.key) {
         var col = cols.filter(function (c) { return c.key === state.key; })[0];
-        if (col) { list.sort(comparator(col)); if (state.dir === 'desc') list.reverse(); }
+        if (col) list = sortRows(list, col, state.dir);
       }
+      // The order the operator is looking at, so an export can match the claim
+      // it makes about being "in the order it is sorted".
+      current = list;
+      rowsShown = list;
+
+      // Build detached and attach once. Appending each row to a tbody that is
+      // already in the document makes the browser invalidate the table on every
+      // one of them.
+      var frag = document.createDocumentFragment();
+
       if (!list.length) {
-        tbody.appendChild(el('tr', el('td', { colspan: String(cols.length) },
+        frag.appendChild(el('tr', el('td', { colspan: String(cols.length) },
           el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
       }
-      list.forEach(function (row) {
+      list.forEach(function (row, rowIndex) {
         var tr = el('tr');
+        tr.dataset.rowIndex = String(rowIndex);
         if (opts.rowKey) tr.dataset.key = opts.rowKey(row);
         cols.forEach(function (c) {
           var td = el('td' + (c.align === 'right' ? '.num' : '') + (c.status ? '.st' : ''));
@@ -281,16 +380,18 @@
           tr.appendChild(td);
         });
         if (opts.onRow) {
+          /* No role="link" here. An explicit role REPLACES the implicit `row`,
+             so the tr stopped being a row of its table and its cells lost their
+             header association -- on exactly the rows that are the main way
+             into every detail screen. The row stays a row; it keeps its
+             tabindex so it is still reachable without a mouse, and the
+             listeners live on the tbody. */
           tr.classList.add('is-clickable');
           tr.tabIndex = 0;
-          tr.setAttribute('role', 'link');
-          tr.addEventListener('click', function () { opts.onRow(row); });
-          tr.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); opts.onRow(row); }
-          });
         }
-        tbody.appendChild(tr);
+        frag.appendChild(tr);
       });
+      tbody.appendChild(frag);
       // Only a sort the operator asked for is worth announcing. Announcing the
       // first paint of all 31 tables races the route-change announcement and
       // silently drops it.
@@ -335,6 +436,18 @@
     wrap.appendChild(t);
     paint();
     wrap.repaint = paint;
+    /** The rows as currently shown, in the order shown. */
+    wrap.currentRows = function () { return current.slice(); };
+    /**
+     * Swap the data without rebuilding the table.
+     *
+     * Every filter consumer used to clear its host and construct a whole new
+     * ui.table, which threw away the thead, every sort button, and -- because
+     * `state` is per instance -- the sort the operator had chosen. Adding a
+     * filter token silently reset the ordering back to the default, which is a
+     * correctness defect as much as a cost.
+     */
+    wrap.setRows = function (next) { rows = next || []; paint(); };
     return wrap;
   }
 
@@ -382,18 +495,36 @@
     var list = el('div.tablist', { role: 'tablist', 'aria-label': opts.label || 'Sections' });
     var buttons = [];
 
+    // Teardown for the panel currently on screen. A tab switch does not go
+    // through the router, so without this nothing ever drained what a panel
+    // registered on render and every switch retained its subtree.
+    var disposePanel = null;
+
     function select(i, focus) {
       buttons.forEach(function (b, j) {
         b.setAttribute('aria-selected', j === i ? 'true' : 'false');
         b.tabIndex = j === i ? 0 : -1;
         b.classList.toggle('is-active', j === i);
       });
+
+      if (disposePanel) { disposePanel(); disposePanel = null; }
       clear(panel);
       panel.setAttribute('aria-labelledby', listId + '-' + i);
-      append(panel, items[i].render());
+
+      if (A.scopeLeaveHooks) {
+        var built;
+        disposePanel = A.scopeLeaveHooks(function () { built = items[i].render(); });
+        append(panel, built);
+      } else {
+        append(panel, items[i].render());
+      }
+
       if (focus) buttons[i].focus();
       if (opts.onSelect) opts.onSelect(items[i].id);
     }
+
+    // The last panel still has to be torn down when the screen itself goes.
+    if (A.onLeave) A.onLeave(function () { if (disposePanel) { disposePanel(); disposePanel = null; } });
 
     items.forEach(function (it, i) {
       var b = el('button.tab', {
@@ -467,10 +598,18 @@
     // Longest-path layering, which is enough for the shallow graphs here.
     var depth = {};
     nodes.forEach(function (n) { depth[n.id] = 0; });
+    // Relax until nothing moves, rather than always running one pass per node.
+    // Depths settle in two or three passes for the shapes drawn here, so the
+    // unconditional O(nodes x edges) loop did most of its work for nothing --
+    // 2.5 million comparisons for a thousand-asset pipeline graph. The pass
+    // ceiling stays as the guard against a cycle in the input.
     for (var pass = 0; pass < nodes.length; pass++) {
-      edges.forEach(function (e) {
-        if (depth[e[1]] < depth[e[0]] + 1) depth[e[1]] = depth[e[0]] + 1;
-      });
+      var moved = false;
+      for (var ei = 0; ei < edges.length; ei++) {
+        var e = edges[ei];
+        if (depth[e[1]] < depth[e[0]] + 1) { depth[e[1]] = depth[e[0]] + 1; moved = true; }
+      }
+      if (!moved) break;
     }
     var cols = {};
     nodes.forEach(function (n) { (cols[depth[n.id]] = cols[depth[n.id]] || []).push(n); });
@@ -513,11 +652,34 @@
     });
 
     // The equivalent, in words, for anyone who cannot see the picture.
-    var described = edges.map(function (e) {
-      var a = nodes.filter(function (n) { return n.id === e[0]; })[0];
-      var b = nodes.filter(function (n) { return n.id === e[1]; })[0];
-      return a && b ? a.label + ' depends on ' + b.label : null;
-    }).filter(Boolean);
+    /*
+     * The text alternative.
+     *
+     * Two full scans of `nodes` per edge, each allocating an array, made this
+     * O(edges x nodes); one index makes it O(edges). It also described edges
+     * only, so a node's KIND -- "database", "bucket", "external", and on the
+     * pipeline graph "fresh", "stale", "failed" -- never reached anybody
+     * listening, and a node with no edges was never mentioned at all. The
+     * kinds are drawn as SVG text inside a role="img", so they are dropped
+     * from the accessibility tree and this sentence is the only place they can
+     * come back.
+     */
+    var byId = Object.create(null);
+    nodes.forEach(function (n) { byId[n.id] = n; });
+
+    var described = [];
+    var mentioned = Object.create(null);
+    edges.forEach(function (e) {
+      var a = byId[e[0]], b = byId[e[1]];
+      if (!a || !b) return;
+      mentioned[a.id] = true; mentioned[b.id] = true;
+      described.push(a.label + ' depends on ' + b.label);
+    });
+    nodes.forEach(function (n) {
+      var kind = n.kind ? ' (' + n.kind + ')' : '';
+      if (!mentioned[n.id]) described.push(n.label + kind + ' has no connections');
+      else if (n.kind) described.push(n.label + ' is a ' + n.kind);
+    });
 
     return el('div.graphwrap', [
       g,
@@ -555,7 +717,9 @@
     return el('div.timeline', { role: 'img', 'aria-label': opts.label || 'Timeline' },
       segments.map(function (s) {
         return el('span.tl-seg.' + (s.tone || 'ok'), {
-          style: { flex: String(s.weight || 1) },
+          // `s.weight || 1` gave a zero-length segment the same width as a
+          // normal one -- the falsy-zero trap again, in the component library.
+          style: { flex: String(s.weight === undefined || s.weight === null ? 1 : s.weight) },
           title: s.label
         });
       }));
@@ -745,7 +909,16 @@
         else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
         else if (e.key === 'End') { e.preventDefault(); focusAt(list.length - 1); }
         else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
-        else if (e.key === 'Tab') { close(false); }
+        else if (e.key === 'Tab') {
+          /* Move focus back to the trigger BEFORE removing the popup. Removing
+             it while a menu item held focus left document.activeElement as
+             <body>, and the browser's default Tab then continued from there --
+             to the first tabbable node in the document, which is the skip link
+             at the very top of the page. The component's own doc comment
+             promises "Tab closes it and moves on"; from the trigger, it does. */
+          if (trigger && trigger.focus) trigger.focus();
+          close(false);
+        }
       });
 
       /* The menu is mounted on <body> and positioned fixed rather than
@@ -786,6 +959,41 @@
     wrap.closeMenu = close;
     return wrap;
   }
+
+  /**
+   * Reveal the row a deep link names.
+   *
+   * Overview builds "#/security/alerts?id=al-9021" and "#/identity/grants?id=g-442",
+   * and the Config tab builds "#/identity/secrets?path=kv/mills/jwt-signing-key".
+   * The right tab opened, and then nothing happened: a link labelled "Open
+   * alert al-9021" landed the operator on an unfiltered list of six and left
+   * them to find it. Tables already stamp data-key on every row, so the row is
+   * findable; this marks it, scrolls it into view and says so.
+   */
+  function revealRow(host, key, opts) {
+    opts = opts || {};
+    if (!host || !key) return false;
+    // Scanned rather than composed into a selector: a key may contain quotes,
+    // brackets or a slash (secret paths do), and building a selector out of
+    // one is how a valid key turns into a syntax error at runtime.
+    var want = String(key);
+    var row = null;
+    var candidates = host.querySelectorAll('[data-key]');
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].getAttribute('data-key') === want) { row = candidates[i]; break; }
+    }
+    if (!row) return false;
+    row.classList.add('is-linked');
+    row.setAttribute('tabindex', '-1');
+    // After paint, so the row has a box to scroll to.
+    window.setTimeout(function () {
+      try { row.scrollIntoView({ block: 'center' }); } catch (e) { row.scrollIntoView(); }
+      row.focus({ preventScroll: true });
+      if (opts.announce !== false && A.announce) A.announce(opts.label || (String(key) + ' is highlighted below'));
+    }, 0);
+    return true;
+  }
+  UI.revealRow = revealRow;
 
   UI.el = el; UI.svg = svg; UI.clear = clear; UI.append = append; UI.fmt = fmt;
   UI.pill = pill; UI.btn = btn; UI.pageHeader = pageHeader; UI.statTile = statTile;
