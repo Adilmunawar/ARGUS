@@ -1,3 +1,4 @@
+<!-- Maintainer note: this file is adapted from Contributor Covenant 2.1. When updating, keep the "Project-specific expectations" section, which is unique to Argus. -->
 # Code of conduct
 
 ## Our pledge
