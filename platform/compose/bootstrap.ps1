@@ -324,6 +324,37 @@ Say "wrote secrets/   (4 file-secrets)"
 Write-FileSecret 'guac_breakglass_password' $breakglassPassword
 Say "wrote secrets/guac_breakglass_password  (the Guacamole break-glass login)"
 
+# --- Garnet ACL -------------------------------------------------------------
+#
+# Garnet reads its users from a file, not from its config, and it EXITS if that
+# file is missing rather than starting without authentication -- so the cache
+# profile cannot come up at all until this is written.
+#
+# Two lines, and both matter:
+#
+#   `user default off` is the whole of the authentication story. Garnet FAILS
+#   OPEN: delete this line and an anonymous client is handed the `default` user
+#   and can SET and FLUSHALL, while the container health check still reports
+#   healthy -- it probes the port, not the identity. Nothing else here notices.
+#
+#   The console user is deliberately near-powerless. It can observe the cache
+#   (ping, info, dbsize, latency, client list) and it cannot read a value, list
+#   keys, or wipe it: no +get, no +keys, no +scan, no +flushall, no config|set.
+#   A dashboard has no business reading what is IN a cache, and this console is
+#   read-only in the application layer too -- this is the second layer.
+#
+# Written by bootstrap because it carries a generated password, so it belongs
+# beside the other file-secrets and outside git, never in the committed conf.
+$garnetSecrets = Join-Path $SecretsDir 'garnet'
+if (-not (Test-Path $garnetSecrets)) { [void](New-Item -ItemType Directory -Path $garnetSecrets) }
+$consoleAcl = 'user console on >' + $gen['GARNET_CONSOLE_PASSWORD'] +
+  ' ~* -@all +ping +select +info +dbsize +time +acl|whoami +config|get' +
+  ' +client|info +client|list +command +command|count +command|docs +command|info +latency|histogram'
+# LF endings and no BOM: Garnet parses this file itself and a CR or a BOM lands
+# inside the username or the password hash.
+Write-TextNoBom -Path (Join-Path $garnetSecrets 'users.acl') -Text ("user default off`n" + $consoleAcl + "`n")
+Say "wrote secrets/garnet/users.acl  (default OFF, console observe-only)"
+
 # --- 5. resolve tags to digests --------------------------------------------
 
 if (-not $SkipDigests) {

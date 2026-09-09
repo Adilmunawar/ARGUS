@@ -372,12 +372,20 @@ const health = guarded('storage:health', 10000, async () => {
   /* Writable means the master has a writable volume for SOME collection. It
      does not mean this console may write -- the console identity has no Write
      action anywhere, deliberately. */
-  const writables = (topo ? topo.layouts : []).reduce((a, l) => a + ((l.writables || []).length), 0);
+  /* Tri-state, because false has to mean "the master says there is no writable
+     volume" and NOT "we never got an answer". Those look identical to an
+     operator and mean opposite things: one is a full cluster, the other is a
+     dead master. Returning false for both is the same defect this file exists
+     to prevent, committed by this file. */
+  const writables = topo ? topo.layouts.reduce((a, l) => a + ((l.writables || []).length), 0) : null;
 
   return {
     components,
     s3: { signedCallOk, ...(signedReason ? { reason: signedReason.reason, message: signedReason.message } : {}) },
-    writable: writables > 0,
+    writable: writables === null ? null : writables > 0,
+    writableUnknownReason: writables === null
+      ? 'The SeaweedFS master did not answer, so whether a writable volume exists is unknown -- not "no".'
+      : null,
     freeVolumes: topo ? topo.slotsFree : null,
     topologyReachable: !!topo && nodeRows.every((n) => n.ok),
     at: new Date().toISOString()
@@ -524,9 +532,27 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     return {
       name,
       createdAt: b.CreationDate ? new Date(b.CreationDate).toISOString() : null,
-      sizeBytes: unknownSize ? null : Math.max(0, agg.sizeBytes - agg.deletedBytes),
-      objects: unknownSize ? null : Math.max(0, agg.files - agg.deleted),
-      objectsApprox: true,
+      /* The ON-DISK FOOTPRINT of the volumes backing this bucket -- NOT the sum
+         of its object sizes, and the gap is large. Measured on this stack:
+         argus-survey-pictures reports 1920 bytes of volume here while a real
+         key walk totals 139 bytes across 7 objects, because the figure includes
+         each volume's superblock and space still held by superseded versions.
+         It is a genuinely useful number -- it is what fills the disk -- but it
+         is a different quantity from "how much data is in this bucket", so it
+         is named for what it is and the UI must label it that way. */
+      diskBytes: unknownSize ? null : agg.sizeBytes,
+      diskBytesIsFootprint: true,
+
+      /* Deliberately null, always.
+         SeaweedFS 3.97 does not populate FileCount on /status -- it reports 0
+         for every collection on this cluster, including ones holding objects
+         right now. Passing that through as `objects` produced a hard zero that
+         looked measured, sat next to a bucket called argus-backups, and was
+         wrong for every bucket at once. There is no cheap per-collection count
+         to replace it with, so the honest answer is that we do not know, and
+         /api/storage/prefix-size exists for when somebody needs the real one. */
+      objects: null,
+      objectsReason: 'SeaweedFS does not report a per-collection object count. Use Calculate on a prefix to walk it.',
       unknownSize,
       unknownSizeReason: unknownSize
         ? (topologyOk

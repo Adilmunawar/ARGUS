@@ -462,7 +462,26 @@
     if (q.length) h += '?' + q.map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
     return h;
   };
-  A.go = function (route, rest, params) { window.location.hash = A.href(route, rest, params); };
+  /**
+   * Navigate, and re-render even when the destination is where we already are.
+   *
+   * Assigning location.hash only fires hashchange when the value CHANGES, and
+   * render() is wired to hashchange alone. So every "Refresh" and "Try again"
+   * control -- which by definition targets the current route -- silently did
+   * nothing: the click registered, the hash was reassigned, no event fired, no
+   * request was made. Nothing in the UI indicated the button was inert, which
+   * is the worst version of this bug: an operator retrying a failed panel got
+   * the same stale failure back and concluded the system was still broken.
+   *
+   * Assigning first still matters for a real navigation, because that is what
+   * writes the history entry the back button needs.
+   */
+  A.go = function (route, rest, params) {
+    var target = A.href(route, rest, params);
+    var same = window.location.hash === target;
+    window.location.hash = target;
+    if (same) render();
+  };
   /** An anchor that routes. Real hrefs, so middle-click and copy-link work. */
   A.link = function (label, route, rest, params, cls) {
     return el('a' + (cls ? '.' + cls : '.rlink'), { href: A.href(route, rest, params) }, label);

@@ -9,61 +9,61 @@
     "suite": "BOOT",
     "id": "screen \"overview\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"apps\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"deploys\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"compute\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"data\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"identity\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"security\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"ml\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"ops\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"audit\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
     "suite": "NAV",
@@ -116,6 +116,12 @@
   {
     "suite": "NAV",
     "id": "nav target \"ops\" has a screen",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "nav target \"stack\" has a screen",
     "pass": true,
     "detail": ""
   },
@@ -183,7 +189,7 @@
     "suite": "NAV",
     "id": "clicking the \"data\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"data\",\"painted\":1093}"
+    "detail": "{\"route\":\"data\",\"painted\":1691}"
   },
   {
     "suite": "NAV",
@@ -238,6 +244,18 @@
     "id": "the \"ops\" sidebar button is marked current once open",
     "pass": true,
     "detail": "{\"go\":\"ops\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"stack\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"stack\",\"painted\":700}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"stack\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"stack\"}"
   },
   {
     "suite": "NAV",
@@ -387,7 +405,7 @@
     "suite": "NAV",
     "id": "\"data\" routes and renders",
     "pass": true,
-    "detail": "route=data children=2"
+    "detail": "route=data children=3"
   },
   {
     "suite": "NAV",
@@ -747,7 +765,7 @@
     "suite": "KBD",
     "id": "the overview has focusable controls",
     "pass": true,
-    "detail": "31 found"
+    "detail": "32 found"
   },
   {
     "suite": "KBD",
@@ -1185,7 +1203,7 @@
     "suite": "ROUTE",
     "id": "a percent at the end of a value does not crash the router",
     "pass": true,
-    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1093}"
+    "detail": "#/data?q=100%&x=1 -> {\"route\":\"data\",\"painted\":1691}"
   },
   {
     "suite": "ROUTE",

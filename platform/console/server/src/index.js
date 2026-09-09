@@ -30,6 +30,10 @@ const config = require('./config');
 const host = require('./host');
 const aws = require('./aws');
 const storage = require('./storage');
+const pg = require('./pg');
+const garnet = require('./garnet');
+const queues = require('./queues');
+const secrets = require('./secrets');
 
 const STARTED = new Date();
 
@@ -150,6 +154,38 @@ const routes = {
       stream
     });
   },
+
+  /* ------------------------------------------------------ the rest of the stack ---
+     Postgres, the cache, the queues and the vault. Each module reports an
+     unreachable service as a normal state with a reason, so a route here
+     answering 200 with ok:false is the expected shape while that service's
+     profile is not started -- not a failure to handle. */
+
+  'GET /api/pg/server': async () => pg.server(),
+  'GET /api/pg/databases': async () => pg.databases(),
+  'GET /api/pg/roles': async () => pg.roles(),
+  'GET /api/pg/activity': async () => pg.activity(),
+  'GET /api/pg/statements': async () => pg.statements(),
+  'GET /api/pg/replication': async () => pg.replication(),
+  'GET /api/pg/tables': async (q) => pg.tables(q && q.database),
+  'GET /api/pg/health': async () => pg.health(),
+
+  'GET /api/cache/server': async () => garnet.serverInfo(),
+  'GET /api/cache/memory': async () => garnet.memory(),
+  'GET /api/cache/clients': async () => garnet.clients(),
+  'GET /api/cache/keyspace': async () => garnet.keyspace(),
+  'GET /api/cache/health': async () => garnet.health(),
+
+  'GET /api/queues/server': async () => queues.server(),
+  'GET /api/queues/account': async () => queues.account(),
+  'GET /api/queues/streams': async () => queues.streams(),
+  'GET /api/queues/consumers': async (q) => queues.consumers(q && q.stream),
+  'GET /api/queues/health': async () => queues.health(),
+
+  'GET /api/secrets/health': async () => secrets.health(),
+  'GET /api/secrets/seal-status': async () => secrets.sealStatus(),
+  'GET /api/secrets/ha': async () => secrets.ha(),
+  'GET /api/secrets/sandbox': async () => secrets.sandbox(),
 
   /* The estate in one call, for the overview screen. Partial failure is the
      normal case -- an account may allow EC2 and deny RDS -- so each section
