@@ -133,6 +133,12 @@
 /* ------------------------------------------------------------- tables --- */
 
 .tablewrap { overflow-x: auto; border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px; background: var(--paper); }
+/* A windowed table needs somewhere to scroll, and a header that stays put --
+   otherwise the columns scroll away from the rows they label, which is worse
+   than the cost the windowing is saving. */
+.tablewrap.is-virtual { overflow-y: auto; max-height: min(70vh, 640px); }
+.tablewrap.is-virtual thead th { position: sticky; top: 0; z-index: 2; }
+.tablewrap.is-virtual tr.vspacer td { border: none; }
 .tablewrap:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 2px; }
 .tablewrap table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .tablewrap th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
