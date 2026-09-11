@@ -57,8 +57,7 @@
           el('p.hint', {
             id: 'audit-csv-note',
             /* No blob download link on purpose: the prototype runs from file://
-             * under a strict CSP where a download never starts and the operator
-             * is left staring at a button that did nothing. */
+             * under a strict CSP where a download never starts. */
             text: 'The text is shown rather than downloaded because this prototype opens from file:// with '
               + 'downloads blocked, so a download link would silently do nothing. Select all and copy. '
               + 'A real deployment streams the same rows from the API, signed, without loading them into a page.'
@@ -139,9 +138,9 @@
       var visible = d.audit.slice();
       var table = null;
 
-      /* One table instance for the life of the screen. Rebuilding it on every
-         token change threw away the sort the operator had chosen, because the
-         sort state lives on the instance. */
+      /* One table instance for the life of the screen: the sort state lives on
+         the instance, so rebuilding it on a token change would throw away the
+         sort the operator has chosen. */
       function paint(tokens) {
         visible = ui.applyTokens(d.audit, tokens || [], accessors);
         if (table) { table.setRows(visible); return; }
@@ -154,11 +153,9 @@
         tableHost.appendChild(table);
       }
 
-      /* The export claims to be "in the order it is sorted", and it was not:
-         it received the filter output in dataset order while ui.table sorted a
-         private copy, so sorting by Actor and exporting produced a CSV in a
-         different order from the table on screen. For a record an auditor is
-         handed, the sentence has to be true. */
+      /* The export dialog claims the CSV is "in the order it is sorted", so it
+         reads the table's own rows: ui.table sorts a private copy, and the
+         filter output is in dataset order. */
       function exportRows() {
         return table && table.currentRows ? table.currentRows() : visible;
       }

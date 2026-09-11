@@ -3,25 +3,6 @@
  * Databases, object storage, cache and queues -- read from the services this
  * platform actually runs, not from the bundled fixture.
  *
- * WHAT CHANGED, AND WHY IT MATTERED
- *
- * This screen used to render ARGUS.data. A fixture is always present, always
- * complete and always instant, so a screen written against one quietly assumes
- * all three and grows numbers nobody measured. Two of them shipped here:
- *
- *   - an "Evictions: 41" tile. GARNET DOES NOT EVICT. It has no maxmemory and
- *     no eviction policy; past the in-memory region of its hybrid log, records
- *     are written to disk and stay LIVE -- reading one is a disk read, not a
- *     miss. There is no count of keys dropped under memory pressure because no
- *     key is dropped under memory pressure. Worse than being wrong, the tile
- *     was wrong in the reassuring direction: "Evictions: 0" tells anyone who
- *     has run Redis that the cache is comfortable, at exactly the moment the
- *     real risks -- the container reaching mem_limit, or the spill directory
- *     filling the WSL2 disk -- are climbing. The tile is now SPILL RATIO,
- *     computed by the server from the log addresses Garnet reports, and the
- *     eviction question is answered in words where the tile used to be.
- *   - a comment claiming Garnet evicts under memory pressure. Deleted.
- *
  * THE RULES THIS FILE HOLDS TO
  *
  *  - Never show a number the code did not measure. Every reader here can say
@@ -33,8 +14,7 @@
  *    that fails must not blank the panels that worked, so every panel owns its
  *    own request, its own skeleton and its own failure.
  *  - Replication renders "not configured" and NEVER a lag figure. There is one
- *    node. A lag of zero bytes is what a healthy replica looks like, which
- *    makes it the single most dangerous number this screen could print.
+ *    node. A lag of zero bytes is what a healthy replica looks like.
  *  - Nothing is built from an HTML string. Bucket names, prefixes, stream names
  *    and query text all come from outside the product, and one innerHTML on
  *    that path is stored XSS in an admin tool.
@@ -62,9 +42,8 @@
    * The readers exist on the server (platform/console/server/src/pg.js,
    * garnet.js, storage.js, queues.js); the routes that expose them are wired in
    * src/index.js, which this file does not own. When a route is named
-   * differently there, it is changed HERE, once, rather than hunted through
-   * twelve call sites -- and until it is wired at all, every panel below says
-   * so in those words instead of looking broken.
+   * differently there, it is changed HERE, once -- and until it is wired at
+   * all, every panel below says so in those words instead of looking broken.
    */
   var API = {
     pgDatabases: '/api/pg/databases',
@@ -227,8 +206,8 @@
    *
    * Sub-second values are rendered in milliseconds rather than through fmt.dur,
    * which rounds to whole seconds: a query that has been running for 0.42 s
-   * came out as "0 s", and a running statement that reads as zero time is the
-   * same class of lie as an unknown that reads as zero.
+   * would read as "0 s", and a running statement that reads as zero time is
+   * the same class of lie as an unknown that reads as zero.
    */
   function secondsNode(s, reason) {
     if (!isNum(s)) return unknown(reason);
@@ -261,11 +240,10 @@
    * A card that owns its own request and its own five states.
    *
    * loading, ok, "the reader answered and the answer is that it cannot read",
-   * "the route does not exist yet" and "the request failed" are all different,
-   * and a screen that only draws the second is the thing that makes a dashboard
-   * feel like a mockup. The panel paints a skeleton immediately and replaces
-   * it; if the operator leaves before the answer lands, the answer is thrown
-   * away rather than written into a detached node.
+   * "the route does not exist yet" and "the request failed" are all different.
+   * The panel paints a skeleton immediately and replaces it; if the operator
+   * leaves before the answer lands, the answer is thrown away rather than
+   * written into a detached node.
    *
    * Every panel is independent on purpose: /api/pg/activity failing must cost
    * the sessions card and nothing else.
@@ -395,13 +373,10 @@
   /**
    * Refresh, which says so when there is nothing to refresh.
    *
-   * With no API to ask, this used to drop a cache that was already empty and
-   * repaint identical text -- indistinguishable, from the operator's side, from
-   * a button wired to nothing, which is exactly what the sandbox sweep called
-   * it. It now answers. Not by disabling itself: a disabled control is drawn in
-   * a muted colour that does not reach WCAG AA against this background, so
-   * greying it out trades a dead control for unreadable text. Pressing it says
-   * why instead, which is also the only way an operator finds out.
+   * It does not disable itself: a disabled control is drawn in a muted colour
+   * that does not reach WCAG AA against this background, so greying it out
+   * trades a dead control for unreadable text. Pressing it says why instead,
+   * which is also the only way an operator finds out.
    *
    * Whether an API exists is not known on the first paint, so the answer is
    * settled by the probe rather than guessed at while `mode` is still unknown.
@@ -433,7 +408,6 @@
     return b;
   }
 
-  /** A row picked out of a list payload, or an honest miss. */
   function findByName(list, name) {
     if (!list) return null;
     for (var i = 0; i < list.length; i++) if (list[i] && list[i].name === name) return list[i];
@@ -492,8 +466,7 @@
    * RENDERED AT ALL WHEN `configured` IS FALSE. That is the whole point of the
    * panel. A lag of zero bytes is exactly what a healthy replica looks like, so
    * printing one for a cluster that has no replica would be a green number
-   * describing something that does not exist -- and it would be the number an
-   * operator checks before accepting a failover plan.
+   * describing something that does not exist.
    */
   function renderPgReplication(body, d) {
     if (!d.configured) {
@@ -666,9 +639,8 @@
     var s = d.summary || {};
 
     if (d.countsCoverWholeCluster === false) {
-      /* The single most misleading state this panel can be in, so it is said
-         before any number is read: without pg_read_all_stats every count below
-         is a count of THIS role's own sessions. */
+      /* Said before any number is read: without pg_read_all_stats every count
+         below is a count of THIS role's own sessions. */
       body.appendChild(el('div.callout.warn', [
         el('strong', { text: 'These counts cover only this console\'s own sessions.' }),
         el('p', {
@@ -982,9 +954,7 @@
      * declaration in buckets.yaml; the sizes come from the volume topology.
      * When both sources of the inventory fail, this reader still answers
      * ok:true with an empty array -- and rendering that as "no bucket exists in
-     * this object store" is a statement nobody measured, next to a bucket
-     * called argus-backups. Measured on a console with no object-store
-     * configuration: buckets [], declaredError set, topologyOk false.
+     * this object store" is a statement nobody measured.
      */
     var enumerated = !d.inventoryError && !d.declaredError;
 
@@ -1227,7 +1197,6 @@
     var c = d.container || {};
 
     body.appendChild(el('div.tiles', [
-      /* THE TILE THAT REPLACED "EVICTIONS". */
       ui.statTile('Spill ratio', tileText(isNum(d.spillRatio) ? fmt.ratioPct(d.spillRatio, 1) : null), {
         note: isNum(d.spillRatio)
           ? 'Worst log: ' + (d.spillRatioLog || 'unnamed')
@@ -1295,10 +1264,7 @@
       empty: 'This server reported no log addresses in INFO, so there is nothing to break down.'
     }));
 
-    /*
-     * THE FALSEHOOD THIS PANEL EXISTS TO REPLACE, ANSWERED IN WORDS.
-     * The message is written on the server so there is one wording of it.
-     */
+    /* The message is written on the server so there is one wording of it. */
     if (d.evictions && d.evictions.available === false) {
       body.appendChild(calloutOf('info', 'This cache does not evict, so there is no eviction count.', d.evictions.message));
     }
@@ -1323,14 +1289,10 @@
     }
 
     /*
-     * WHERE THE FIXTURE'S "KEYS BY PREFIX" TABLE USED TO BE.
-     *
-     * That table needed SCAN or KEYS to enumerate and MEMORY USAGE or GET to
-     * size what it found, and the console credential holds none of them on
-     * purpose: this is a dashboard, and a compromised console process must not
-     * be able to lift a session token out of the cache. An empty prefix table
-     * would read as "the cache holds nothing", which is the opposite of the
-     * truth whenever it appeared.
+     * There is no per-prefix table. Enumerating needs SCAN or KEYS and sizing
+     * needs MEMORY USAGE or GET, and the console credential holds none of them
+     * on purpose: this is a dashboard, and a compromised console process must
+     * not be able to lift a session token out of the cache.
      */
     if (d.byPrefix && d.byPrefix.available === false) {
       body.appendChild(calloutOf('info', 'There is no per-prefix breakdown, and there is not supposed to be.', d.byPrefix.message));
@@ -1677,17 +1639,10 @@
    * Routines that write, lock, or reach outside the database -- every one of
    * them callable through a statement that begins with SELECT.
    *
-   * Three holes were found here by testing this check rather than reading it:
-   *
-   *   SELECT nextval('parcels_id_seq')      accepted -- advances a sequence
-   *   SELECT setval('parcels_id_seq', 1)    accepted -- rewinds one
-   *   SELECT lo_import('C:/secret.txt')     accepted -- reads a server file in
-   *   SELECT pg_advisory_lock(1)            accepted
-   *
-   * The last is the instructive one. `lock` WAS in the grammar list above, but
-   * \block\b finds no word boundary inside `pg_advisory_lock`, so a blocklist of
-   * bare words silently misses every function whose name merely contains one.
-   * Function names are matched in full here instead.
+   * Function names are matched in full here rather than by bare words:
+   * \block\b finds no word boundary inside `pg_advisory_lock`, so a blocklist
+   * of bare words silently misses every function whose name merely contains
+   * one.
    */
   var WRITE_ROUTINE = new RegExp('\\b(' + [
     'pg_terminate_backend', 'pg_cancel_backend',
@@ -1708,12 +1663,8 @@
   /**
    * The statements in a batch, ignoring a single trailing semicolon.
    *
-   * Only the FIRST statement's leading keyword was ever checked, so anything
-   * after a semicolon rode through untested unless it happened to use a
-   * blocklisted word. `SELECT 1; REFRESH MATERIALIZED VIEW mv_parcels`,
-   * `SELECT 1; ANALYZE parcels` and `SELECT 1; SET statement_timeout = 0` were
-   * all accepted. Refusing a batch outright closes the whole class, rather than
-   * chasing the keywords that might appear inside one.
+   * Refusing a batch outright closes the whole class, rather than chasing the
+   * keywords that might appear inside one.
    */
   function statementsIn(probe) {
     return probe.split(';').map(function (x) { return x.trim(); }).filter(Boolean);
@@ -1738,15 +1689,9 @@
   }
 
   /**
-   * The read-only grammar guard, kept; the invented result set, gone.
-   *
-   * This box used to answer an accepted statement with rows built out of the
-   * fixture and a line reading "3 rows returned ... written to the audit". Both
-   * halves were false: nothing ran, nothing was audited, and the rows described
-   * a database nobody queried. The guard below is real and worth keeping --
-   * it is the thing that decides whether a statement would EVER be sent -- so
-   * it stays exactly as it was, and the accepted path now says plainly that
-   * this console has no route that executes a statement.
+   * The read-only grammar guard. It is the thing that decides whether a
+   * statement would EVER be sent; an accepted statement is not run, because
+   * this console has no route that executes one.
    */
   function queryEditor(name) {
     var editorId = 'queryeditor-' + String(name).replace(/[^a-z0-9]/gi, '-');
@@ -1794,8 +1739,7 @@
        * on the console API that runs a statement, the API refuses every
        * non-GET verb while ARGUS_ALLOW_WRITES is off, and the console's
        * PostgreSQL role holds pg_monitor and not one table privilege -- so a
-       * result here would have to be invented, which is the defect this rewrite
-       * removed.
+       * result here would have to be invented.
        */
       ui.clear(result);
       result.appendChild(ui.emptyState(

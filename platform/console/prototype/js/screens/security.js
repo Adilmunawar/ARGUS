@@ -129,13 +129,6 @@
     return 'Nothing else in the inventory is recorded as running on ' + name + '.';
   }
 
-  /* setEnabled used to live here, on the premise recorded in its own comment:
-     "ui.btn captures its options object, so flipping opts.disabled works."
-     It does not -- ui.btn captures the boolean, and only setDisabled moves it.
-     It also set the native `disabled` property, which drops the control out of
-     the tab order and hides the title explaining why it is unavailable, the
-     exact defect recorded as B7. Callers now use button.setDisabled(). */
-
   /* ------------------------------------------------------------ posture --- */
 
   function postureTab() {
@@ -178,11 +171,7 @@
     ]);
 
     var grid = ui.heatgrid(p.hosts, p.families, function (host, colIndex) {
-      // ui.heatgrid renders null as the not-applicable tone. Passing the raw
-      // score meant the two hosts with no Microsoft Defender to configure
-      // scored 0 and painted as red failures -- contradicting both this
-      // screen's own footnote and the dialog behind the cell, and inventing
-      // two criticals on the most-read grid in the console.
+      // ui.heatgrid renders null as the not-applicable tone.
       if (!isApplicable(d, host, colIndex)) return null;
       return p.scores[host][colIndex];
     }, {
@@ -362,8 +351,8 @@
     var tableHost = el('div');
     var alertTable = null;
 
-    /* The table is built once and re-fed. Constructing a new one per token
-       change discarded the operator's chosen sort along with the thead. */
+    /* The table is built once and re-fed, so the operator's chosen sort
+       survives a token change. */
     function paint(tokens) {
       var rows = ui.applyTokens(d.alerts, tokens || [], accessors);
       if (alertTable) { alertTable.setRows(rows); return; }
@@ -403,7 +392,7 @@
     var expired = v.waiver.until < d.now;
     if (expired) {
       /* An expired waiver is not a silent pass. It is a finding with nobody
-       * currently accountable for it, which is worse than an open CVE. */
+       * currently accountable for it. */
       return el('div.col', [
         ui.pill('waiver expired', 'bad'),
         el('span.muted', {
@@ -420,12 +409,10 @@
   /**
    * Add a waiver.
    *
-   * The fields are built once, here, and held. The previous version created
-   * them inside body() and then looked them up with getElementById from
-   * actions() -- but A.dialog evaluates body() and actions() as siblings of one
-   * element tree and appends the panel to the document afterwards, so every
-   * lookup returned null, no listener was ever attached, and the submit could
-   * never be enabled. Holding the nodes removes the ordering question entirely.
+   * The fields are built once, here, and held. A.dialog evaluates body() and
+   * actions() as siblings of one element tree and appends the panel to the
+   * document afterwards, so a getElementById lookup from actions() would find
+   * nothing. Holding the nodes removes the ordering question entirely.
    */
   function addWaiverDialog() {
     var owner = el('input.field', { type: 'text', id: 'waiver-owner', autocomplete: 'off', spellcheck: 'false' });
@@ -531,12 +518,9 @@
     var posNode = el('span.mono', { text: offsetLabel(0) + ' / ' + offsetLabel(duration) });
 
     /*
-     * Markers live INSIDE the track.
-     *
-     * They were siblings of it, so `left: N%` on an absolutely positioned span
-     * resolved against the nearest positioned ancestor -- which was not the
-     * track -- and every marker rendered somewhere else entirely, outside the
-     * card. The keystroke marks on a session recording pointed nowhere.
+     * Markers live INSIDE the track: `left: N%` on an absolutely positioned
+     * span resolves against the nearest positioned ancestor, so the track has
+     * to be that ancestor.
      *
      * They are also capped. One absolutely positioned span per keystroke is
      * fine for six and meaningless for two thousand: past the cap the track is
@@ -605,13 +589,6 @@
       var at = Number(range.value);
       var idx = currentIndex(at);
 
-      /*
-       * `keys.indexOf(k)` used to sit inside this loop, making the repaint
-       * O(K squared) -- 4 million comparisons for a 2,000-keystroke track,
-       * on every frame of a scrubber drag. Walking the track by index gives
-       * the same answer for free, and the rows are built detached and
-       * attached once.
-       */
       var frag = document.createDocumentFragment();
       var shown = 0;
       for (var i = 0; i < keys.length; i++) {
@@ -865,8 +842,8 @@
       mount.appendChild(ui.tabs(items, {
         label: 'Security sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,
-        /* Overview links to "#/security/alerts?id=al-9021". The tab opened and
-           then the operator was handed an unfiltered list to search by eye. */
+        /* Overview links to "#/security/alerts?id=al-9021", so the alert it
+           names is revealed and highlighted when the tab opens. */
         onSelect: function (id) {
           var want = ctx && ctx.params && ctx.params.id;
           if (id === 'alerts' && want) ui.revealRow(mount, want, { label: 'Alert ' + want + ' is highlighted' });

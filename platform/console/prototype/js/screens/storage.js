@@ -4,15 +4,13 @@
  * how much room is left before writes start failing, and whether the
  * immutability this estate depends on is actually enforced.
  *
- * Everything here reads platform/console/server/src/storage.js, which is
- * careful about one thing above all others: it never reports a number it did
- * not measure. A screen can throw that away at the last step -- an empty cell
- * where the server said `unknown`, a "0 B" where it said null -- and next to a
- * bucket called argus-backups, "this is empty" and "we cannot tell" lead to
- * opposite actions. Exactly one of them is right, and the screen is the only
- * thing standing between the operator and the wrong one.
+ * Everything here reads platform/console/server/src/storage.js, which never
+ * reports a number it did not measure. A screen can throw that away at the
+ * last step -- an empty cell where the server said `unknown`, a "0 B" where it
+ * said null -- and next to a bucket called argus-backups, "this is empty" and
+ * "we cannot tell" lead to opposite actions.
  *
- * Four rules, each of which exists because breaking it is actively dangerous:
+ * Four rules:
  *
  *   UNKNOWN IS A VALUE, NOT A BLANK. A bucket whose size the volume topology
  *   cannot account for renders the word `unknown`, carrying the server's own
@@ -24,8 +22,7 @@
  *   enforcement was never tested is grey, not green.
  *
  *   NOTHING IS OFFERED THAT WILL FAIL. Delete renders disabled with the reason
- *   the API computed, because a button that 403s is a support ticket with
- *   extra steps.
+ *   the API computed.
  *
  *   A WALK HAPPENS ONLY WHEN A HUMAN ASKS. There is no cheap object count in
  *   S3. The per-prefix total sits behind Calculate, and says "at least" when
@@ -81,8 +78,7 @@
    * Those two are anchored to ARGUS.data.now, which is a FIXTURE CONSTANT
    * (data.js pins it to 2026-09-08T09:14Z). Against live timestamps from the
    * object store that produces a confident relative age computed from the
-   * wrong clock -- "3 h ago" for something written a minute ago -- which is
-   * precisely the class of invented number this screen exists to refuse. */
+   * wrong clock -- "3 h ago" for something written a minute ago. */
   function stamp(iso) {
     if (!iso) return null;
     var t = Date.parse(iso);
@@ -96,8 +92,6 @@
   }
 
   /**
-   * The one rendering on this screen that matters more than the rest.
-   *
    * An unknown value renders as the WORD unknown, in the neutral tone, with
    * the server's reason on hover and repeated for a screen reader -- never as
    * an empty cell, a dash or a zero. Grey, not green and not red: not knowing
@@ -114,21 +108,17 @@
   /* Why every size and count from /api/storage/buckets carries a qualifier.
      Both are summed from volume metadata -- one request per volume server,
      never one per object -- so they include the volume superblock and space
-     still held by deleted or superseded versions. Verified against this stack:
-     argus-survey-pictures sums to 1,920 bytes of volume content while a real
-     walk of its keys totals 139 bytes across 7 objects. */
+     still held by deleted or superseded versions. */
   var APPROX_SIZE_TITLE =
     'Summed from volume metadata rather than by listing objects, so it includes volume overhead and space ' +
     'still held by deleted or superseded versions. Browse the bucket and press Calculate for a counted total.';
 
   /* The object count needs a stronger treatment than the size does.
-     Measured on this cluster (SeaweedFS 3.97): every volume reports
-     FileCount 0 in /status, including the volumes of a bucket a real walk
-     shows holding seven objects. So a zero here is the volume servers having
-     nothing to say, not a bucket with nothing in it -- and printing "0
-     objects" beside a bucket you can browse is the exact confusion this
-     screen refuses to create. Zero is rendered as unknown; any positive count
-     is shown, still labelled approximate. */
+     On this cluster (SeaweedFS 3.97) every volume reports FileCount 0 in
+     /status, including the volumes of buckets that hold objects, so a zero
+     here is the volume servers having nothing to say, not a bucket with
+     nothing in it. Zero is rendered as unknown; any positive count is shown,
+     still labelled approximate. */
   var ZERO_COUNT_TITLE =
     'The volume servers report no file count for this bucket. That is not the same as the bucket being empty: ' +
     'on this cluster every volume reports a file count of zero even where a listing finds objects. Browse the ' +
@@ -190,9 +180,7 @@
   /* Two guards, because there are two ways a response can arrive too late.
      `alive` goes false when the router leaves the screen; `generation` moves
      when Refresh rebuilds the screen in place. Either one makes a resolved
-     promise write into a node nobody is looking at, and in-place refresh is
-     the common one -- pressing Refresh twice used to leave two sets of
-     handlers racing for the same card. */
+     promise write into a node nobody is looking at. */
   var alive = true;
   var generation = 0;
 
@@ -213,8 +201,7 @@
   function staleBanner(env) {
     var why = env.error && env.error.message ? env.error.message : '';
     /* Upstream messages arrive with and without a full stop -- classify() ends
-       its sentences, a raw driver error does not -- and the ones that did not
-       ran straight into the next sentence. */
+       its sentences, a raw driver error does not. */
     if (why && !/[.!?]$/.test(why)) why += '.';
     return el('div.callout.warn', [
       el('strong', { text: 'Showing the last value that could be read.' }),
@@ -238,10 +225,8 @@
   }
 
   /**
-   * Fill a node from one API path, with all five states it really has.
-   *
-   * loading, sample-mode, failed, stale-but-usable and ok. A screen that only
-   * draws the last one is a mockup with a fetch in it.
+   * Fill a node from one API path, with all five states it really has:
+   * loading, sample-mode, failed, stale-but-usable and ok.
    */
   function loadInto(host, path, opts, render) {
     opts = opts || {};
@@ -742,8 +727,8 @@
         /* Folders sort above objects whichever way the column is sorted,
            because a directory listing that interleaves them is unreadable.
            The group prefix is a LETTER, not a digit: ui.table sorts through a
-           collator built with numeric:true, so "0" + "2026/" collates as the
-           number 2026 and a folder called 2026 landed after manifest.json. */
+           collator built with numeric:true, so "0" + "2026/" would collate as
+           the number 2026. */
         sort: function (r) { return (r.kind === 'folder' ? 'A ' : 'B ') + r.name; },
         render: function (r) {
           if (r.kind === 'folder') {
@@ -817,8 +802,7 @@
           var text = d.complete
             ? size + ' in ' + fmt.num(d.objectCount) + ' object' + (d.objectCount === 1 ? '' : 's')
             /* "at least", because the walk stopped early. An undercount
-               presented as a total is worse than an honest partial: it is the
-               number somebody quotes in a capacity plan. */
+               presented as a total is worse than an honest partial. */
             : 'at least ' + size + ' in at least ' + fmt.num(d.objectCount) + ' objects';
           host.appendChild(el('div.row', [
             el('strong', { text: text }),
@@ -872,8 +856,7 @@
     }));
 
     /* Two different kinds of "there is more". A cursor can be followed; a
-       budget stop cannot, and saying so is the difference between a page an
-       operator can trust and one that quietly hides objects. */
+       budget stop cannot. */
     if (data.cursor) {
       var cursor = data.cursor;
       var more = ui.btn('Load the next page', {
@@ -1203,8 +1186,7 @@
    * Both the first paint and Refresh come through here. Whether there is an
    * API to read is itself something to find out, and building before the probe
    * answers renders the "no API" state at a moment when the answer is still
-   * 'unknown' -- which is what a Refresh pressed during the first 2.5 seconds
-   * used to do.
+   * 'unknown'.
    */
   function rebuild(body, params) {
     generation += 1;

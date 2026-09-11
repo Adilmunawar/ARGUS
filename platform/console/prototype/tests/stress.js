@@ -3,15 +3,11 @@
  *
  *   node tests/stress.js [path-to-index.html]
  *
- * run-tests.js asserts properties. sandbox.js presses every control. Neither
- * one asks the question an operator asks after a fortnight on a bridge call:
- * why has this got slower?
- *
- * This file answers it with numbers instead of opinion. It inflates the
- * dataset in the page, drives the console the way a person drives it, and
- * reads counters out of the DevTools protocol -- live DOM nodes, registered
- * event listeners, JS heap after a forced collection, layout and style-recalc
- * counts, script time. Those five numbers are what "slower" decomposes into.
+ * run-tests.js asserts properties. sandbox.js presses every control. This
+ * file inflates the dataset in the page, drives the console the way a person
+ * drives it, and reads counters out of the DevTools protocol -- live DOM
+ * nodes, registered event listeners, JS heap after a forced collection,
+ * layout and style-recalc counts, script time.
  *
  *   SCALE   render cost per route at 1x, 10x and 50x the dataset, and the
  *           scaling exponent for each. An exponent near 1 is linear and fine;
@@ -58,11 +54,9 @@ const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 's
 /**
  * The views that actually cost something.
  *
- * Measuring the ten top-level routes alone was misleading: `security` came
- * back flat across every multiplier because its default tab is Posture, which
- * reads a fixed 7x7 object and no row collection at all. The tables that would
- * carry thousands of rows in production all live one segment deeper, so they
- * are named here explicitly.
+ * `security`'s default tab is Posture, which reads a fixed 7x7 object and no
+ * row collection at all. The tables that would carry thousands of rows in
+ * production all live one segment deeper, so they are named here explicitly.
  */
 const VIEWS = [
   'overview', 'apps', 'deploys', 'audit',
@@ -161,11 +155,10 @@ const INFLATE = function (factor) {
  * Navigate, and return the time the console spent building the screen.
  *
  * Assigning location.hash fires hashchange on a later task, so timing it
- * against a frame callback measures the frame clock and not the work: every
- * route came back at ~31 ms, which is two frames at 60 Hz, whatever the route
- * was doing. history.replaceState changes the hash WITHOUT firing the event,
- * so the synthetic dispatch below runs the shell's own `render` synchronously
- * on this stack and the two clock reads bracket exactly the script work.
+ * against a frame callback measures the frame clock and not the work.
+ * history.replaceState changes the hash WITHOUT firing the event, so the
+ * synthetic dispatch below runs the shell's own `render` synchronously on
+ * this stack and the two clock reads bracket exactly the script work.
  *
  * Layout and style are not on this stack -- they are charged separately, from
  * the protocol's own LayoutDuration and RecalcStyleDuration counters.
@@ -222,8 +215,7 @@ async function suiteScale(browser, label) {
     const counts = await page.evaluate(INFLATE, scale);
 
     for (const route of VIEWS) {
-      // A view that does not resolve is a harness bug, not a fast screen, and
-      // saying so out loud is the difference between a measurement and a lie.
+      // A view that does not resolve is a harness bug, not a fast screen.
       await page.evaluate(NAVIGATE, route);
       const ok = await page.evaluate(() => !!document.querySelector('#main h1'));
       if (!ok) { rec('SCALE', `${label}${route} resolves to a screen`, false, 'no heading rendered'); continue; }
@@ -267,7 +259,7 @@ async function suiteScale(browser, label) {
   for (const route of VIEWS) {
     const row = table[route];
     // A view that failed to resolve was already recorded as a failure above;
-    // it has no timings, and reading them is how the harness used to crash.
+    // it has no timings.
     if (!row) continue;
     const small = SCALES[0], large = SCALES[SCALES.length - 1];
 
@@ -305,8 +297,7 @@ async function suiteScale(browser, label) {
 /**
  * The long tour. Nodes, listeners and heap are sampled every 20 navigations
  * after a forced collection, and the slope of each against navigation count is
- * the retention rate. Anything that grows without bound here is what makes a
- * console that has been open since Monday feel like treacle by Thursday.
+ * the retention rate.
  */
 async function suiteLeak(browser) {
   const { ctx, page, cdp, errors } = await newPage(browser);
@@ -360,15 +351,9 @@ async function suiteLeak(browser) {
   // Timers are the other thing that survives a navigation. The console's own
   // teardown hook is meant to clear every one.
   const stray = await page.evaluate(() => {
-    // Occupy the next id and read it: the gap since boot is how many timers
-    // were ever created, which on its own proves nothing. What matters is
-    // whether any are still armed, so cancel a fresh one and count backwards
-    // over plausible ids, asking the page which are still live is not possible
-    // -- instead the console exposes nothing, so we approximate by checking
-    // that no interval fires after teardown.
     return new Promise(resolve => {
       let fired = 0;
-      const mark = window.setInterval; // untouched; we only count callbacks
+      const mark = window.setInterval;
       void mark;
       const t0 = Date.now();
       const probe = window.setInterval(() => {
@@ -505,16 +490,13 @@ async function suiteInteraction(browser) {
 /**
  * The same screen, used hard, without navigating away.
  *
- * Navigation is the path the teardown hook covers, and it covers it well: the
- * LEAK tour retains nothing. But an operator triaging an incident does not
- * navigate -- they sit on one table and sort it, filter it, and sort it again,
- * for twenty minutes. If a repaint rebuilds more than it replaces, or leaves
- * the old rows attached, that is where it shows, and nothing in the existing
- * suites presses it.
+ * Navigation is the path the teardown hook covers. But an operator triaging
+ * an incident does not navigate -- they sit on one table and sort it, filter
+ * it, and sort it again, for twenty minutes. If a repaint rebuilds more than
+ * it replaces, or leaves the old rows attached, that is where it shows.
  *
  * The finding is the DRIFT: the last few interactions against the first few.
- * A flat line is correct behaviour; a rising one is the answer to "why has
- * this got slower since I opened it".
+ * A flat line is correct behaviour.
  */
 async function suiteSustain(browser) {
   const scale = SCALES[SCALES.length - 1];
@@ -575,15 +557,8 @@ async function suiteSustain(browser) {
     if (tabs < 2) { rec('SUSTAIN', `${view} has tabs to switch between`, true, 'single panel, skipped'); continue; }
 
     /*
-     * End on the tab we started on.
-     *
-     * The first version of this ran 60 alternating clicks, which finishes on
-     * the SECOND tab -- so the "after" reading was taken with a different
-     * panel on screen and reported the size of that panel as retention. On
-     * Security at 50x it claimed 39,411 retained nodes; the true figure, with
-     * both readings taken on the same panel, is zero. A harness that compares
-     * two different states and calls the difference a leak is worse than no
-     * harness, because it sends you refactoring something that is correct.
+     * End on the tab we started on, so the "after" reading is taken with the
+     * same panel on screen as the "before" and only retention is measured.
      */
     await page.evaluate(() => { document.querySelectorAll('.tab')[0].click(); });
     await collectGarbage(cdp);
@@ -621,10 +596,7 @@ async function suiteSustain(browser) {
  *
  * `render()` clears the mount and the breadcrumb on every navigation but never
  * touches the flash host, and almost every caller of A.flash omits the optional
- * timeout. If that is so, a notification raised on Monday is still on screen on
- * Thursday, above every screen, pushing the content down and carrying a bordered
- * box-shadowed node each. This suite states it as a number rather than a worry:
- * fire one flash per navigation and watch the host.
+ * timeout. This suite fires one flash per navigation and watches the host.
  */
 async function suiteFlash(browser) {
   const REPS = 60;
@@ -647,8 +619,8 @@ async function suiteFlash(browser) {
       if (i % 10 === 9) samples.push({ i: i + 1, inBar: host ? host.childElementCount : -1, docNodes: document.getElementsByTagName('*').length });
     }
     // Finish on the screen we started on, or the node count difference is
-    // partly just a different screen -- the same trap the tab measurement fell
-    // into. Only the notifications should be left to account for.
+    // partly just a different screen. Only the notifications should be left
+    // to account for.
     history.replaceState(null, '', '#/overview');
     window.dispatchEvent(new Event('hashchange'));
     return samples;
@@ -710,10 +682,7 @@ async function suiteSoak(browser) {
     for (let t = step; t <= DWELL_MS; t += step) {
       await page.waitForTimeout(step);
       // Collect before each sample. Without this the slope measures allocation
-      // churn between collections rather than retention: a countdown that
-      // rewrites its own text every second looked like 4 nodes per second of
-      // growth while retaining, as the same run's own post-collection figure
-      // said, exactly zero.
+      // churn between collections rather than retention.
       await collectGarbage(cdp);
       const m = await metrics(cdp);
       samples.push({ t, nodes: m.Nodes, listeners: m.JSEventListeners, heapKb: m.JSHeapUsedSize / 1024 });
@@ -806,8 +775,7 @@ async function suiteSearch(browser) {
  * Guacamole recording is hundreds to thousands, and the player repaints its
  * whole log on every tick of playback and on every pointer move while
  * scrubbing -- so this is the screen where the fixture size hides the cost
- * most completely. It also checks the geometry, because the keystroke markers
- * were positioned against the page rather than the track and pointed nowhere.
+ * most completely. It also checks the geometry of the scrubber markers.
  */
 async function suitePlayer(browser) {
   const { ctx, page, errors } = await newPage(browser);
@@ -890,11 +858,10 @@ async function suitePlayer(browser) {
 /**
  * Scrolling a long table.
  *
- * Two declarations used to make every scroll frame more expensive than it had
- * to be, independent of row count: a viewport-anchored gradient the browser
- * could not fast-path, and a blur on the sticky top bar that had to be
- * re-sampled whenever anything moved behind it. Both are asserted directly as
- * well as measured, so neither can come back quietly.
+ * A viewport-anchored gradient the browser cannot fast-path, or a blur on the
+ * sticky top bar that has to be re-sampled whenever anything moves behind it,
+ * would make every scroll frame more expensive independent of row count.
+ * Both are asserted directly as well as measured.
  */
 async function suiteScroll(browser) {
   const { ctx, page, errors } = await newPage(browser);
@@ -954,8 +921,7 @@ async function suiteScroll(browser) {
 
 /**
  * The same measurement in parallel contexts. A number that only holds on an
- * idle machine is not a number you can gate a pull request on, and a real
- * operator's laptop is never idle.
+ * idle machine is not a number you can gate a pull request on.
  */
 async function suiteParallel(browser) {
   const scale = SCALES[Math.min(1, SCALES.length - 1)];

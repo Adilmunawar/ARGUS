@@ -186,9 +186,6 @@ function send(method, path) {
     assert.strictEqual(statik.status, 200);
     assert.match(statik.body, /Argus Console/);
   });
-  // `assert.ok(x === undefined || true)` was here first, which cannot fail --
-  // the exact defect class this project spent a day removing from its other
-  // harnesses. Assert the header that is actually meant to be present.
   check('static responses carry nosniff', () => {
     assert.strictEqual(statik.headers['x-content-type-options'], 'nosniff');
   });

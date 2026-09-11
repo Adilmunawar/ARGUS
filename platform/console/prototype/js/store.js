@@ -1,11 +1,8 @@
 /* Argus Console: the data layer.
  *
- * Every screen until now read ARGUS.data directly -- a fixture object that is
- * always present, always complete and always instant. Real data is none of
- * those things, and a UI written against fixtures quietly assumes all three:
- * no loading state, no failure state, no staleness, no cancellation. Wiring a
- * real API into that shape means touching every screen. This is the seam that
- * makes it one place instead.
+ * The seam between the screens and their data. Real data can be missing,
+ * late, stale or failing, and this is the one place that models it, so
+ * wiring a real API in touches one file rather than every screen.
  *
  * Two modes, decided once at boot by asking the API if it is there:
  *

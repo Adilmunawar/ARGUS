@@ -1,5 +1,5 @@
 #!/bin/sh
-# ══════════════════════════ Argus queues: streams, retry policy, dead letters
+# --- Argus queues: streams, retry policy, dead letters ----------------------
 #
 # Runs once per `docker compose up`, in nats-box (the `nats` CLI does not exist
 # in the nats server image). It creates the JetStream streams, the durable
@@ -20,7 +20,7 @@
 # like success and is reported as failure.
 #
 #
-# ── WHAT A REDELIVERY ACTUALLY GUARANTEES ────────────────────────────────────
+# --- WHAT A REDELIVERY ACTUALLY GUARANTEES ----------------------------------
 #
 # Everything in this section was measured against nats-server 2.11.4 running
 # the committed nats-server.conf, not taken from documentation.
@@ -55,7 +55,7 @@
 # own sequencing.
 #
 #
-# ── THE DEAD-LETTER MECHANISM, AND WHAT IT DOES NOT DO ───────────────────────
+# --- THE DEAD-LETTER MECHANISM, AND WHAT IT DOES NOT DO ---------------------
 #
 # JETSTREAM SHIPS NO DEAD-LETTER QUEUE. There is no setting that moves a
 # poisoned message anywhere. What the server does provide is an advisory, and
@@ -135,7 +135,7 @@ dur_ns() {
 # reporting success.
 nats_() { nats "$@" </dev/null; }
 
-# ─────────────────────────────────────────────────────────────── preconditions
+# --- preconditions ----------------------------------------------------------
 : "${NATS_URL:?nats-init needs NATS_URL (docker-compose.yml sets it)}"
 : "${NATS_USER:?nats-init needs NATS_USER}"
 : "${NATS_PASSWORD:?nats-init needs NATS_PASSWORD; bootstrap.ps1 generates it}"
@@ -147,7 +147,7 @@ REPLICAS="${ARGUS_NATS_REPLICAS:-1}"
 
 say "nats-init: $NATS_URL as $NATS_USER, replicas=$REPLICAS"
 
-# ────────────────────────────────────────────────── wait for the JetStream API
+# --- wait for the JetStream API ---------------------------------------------
 # The container healthcheck this job is gated on proves the PROCESS is up and
 # JetStream is enabled server-wide (/healthz?js-server-only=true). It does not
 # prove the JetStream API answers for this account: the meta layer comes up
@@ -165,7 +165,7 @@ until nats_ account info >/dev/null 2>&1; do
 done
 say "nats-init: JetStream API answered after $((attempt * 2))s"
 
-# ───────────────────────────────────── prove we are talking to OUR nats-server
+# --- prove we are talking to our nats-server --------------------------------
 # A server started without --config, or with a config that failed to mount, runs
 # with JetStream limits sized against the whole WSL2 VM. Every stream below
 # would still be created, the boot would be green, and the pin that stops
@@ -184,7 +184,7 @@ case "$limits" in
           UNVERIFIED here. The stream creates below still enforce their own bounds." ;;
 esac
 
-# ───────────────────────────────────────────────────────────────────── streams
+# --- streams ----------------------------------------------------------------
 #
 # RETENTION IS `limits` EVERYWHERE, DELIBERATELY.
 #   workqueue deletes a message the moment it is acked, which makes both replay
@@ -259,7 +259,7 @@ ARGUS_SENTINEL|argus.sentinel.>|limits|old|168h|128MB|2m|Sentinel scene notifica
 ARGUS_DEADLETTER|argus.dlq.> $JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>|limits|old|48h|64MB|2m|Dead letters: server max-delivery advisories (pointers) and bodies applications republished.
 STREAMS
 
-# ──────────────────────────────────── the invariant the whole mechanism rests on
+# --- the invariant the whole mechanism rests on -----------------------------
 # Measured from the server, not from the table above, because the table is what
 # we asked for and this is what exists. A dead-letter pointer that outlives the
 # body it points at is worse than no dead-letter record: it is a Replay button
@@ -275,7 +275,7 @@ for s in ARGUS_INGEST ARGUS_EXPORT ARGUS_PIPELINE ARGUS_AI ARGUS_SENTINEL; do
 done
 say "nats-init: dead-letter pointers expire before the bodies they point at (checked against the server)"
 
-# ─────────────────────────────────────────────────────────────────── consumers
+# --- consumers --------------------------------------------------------------
 #
 # THESE CONSUMERS ARE THE DEAD-LETTER MECHANISM. A consumer created with the
 # CLI's defaults has max_deliver = -1 -- measured -- which means it redelivers a
@@ -287,7 +287,7 @@ say "nats-init: dead-letter pointers expire before the bodies they point at (che
 # ack_wait is the p99 of the WORK, not a round number, because an ack_wait
 # expiry spends a delivery exactly like a failure does (see the header).
 #
-# ── --backoff-min SILENTLY OVERWRITES --wait. MEASURED, AND IT SHIPPED HERE ──
+# --- --backoff-min SILENTLY OVERWRITES --wait --------------------------------
 #
 # `--wait 5m --backoff linear --backoff-min 30s --backoff-max 15m
 #  --backoff-steps 5` produces, on 2.11.4:
@@ -299,8 +299,7 @@ say "nats-init: dead-letter pointers expire before the bodies they point at (che
 # four minutes would have been redelivered at thirty seconds, six times over,
 # exhausting all five deliveries and dead-lettering a job that was succeeding --
 # the exact failure the header warns about, introduced by the retry policy meant
-# to prevent it. The first version of this table had it that way and the
-# read-back below is what caught it.
+# to prevent it.
 #
 # So the first backoff step IS the ack_wait, and the two columns must agree.
 # create_consumer reads ack_wait back from the server after creating it and
@@ -374,7 +373,7 @@ CONSUMERS
 #
 # ARGUS_DEADLETTER deliberately has no consumer at all: see the header.
 
-# ────────────────────────────────────────────────────────────────── kv buckets
+# --- kv buckets -------------------------------------------------------------
 # A KV bucket IS a stream (KV_<name>), so it counts against max_streams and the
 # account's storage, and --max-bucket-size is not optional here: the account
 # sets max_bytes_required, and `nats kv add` without it fails with
@@ -398,7 +397,7 @@ create_kv argus_jobs  24h 64MB 64KB "Async job status: one key per job id, writt
 # symptom is that nothing runs.
 create_kv argus_locks  5m  8MB  1KB "Singleton locks for schedulers. TTL 5m so a dead holder releases itself."
 
-# ───────────────────────────────────────────────────────── prove it can publish
+# --- prove it can publish ---------------------------------------------------
 # The healthcheck proves the port answers; everything above proves the API
 # accepts configuration. Neither proves a message can be stored, which is the
 # one thing this service exists to do -- and the failure that is invisible until
@@ -420,7 +419,7 @@ stored="$(nats_ stream info ARGUS_SELFTEST -j | jq -r '.state.messages')"
 nats_ stream rm ARGUS_SELFTEST -f >/dev/null 2>&1 || warn "could not remove ARGUS_SELFTEST; remove it by hand."
 say "nats-init: publish probe stored and read back 1 message"
 
-# ────────────────────────────────────────────────────────────────────── report
+# --- report -----------------------------------------------------------------
 # EVERY NUMBER BELOW IS READ BACK FROM THE SERVER. None of it is echoed from the
 # table above: the point of printing it is to show what exists, and a summary
 # that prints its own inputs cannot tell you when the two disagree.
@@ -458,7 +457,7 @@ done
 say ""
 nats_ account info | sed -n '/Tier/,$p' | sed 's/^/  /'
 
-# ────────────────────────────────────────────────────────── what is still true
+# --- what is still true -----------------------------------------------------
 if [ "$REPLICAS" = "1" ]; then
   say ""
   say "NOTE  Every stream above is R1 on a single node. There is no redundancy here and none is"

@@ -6,19 +6,18 @@
  * Runs once per `docker compose up`, before the console starts, and is the only
  * thing in the stack allowed to hold the S3 admin identity.
  *
- * Four rules, each of which exists because the obvious alternative is wrong.
+ * Four rules.
  *
  * 1. platform/gitops/storage/buckets.yaml is the SINGLE SOURCE. Bucket names,
  *    versioning, object lock and lifecycle are read from it, never restated
  *    here. A table in this file would be a second source, and two sources of
- *    truth do not stay equal -- they diverge quietly, and the one that is wrong
- *    is always the one nobody reads.
+ *    truth do not stay equal.
  *
  * 2. "It already exists, so skip it" is a bug, not an optimisation. Object Lock
  *    CANNOT be enabled on a bucket after creation -- S3 and SeaweedFS both
  *    require it at CreateBucket time. So a bucket created once without lock
- *    stays unlocked forever, while every subsequent boot cheerfully reports
- *    success. On an existing bucket this VERIFIES the declared configuration
+ *    stays unlocked forever, while every subsequent boot reports success.
+ *    On an existing bucket this VERIFIES the declared configuration
  *    and exits non-zero when it does not match.
  *
  * 3. Configured is not enforced. GetObjectLockConfiguration returning 200 only

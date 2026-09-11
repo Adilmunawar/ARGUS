@@ -17,13 +17,11 @@
  * It sends no credential: no Authorization header, no X-Vault-Token, no
  * X-Bao-Token, and no parameter that could carry one. It never spreads an
  * upstream body into its return value either -- every field below is copied out
- * by name -- and it never logs a response body. A secrets screen that could leak
- * a secret is worse than having no secrets screen.
+ * by name -- and it never logs a response body.
  *
- * The cost of that is real and is stated rather than hidden: the raft peer list
- * lives at sys/storage/raft/configuration, which requires a token, so this
- * console cannot count the nodes in the cluster. It reports that as unknown. It
- * does not report one.
+ * The raft peer list lives at sys/storage/raft/configuration, which requires a
+ * token, so this console cannot count the nodes in the cluster. It reports that
+ * as unknown. It does not report one.
  *
  * ── THE SANDBOX WARNING IS THE HEADLINE, NOT A FOOTNOTE ──────────────────────
  *

@@ -2,8 +2,7 @@
  *
  * The morning screen. It answers two questions and nothing else: is anything
  * wrong, and does anything need me. Every sentence on it is computed from the
- * dataset, because a dashboard that reassures you with hardcoded copy is worse
- * than no dashboard.
+ * dataset.
  */
 (function () {
   'use strict';
@@ -23,9 +22,7 @@
   // Ordered worst-first so "the worst thing open" is just the head of the list.
   var SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
   /* rank() rather than `RANK[x] || 9`: critical is rank 0, and `0 || 9` is 9,
-     so the falsy fallback ranked the worst severity in the estate BELOW low.
-     The tile reported "worst severity: high" with a critical alert open, and
-     Needs you listed the critical one under the high one. */
+     so a falsy fallback would rank the worst severity below low. */
   function rank(sev) {
     return Object.prototype.hasOwnProperty.call(SEVERITY_RANK, sev) ? SEVERITY_RANK[sev] : 9;
   }
@@ -90,7 +87,7 @@
         ? ' ' + fmt.num(critical.length - 1) + ' other critical alert' + (critical.length === 2 ? ' is' : 's are') + ' also open.'
         : '';
       // A critical alert reads in the critical tone. The same fact is already
-      // red in the Security table; amber here contradicted it.
+      // red in the Security table, so the tone here has to match.
       return el('div.callout.bad', [
         el('strong', { text: 'A critical alert is open on ' + a.host + '.' }),
         el('p', {
@@ -280,9 +277,6 @@
 
   // app.js is parsed first and defers its boot, so A.screen exists by now. The
   // queued path stays as a guard against the load order regressing.
-  // Screen files are parsed first, so this listener is queued ahead of the
-  // shell's own DOMContentLoaded boot and the route is registered before the
-  // first render.
   if (typeof A.screen === 'function') A.screen('overview', screen);
   else document.addEventListener('DOMContentLoaded', function () { A.screen('overview', screen); });
 })();

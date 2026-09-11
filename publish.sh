@@ -109,7 +109,7 @@ gh api -X PUT "repos/$OWNER/$NAME/branches/main/protection" \
   && echo "  protected" \
   || echo "  Skipped: branch protection needs a paid plan on private repos. Set it in Settings → Branches."
 
-# Free for public repositories, and it would have caught a pasted token.
+# Free for public repositories.
 gh api -X PATCH "repos/$OWNER/$NAME" \
   -f 'security_and_analysis[secret_scanning][status]=enabled' \
   -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' >/dev/null 2>&1 \

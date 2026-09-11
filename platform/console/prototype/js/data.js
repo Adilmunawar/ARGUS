@@ -184,10 +184,7 @@
 
     databases: [
       /* No lastLog and an RPO of three hours, because SIMPLE recovery means the
-         recovery point is the last differential, not the last log backup. The
-         stored 11-minute RPO was unreachable under the coverage this database
-         actually has, and the console printed it beside a card correctly saying
-         there was no log chain at all. */
+         recovery point is the last differential, not the last log backup. */
       { name: 'umairv3_db', engine: 'SQL Server 2022', host: 'sql-01', sizeGB: 611, ag: 'argus-ag1', agState: 'synchronising', lagS: 3, recovery: 'SIMPLE', lastFull: hoursAgo(9), lastDiff: hoursAgo(3), lastLog: null, lastVerified: daysAgo(6), rpoMin: 180, connections: 34 },
       { name: 'FarmerFacilitatorDb', engine: 'SQL Server 2022', host: 'sql-01', sizeGB: 52, ag: 'argus-ag1', agState: 'synchronising', lagS: 3, recovery: 'FULL', lastFull: hoursAgo(9), lastDiff: hoursAgo(3), lastLog: minutesAgo(11), lastVerified: daysAgo(6), rpoMin: 11, connections: 6 },
       { name: 'ArgusConsole', engine: 'SQL Server 2022', host: 'sql-01', sizeGB: 4, ag: 'argus-ag1', agState: 'synchronising', lagS: 3, recovery: 'FULL', lastFull: hoursAgo(9), lastDiff: hoursAgo(3), lastLog: minutesAgo(11), lastVerified: daysAgo(6), rpoMin: 11, connections: 9 },
@@ -276,12 +273,9 @@
     },
 
     backups: [
-      /* SIMPLE recovery keeps no log chain, so this store cannot have one. It
-         was listed as "SQL log, every 15 min", which contradicted the database's
-         own recovery model and the backup-coverage card that reads it -- and
-         made the estate's worst RPO look like 11 minutes when it is three
-         hours. ADR-0031 proposes moving back to FULL; until it lands, this is
-         what the protection actually is. */
+      /* SIMPLE recovery keeps no log chain, so this store cannot have one.
+         ADR-0031 proposes moving to FULL; until it lands, this is what the
+         protection actually is. */
       { store: 'umairv3_db', kind: 'SQL differential', cadence: 'every 3 h', last: hoursAgo(3), lock: '35 d', site: 'A + B', state: 'warn' },
       { store: 'FarmerFacilitatorDb', kind: 'SQL log', cadence: 'every 15 min', last: minutesAgo(11), lock: '35 d', site: 'A + B', state: 'ok' },
       { store: 'pgstac / argus_geo / argus_ml', kind: 'WAL (wal-g)', cadence: 'continuous', last: minutesAgo(4), lock: '35 d', site: 'A + B', state: 'ok' },
@@ -367,16 +361,9 @@
   /*
    * Convenience lookups the screens rely on.
    *
-   * These were `.filter(...)[0]`: a full scan of the collection, with an array
-   * allocated per call, and no early exit. That is invisible against seven
-   * apps and is not invisible in the places they are actually used -- the
-   * deployment queue calls appByName and personName once per card, which is
-   * O(cards x (apps + people)) with two allocations per card.
-   *
    * An index is built on first use and rebuilt whenever the underlying array
-   * is replaced. Comparing the array identity rather than caching once matters:
-   * the stress harness swaps whole collections in to inflate the dataset, and a
-   * stale index would have quietly hidden the very cost being measured.
+   * is replaced. The array identity is compared rather than cached once,
+   * because the stress harness swaps whole collections in.
    */
   function indexBy(getArray, key) {
     var indexed = null, map = null;

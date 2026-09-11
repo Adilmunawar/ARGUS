@@ -73,8 +73,7 @@
 --  block, and format(%L) to quote it into the CREATE ROLE. The only statement
 --  whose text ever contains the plaintext is `SELECT set_config($1, $2, $3)` --
 --  an ordinary SELECT, whose constants pg_stat_statements DOES normalise into
---  parameter placeholders. Verified after a real run: no password appears
---  anywhere in pg_stat_statements.
+--  parameter placeholders. No password appears anywhere in pg_stat_statements.
 --
 --  HONEST LIMIT: the plaintext still crosses the connection and exists in the
 --  statement text the server parses, so a log line that quotes a failing
@@ -125,10 +124,9 @@
 -- `IS NOT NULL` rather than hiding the calls in a subquery whose columns
 -- nothing selects: this form does not depend on how the planner treats an
 -- output column no one reads. Each call is consumed by the expression around
--- it, so it is evaluated for certain. The failure it avoids is nasty out of
--- proportion to the fix -- a set_config() that never ran leaves the password
--- empty, and the guard below then blames the environment for something this
--- statement did.
+-- it, so it is evaluated for certain. The failure it avoids: a set_config()
+-- that never ran leaves the password empty, and the guard below then blames
+-- the environment for something this statement did.
 SELECT set_config('argus.pw_app', :'pw_app', false) IS NOT NULL AS app_read,
        set_config('argus.pw_console', :'pw_console', false) IS NOT NULL AS console_read,
        set_config('argus.pw_exporter', :'pw_exporter', false) IS NOT NULL AS exporter_read,

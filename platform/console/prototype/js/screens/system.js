@@ -1,13 +1,9 @@
 /* Argus Console: System.
  *
- * The first screen in this console that shows real data.
- *
- * Everything else renders fixtures. This one asks the console API for the
+ * Every other screen renders fixtures. This one asks the console API for the
  * actual machine it is running on and the actual AWS account it can see, and
  * renders whatever comes back -- including nothing, including an error,
- * including a value that is older than it looks. Those three are the states a
- * fixture-backed screen never has to think about, and they are most of what
- * separates a dashboard from a mockup.
+ * including a value that is older than it looks.
  *
  * The rule this screen holds to: never show a number without saying where it
  * came from and how old it is.
@@ -33,11 +29,8 @@
   function ratioTone(r) { return r >= 0.9 ? 'bad' : r >= 0.75 ? 'warn' : null; }
 
   /**
-   * A panel that owns its own request and its own four states.
-   *
-   * loading, ok, empty and failed are all real and all different, and a screen
-   * that only draws the third is the thing that makes a prototype feel like a
-   * prototype. The panel renders itself immediately as a skeleton, then
+   * A panel that owns its own request and its own four states: loading, ok,
+   * empty and failed. It renders itself immediately as a skeleton, then
    * replaces itself -- and if the screen is left before the request lands, it
    * throws the result away rather than writing into a detached node.
    */

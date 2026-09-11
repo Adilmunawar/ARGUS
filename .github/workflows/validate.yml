@@ -75,10 +75,9 @@ jobs:
       - name: Accessibility, responsive, density and keyboard suite
         run: node platform/console/prototype/tests/run-tests.js
 
-      # The property suite cannot find a control that was never wired to
-      # anything: it navigates by assigning location.hash, which is how a
-      # sidebar that did nothing on click stayed green for six releases. The
-      # sandbox presses every control in nine environments instead.
+      # The property suite navigates by assigning location.hash, so it cannot
+      # find a control that was never wired to anything. The sandbox presses
+      # every control in nine environments instead.
       - name: Full-scale sandbox
         run: node platform/console/prototype/tests/sandbox.js
 

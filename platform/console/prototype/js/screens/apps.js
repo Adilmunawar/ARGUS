@@ -15,10 +15,10 @@
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
   /* app.js is parsed before the screens and defers its own boot, so A.screen
-     exists by now. The queue below stays as a guard against that regressing
-   * yet when this file is evaluated. Queue the registration and flush it the
-   * moment app.js installs the real registry, rather than depending on the
-   * order of two <script> tags staying the way it is today. */
+   * exists by now. The queue below guards against that ordering regressing:
+   * registrations are queued and flushed the moment app.js installs the real
+   * registry, rather than depending on the order of two <script> tags staying
+   * the way it is today. */
   function registerScreen(id, def) {
     if (typeof A.screen === 'function') { A.screen(id, def); return; }
     var q = (A._screenQueue = A._screenQueue || []);
@@ -162,9 +162,8 @@
        * they never reuse a sentence.
        *
        * The host is only cleared when an empty state genuinely replaces the
-       * table. Clearing it unconditionally detached the instance on every token
-       * change, so the rebuild below always ran and the operator's sort was
-       * lost every time they touched a filter. */
+       * table, so the instance stays connected and the operator's sort survives
+       * a token change. */
       if (!d.apps.length) {
         appTable = null;
         ui.clear(tableHost);
@@ -332,9 +331,8 @@
    *  every run, because the tests compare rendered output. */
   var poolCache = null, poolCacheFor = null;
   function nodeForService(serviceName, index) {
-    // Memoised per service. This is a filter containing an indexOf, called once
-    // per instance, and it recomputed the identical pool for every instance of
-    // the same service on every render of the Instances tab.
+    // Memoised per service, so the pool is computed once rather than once per
+    // instance on every render of the Instances tab.
     if (poolCacheFor !== d.sfNodes) { poolCacheFor = d.sfNodes; poolCache = Object.create(null); }
     var pool = poolCache[serviceName];
     if (!pool) {
@@ -493,15 +491,10 @@
 
     /* The tail.
      *
-     * `live` used to be flipped, rendered into the button label and announced
-     * to a screen reader -- and never read again. The control reported a state
-     * the code did not implement, which is worse than not offering it.
-     *
-     * Two properties matter more than the animation. The buffer is CAPPED: a
-     * tail that appends without bound is the classic way a console that has
-     * been open since Monday runs out of memory, and the cap is what the
-     * eventual real stream will need too. And the interval is registered with
-     * A.onLeave, so leaving the screen stops the work it started.
+     * The buffer is CAPPED: a tail that appends without bound eventually runs
+     * the console out of memory, and the cap is what the eventual real stream
+     * will need too. The interval is registered with A.onLeave, so leaving the
+     * screen stops the work it started.
      */
     var TAIL_CAP = 500;
     var tailTimer = null;
@@ -822,10 +815,9 @@
     ], {
       label: 'Sections of ' + app.display,
       // This screen is the only one that emits ?tab= (from the row overflow
-      // menu, which offers "Logs" and "Deploy history") and it was the only one
-      // that never read it back, so both of its own links landed on Overview.
-      // The second path segment is accepted too, so #/apps/mills/logs works
-      // like every other detail screen in the console.
+      // menu, which offers "Logs" and "Deploy history"). The second path
+      // segment is accepted too, so #/apps/mills/logs works like every other
+      // detail screen in the console.
       initial: (ctx && ctx.params && ctx.params.tab) || (ctx && ctx.rest && ctx.rest[1]) || null
     }));
   }

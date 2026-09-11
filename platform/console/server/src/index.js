@@ -6,7 +6,7 @@
  * Serves real host telemetry, a real AWS inventory, and the console's own
  * static files, from one process with no build step.
  *
- * Deliberate choices, because each has bitten a dashboard somewhere:
+ * Deliberate choices:
  *
  *  - Node's own http module, no framework. The console runs inside an
  *    egress-restricted network (ADR-0027) and every dependency is a thing that
@@ -52,8 +52,6 @@ class RawResponse {
 
 /* Map a thrown error onto the status it deserves.
  *
- * Everything used to become a 500, which told the browser "the server is
- * broken" when the truth was "you asked for a bucket that does not exist".
  * The console renders retry affordances off these, so getting them wrong means
  * offering Try Again for something that will never succeed. */
 const STATUS_FOR = {
@@ -223,7 +221,7 @@ function sendJson(res, status, body) {
 async function serveStatic(req, res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
   // Resolve, then verify containment. Joining user input onto a root without
-  // this check is the oldest file-serving bug there is.
+  // this check allows path traversal.
   const target = path.resolve(WEB_ROOT, '.' + rel);
   if (target !== WEB_ROOT && !target.startsWith(WEB_ROOT + path.sep)) {
     return sendJson(res, 403, { error: 'forbidden' });

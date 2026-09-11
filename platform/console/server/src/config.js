@@ -35,8 +35,8 @@ const config = {
      network; putting it on an interface is a deliberate act. */
   region: process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || 'eu-west-1',
 
-  /* AWS calls cost money and are rate-limited, and a dashboard that polls is
-     the classic way to find that out. Every read is cached for this long. */
+  /* AWS calls cost money and are rate-limited. Every read is cached for this
+     long. */
   cacheTtlMs: int('ARGUS_CACHE_TTL_MS', 30000),
 
   /* A hung AWS call must not become a hung dashboard. */

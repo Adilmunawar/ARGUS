@@ -110,9 +110,7 @@ async function axeOn(page, label) {
   }
 
   // Press the control a person presses. Every other navigation test in this
-  // file assigns location.hash, and that blind spot is exactly how the console
-  // shipped with a sidebar that did nothing on click: the buttons carried
-  // data-go, the routes all resolved, and no test ever clicked one.
+  // file assigns location.hash.
   for (const t of navTargets) {
     await page.evaluate(() => { window.location.hash = '#/overview'; });
     await page.waitForTimeout(120);
@@ -208,13 +206,7 @@ async function axeOn(page, label) {
       /*
        * The element is already focused by a real Tab press and has been checked
        * against :focus-visible, so getComputedStyle(a) ALREADY reflects the
-       * focus styles. The third clause used to be
-       * `getComputedStyle(a, ':focus-visible').outlineStyle !== 'none'` --
-       * getComputedStyle takes a pseudo-ELEMENT and :focus-visible is a
-       * pseudo-class, so Chrome returns an empty declaration, outlineStyle is
-       * '', and '' !== 'none' is true for every element. That made this
-       * assertion unfailable: with every focus ring in both stylesheets
-       * replaced by `outline: none`, the suite still reported 241/241.
+       * focus styles.
        *
        * A box-shadow is not accepted as a ring either -- almost every surface
        * here carries --sh-card and would satisfy it focused or not.
@@ -385,9 +377,7 @@ async function axeOn(page, label) {
 
   /* --------------------------------------------------------------- GUARD */
 
-  // Every assertion here corresponds to a defect an adversarial audit found
-  // that this suite had passed over. They are the expensive kind: the interface
-  // looked correct and behaved wrongly.
+  // Every assertion here corresponds to a defect an adversarial audit found.
 
   await goto(page, 'overview');
   rec('GUARD', 'a disabled button does not run its action',
@@ -474,12 +464,10 @@ async function axeOn(page, label) {
       return count <= 2;
     }));
 
-  /* Regressions for the four defects that made the console unusable and that
-     every suite here passed straight over. Each one is exercised the way an
-     operator meets it, not by inspecting an attribute. */
+  /* Each regression below is exercised the way an operator meets it, not by
+     inspecting an attribute. */
 
   // The rail collapses at 1200px and for anyone who ever pressed Collapse.
-  // display:none on the label left ten buttons with no accessible name.
   await page.setViewportSize({ width: 1100, height: 800 });
   await goto(page, 'overview');
   rec('GUARD', 'a collapsed rail keeps an accessible name on every nav button',
@@ -490,9 +478,6 @@ async function axeOn(page, label) {
     }));
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // The scrim is z-index 100; the drawer was 95, in the same stacking context,
-  // so every tap on a nav item hit the scrim and closed it. Keyboard worked,
-  // which is why navigating by location.hash could never see it.
   await page.setViewportSize({ width: 390, height: 800 });
   await goto(page, 'overview');
   rec('GUARD', 'the mobile navigation drawer is above its own scrim',
@@ -506,9 +491,7 @@ async function axeOn(page, label) {
     }));
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // ui.btn captures disabled at construction; mutating opts.disabled made the
-  // button look enabled while the guard still swallowed the click, so a
-  // deployment could never be rejected.
+  // ui.btn captures disabled at construction.
   await goto(page, 'deploys/1847');
   rec('GUARD', 'a deployment can actually be rejected once a reason is given',
     await page.evaluate(async () => {
@@ -532,8 +515,7 @@ async function axeOn(page, label) {
       return document.querySelectorAll('#flashes .flash').length > before;
     }));
 
-  // A.dialog builds body() and actions() before the panel is in the document,
-  // so getElementById returned null and no listener was ever attached.
+  // A.dialog builds body() and actions() before the panel is in the document.
   await goto(page, 'security/vulns');
   rec('GUARD', 'the waiver dialog reaches its own fields and can be submitted',
     await page.evaluate(async () => {
@@ -557,8 +539,7 @@ async function axeOn(page, label) {
       return go.getAttribute('aria-disabled') === 'false';
     }));
 
-  // Applications is the only screen that emits ?tab= and was the only one that
-  // never read it, so both of its own row-menu links landed on Overview.
+  // Applications is the only screen that emits ?tab=.
   await goto(page, 'apps/mills?tab=logs');
   rec('GUARD', 'the applications screen opens the tab its own links name',
     await page.evaluate(() => {
@@ -566,8 +547,6 @@ async function axeOn(page, label) {
       return !!sel && /logs/i.test(sel.textContent);
     }));
 
-  // Math.floor for hours and Math.round for the remainder let the remainder
-  // reach 60, live on the elevation countdown.
   rec('GUARD', 'a duration never reads sixty minutes past the hour',
     await page.evaluate(() => {
       const f = window.ARGUS.ui.fmt.dur;
@@ -578,8 +557,6 @@ async function axeOn(page, label) {
       return true;
     }));
 
-  // Descending sort used to be ascending.reverse(), which also reversed where
-  // the comparator deliberately sank rows with no value.
   rec('GUARD', 'rows with no value stay at the bottom in both sort directions',
     await page.evaluate(() => {
       const ui = window.ARGUS.ui;
@@ -602,11 +579,8 @@ async function axeOn(page, label) {
       const found = await page.evaluate((route) => {
         const bad = [];
         // Callouts: a tone in background and border needs a glyph too.
-        /* Not just "non-empty": a stylesheet that ended up holding a control
-           character and the text "C6" -- a CSS escape written through a layer
-           that read it as octal -- rendered a tofu box and passed this check,
-           because a tofu box is not the empty string. The glyph has to be one
-           of the shapes the pill vocabulary actually uses. */
+        /* The glyph has to be one of the shapes the pill vocabulary actually
+           uses. */
         const GLYPHS = ['●', '▲', '■', '◆', '○'];
         document.querySelectorAll('.callout').forEach(n => {
           const raw = getComputedStyle(n, '::before').content;
@@ -639,7 +613,6 @@ async function axeOn(page, label) {
       colourOnly.length === 0, colourOnly.slice(0, 6).join(' | '));
   }
 
-  // A deep link opens the tab it names.
   await goto(page, 'identity/grants');
   rec('GUARD', 'a deep link opens the tab it names',
     await page.evaluate(() => {
@@ -712,19 +685,10 @@ async function axeOn(page, label) {
     const found = await page.evaluate(() => {
       const out = [];
       /*
-       * Two holes made this far weaker than its name.
-       *
-       * It walked from #main, so the navigation rail, top bar, breadcrumb and
-       * every overlay were never checked -- about 28 text runs per route. And
-       * it bailed on the FIRST ancestor with any background-image, marking it
-       * 'gradient' and skipping it. Since `body` carries a radial-gradient
-       * wash, that exempted not just the gradient buttons but any text whose
-       * ancestors were otherwise transparent. Primary-button labels at 1.15:1
-       * passed this, passed the dark check, and passed axe too -- axe reports
-       * a gradient as "incomplete" rather than a violation.
-       *
-       * Gradients are resolved now: each colour stop is a candidate background,
-       * composited over what is behind it, and the worst stop is the verdict.
+       * Gradients are resolved rather than skipped: each colour stop is a
+       * candidate background, composited over what is behind it, and the
+       * worst stop is the verdict. axe reports a gradient as "incomplete"
+       * rather than a violation.
        */
       const parse = (v) => {
         const m = String(v).match(/[\d.]+/g);
@@ -796,16 +760,9 @@ async function axeOn(page, label) {
       const small = [], clip = [];
       /* The whole document, not just #main.
        *
-       * Scoping to '#main *' meant this check could never see the navigation
-       * rail, the top bar, the flash bar, the session drawer or the command
-       * palette -- and the rail carried three 10.5px group headings and the
-       * palette a 10.5px category label on every row, live, for as long as the
-       * floor has existed.
-       *
        * offsetParent is an HTMLElement property and is undefined on every
-       * SVGElement, so `!n.offsetParent` skipped all SVG text unconditionally,
-       * including the 10.5px type label under every dependency-graph node.
-       * getClientRects() answers the "is it rendered" question for both. */
+       * SVGElement; getClientRects() answers the "is it rendered" question
+       * for both. */
       document.querySelectorAll('body *').forEach(n => {
         if (n.closest('.sr') || n.closest('#live')) return;
         if (!n.getClientRects().length) return;
@@ -910,11 +867,9 @@ async function axeOn(page, label) {
 
     /* WCAG 2.4.11: and nothing may cover the control that has focus.
      *
-     * Reflow alone was not enough. At the 320px equivalent the top bar wraps
-     * to 162px against a 200px viewport, and while it was still sticky every
-     * control the browser scrolled focus to landed underneath it, on all ten
-     * routes. A fixed scroll-padding cannot track a height that depends on how
-     * the row wraps, so below 620px the bar stops being sticky -- and this
+     * At the 320px equivalent the top bar wraps to 162px against a 200px
+     * viewport. A fixed scroll-padding cannot track a height that depends on
+     * how the row wraps, so below 620px the bar stops being sticky -- and this
      * asserts the outcome rather than the mechanism. */
     let covered = [];
     for (const r of ROUTES) {
@@ -1026,8 +981,7 @@ async function axeOn(page, label) {
 
   // parseHash runs on every hashchange and *before* the try/catch that guards
   // a screen's render, so anything it throws takes the console down until a
-  // manual reload. decodeURIComponent throws URIError on a malformed escape,
-  // which made a pasted link with a stray percent sign a denial of service.
+  // manual reload. decodeURIComponent throws URIError on a malformed escape.
   const ROUTE_CASES = [
     { hash: '#/apps?q=%', route: 'apps', why: 'a stray percent sign' },
     { hash: '#/apps?q=%zz', route: 'apps', why: 'an invalid escape' },
@@ -1046,8 +1000,6 @@ async function axeOn(page, label) {
       st.route === c.route && st.painted > 0, `${c.hash} -> ${JSON.stringify(st)}`);
   }
 
-  // Splitting a query pair on every '=' truncated any value that legitimately
-  // contained one, so a base64 filter never survived being shared as a link.
   await page.evaluate(() => { window.location.hash = '#/audit?q=YWRtaW4='; });
   await page.waitForTimeout(120);
   const eqParam = await page.evaluate(() => window.ARGUS.state.params.q);
@@ -1124,10 +1076,7 @@ async function axeOn(page, label) {
     const found = await page.evaluate(() => {
       const out = [];
       /* The same scan as CON above -- full document, gradients composited
-         rather than skipped. This pass carried its own copy of the original
-         logic, so fixing the light one alone would have left dark scoped to
-         #main and exempting every gradient, which is exactly how a selected
-         tab at 1.24:1 survived here. */
+         rather than skipped. */
       const parse = (v) => {
         const m = String(v).match(/[\d.]+/g);
         if (!m) return null;
@@ -1200,9 +1149,7 @@ async function axeOn(page, label) {
 
   /* --------------------------------------------------------------- PREFS */
 
-  // localStorage is writable by anything else on this origin, and the whole
-  // blob used to be copied into prefs unchecked: one junk value put the shell
-  // into a class no stylesheet defines, with no way back but clearing storage.
+  // localStorage is writable by anything else on this origin.
   const prefGuard = await page.evaluate(async () => {
     localStorage.setItem('argus.prefs', JSON.stringify({
       density: '"><img src=x>', theme: 'neon', timezone: 42, rail: 'yes'
@@ -1230,8 +1177,6 @@ async function axeOn(page, label) {
     !/[<>"]/.test(survived.bodyClass), survived.bodyClass);
   await page.evaluate(() => localStorage.removeItem('argus.prefs'));
 
-  // The timezone preference shipped in the first commit and nothing read it,
-  // so every timestamp was UTC whatever the operator chose.
   const stamps = await page.evaluate(() => {
     const d = new Date(Date.UTC(2026, 8, 8, 9, 30));
     window.ARGUS.setTimezone('utc');
@@ -1264,9 +1209,7 @@ async function axeOn(page, label) {
   /* ------------------------------------------------------------- OVERLAY */
 
   // A dialog and an overflow menu are both mounted on <body>, so neither is
-  // removed when main is cleared. Pressing a "g then key" shortcut while the
-  // shortcuts dialog was open left that dialog floating over a different
-  // screen, with body.has-dialog stuck on and an opener that no longer existed.
+  // removed when main is cleared.
   const strandedDialog = await page.evaluate(async () => {
     window.location.hash = '#/overview';
     await new Promise(r => setTimeout(r, 200));
@@ -1326,8 +1269,6 @@ async function axeOn(page, label) {
   rec('OVERLAY', 'closing a dialog more than once does not corrupt the next one',
     doubleClose.restored, JSON.stringify(doubleClose));
 
-  // "Add filter" with an empty box returned silently, so the control looked
-  // broken rather than unsatisfied.
   const emptyFilter = await page.evaluate(async () => {
     window.location.hash = '#/apps';
     await new Promise(r => setTimeout(r, 300));
@@ -1372,8 +1313,8 @@ async function axeOn(page, label) {
       opened: !!pop,
       items: items.length,
       danger: pop ? !!pop.querySelector('.menuitem.danger') : false,
-      // A popup mounted inside .tablewrap is clipped by its overflow-x, which
-      // sliced the labels in half; it has to live on <body>.
+      // A popup mounted inside .tablewrap is clipped by its overflow-x; it
+      // has to live on <body>.
       onBody: pop ? pop.parentElement === document.body : false,
       rect: r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null,
       vw: window.innerWidth, vh: window.innerHeight
@@ -1444,9 +1385,8 @@ async function axeOn(page, label) {
 
   /* ------------------------------------------------------------- SESSION */
 
-  // The shortcuts table has always documented Escape as closing "a dialog,
-  // drawer or palette", but only the navigation drawer was ever wired to it,
-  // so a recorded session could be dismissed with the mouse alone.
+  // The shortcuts table documents Escape as closing "a dialog, drawer or
+  // palette".
   const session = await page.evaluate(async () => {
     window.location.hash = '#/compute';
     await new Promise(r => setTimeout(r, 200));

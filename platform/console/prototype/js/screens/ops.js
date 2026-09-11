@@ -25,13 +25,8 @@
 
   /* Plausible PowerShell output per runbook. Each entry is a function of the
    * parameter values so the transcript names the machine the operator chose.
-   *
-   * `v.Host || 'hv-01'` defeated that: clearing the field put a DIFFERENT
-   * machine's name into the transcript -- cert-01-renewal-failure read
-   * "-HostName caddy" for a host the operator had not chosen -- and
-   * dr-01-site-a-loss ships Reason with a default of '', so the fallback fired
-   * on the default value every time. A transcript that names the wrong machine
-   * is worse than one that admits nothing was given. */
+   * An unset parameter renders as UNSET rather than a default host name, so
+   * the transcript never names a machine the operator did not choose. */
   var UNSET = '(not specified)';
   function val(v, key) {
     var x = v && v[key];
@@ -261,8 +256,7 @@
     var runOpts;
     var runBtn;
     var timers = [];
-    // A transcript that outlives its screen keeps appending to a detached node
-    // and flashes its result over whatever you navigated to.
+    // Cleared on leave, so a run cannot keep appending to a detached node.
     A.onLeave(function () {
       timers.forEach(function (h) { window.clearTimeout(h); });
       timers = [];
@@ -284,9 +278,8 @@
       Object.keys(fields).forEach(function (k) { values[k] = fields[k].value; });
       var lines = transcriptFor(rb, values);
 
-      // setDisabled is the API. The native property drops the button out of
-      // the tab order and takes its title with it -- defect B7 -- for the whole
-      // length of the run, and `runOpts.disabled` was never read by anything.
+      // setDisabled is the API: the native disabled property drops the button
+      // out of the tab order and takes its title with it.
       runBtn.setDisabled(true);
 
       /* A transcript is capped and scrolled without reading layout.
@@ -295,9 +288,8 @@
        * after mutating the same element, and the cost of that read grows with
        * everything already in the container -- so a long transcript pays
        * O(lines squared) in forced layout. Assigning a large number scrolls to
-       * the end just as well and reads nothing. The cap is what stops a real
-       * streaming transcript from growing without bound, which is the same
-       * rule the log tail now follows. */
+       * the end just as well and reads nothing. The cap stops a real streaming
+       * transcript from growing without bound. */
       var TRANSCRIPT_CAP = 500;
       lines.forEach(function (line, i) {
         timers.push(window.setTimeout(function () {
@@ -361,10 +353,6 @@
   function backupsTab() {
     var d = A.data;
 
-    // Guarded like its sibling three lines below. This was the one collection
-    // on the screen whose empty case threw -- inside a tab panel, so it left a
-    // blank rectangle rather than the "No backup store is configured." message
-    // the table beside it already declares.
     var oldest = d.backups.slice().sort(function (a, b) { return a.last - b.last; })[0] || null;
     var passed = d.drills.filter(function (x) { return x.outcome === 'pass'; }).length;
     var restores = d.drills.filter(function (x) { return x.kind === 'Restore'; })
@@ -562,9 +550,8 @@
       ], {
         label: 'Operations sections',
         /* The breadcrumb and the document title already name the segment
-           (#/ops/cost read "Operations / cost" and titled itself "cost"),
-           so the panel has to match it. identity and security have always
-           read it; these three ignored it and opened tab zero. */
+           (#/ops/cost reads "Operations / cost" and titles itself "cost"),
+           so the open panel has to match it. */
         initial: (ctx && ctx.rest && ctx.rest[0]) || null
       }));
     }

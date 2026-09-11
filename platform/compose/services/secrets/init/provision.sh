@@ -442,11 +442,8 @@ ensure_console_approle() {
       printf '%s' "$stored" > "$sid_file"
       # THE EXIT CODE OF THIS LOOKUP IS ALWAYS 0. Measured on 2.6.2: an unknown
       # SecretID answers 204 No Content and the CLI prints "Success! Data
-      # written" and exits 0, exactly as it does for a valid one. Checked on the
-      # exit code, this branch reported "existing SecretID still accepted"
-      # about a credential belonging to a vault that had been destroyed -- and
-      # then never minted the replacement the console needed. Only the RESPONSE
-      # BODY distinguishes them: a real SecretID returns its accessor.
+      # written" and exits 0, exactly as it does for a valid one. Only the
+      # RESPONSE BODY distinguishes them: a real SecretID returns its accessor.
       #
       # `secret_id=@file` keeps the credential out of argv (verified: the CLI
       # reads the value from the file).
@@ -504,8 +501,7 @@ write_mode_marker() {
 
   # The warning follows the VERDICT, not the mode. Chosen by mode, this record
   # would have said "no unseal key is stored" on a vault whose key was sitting
-  # in the next file along, purely because somebody edited a variable -- a
-  # reassuring sentence written by a script that had just measured the opposite.
+  # in the next file along, purely because somebody edited a variable.
   if [ "$verdict" = true ]; then
     w="SANDBOX: $(sandbox_reason). ADR-0013 forbids this on any real host, and the console must show a \
 permanent warning while it is true."

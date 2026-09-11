@@ -19,21 +19,12 @@
   --pine-rgb:12,43,31; --paper-rgb:255,254,250; --white-rgb:255,255,255;
   --shadow-rgb:22,48,38;
 
-  /* Three channels that were missing, and whose absence made the dark theme
-     paint light-theme hues onto dark surfaces:
+  /* Channels the dark theme overrides independently:
 
-     --wash-rgb   every hover, highlight and selection wash. It was --leaf-rgb
-                  directly, and --leaf-rgb is identical in both themes -- so on
-                  a dark ground a 26% wash LIFTED the surface hard while the
-                  text token stayed put, and .muted fell to 3.16:1 on a hovered
-                  row, 2.51:1 on the active palette item.
-     --focus-rgb  the focus ring. It was --brand-rgb, which the dark block
-                  never overrode, so the ring was the light theme's dark green
-                  at 50% alpha on a dark surface: 1.59:1, against the 3:1 that
-                  WCAG 1.4.11 asks for. It failed in light too, at 2.21:1.
-     --scrim-rgb  the modal scrim. It was --pine-rgb, which becomes near-black
-                  in dark, leaving the scrim nothing to darken: 1.08:1 between
-                  a dialog and the page behind it. */
+     --wash-rgb   every hover, highlight and selection wash.
+     --focus-rgb  the focus ring; it has to hold the 3:1 that WCAG 1.4.11
+                  asks for against both themes' surfaces.
+     --scrim-rgb  the modal scrim. */
   --wash-rgb:200,227,111;
   --focus-rgb:30,111,74;
   --scrim-rgb:12,43,31;
@@ -44,10 +35,6 @@
      enough for white in both themes, rather than following --brand. */
   --on-white-from:#113a2b; --on-white-to:#1e6f4a;
 
-  /* The surfaces that carry WHITE text. --brand lightens to #4aa87a in dark,
-     which puts white at 2.93:1 on the primary button, the avatar and the
-     staging pill -- so these need a channel of their own that stays dark
-     enough for white in both themes, rather than following --brand. */
   --on-white-from:#113a2b; --on-white-to:#1e6f4a;
 
   /* Status surfaces: background, softer background, border. */
@@ -112,9 +99,9 @@
   --idle-bg:#1e2a25; --idle-ink:#a3b3aa; --idle-line:#31413a;
   --danger-fill:#a32f2f; --on-danger:#fff;
 
-  /* --sunk was #1c2722 against a #15211c card: delta-E 3.0, so an N/A heat
-     cell and an empty meter track were the same colour as the surface they sat
-     on. A zero-filled bar read as "no bar" rather than "zero". */
+  /* --sunk has to sit clearly off the card surface, or an N/A heat cell and
+     an empty meter track disappear into it and a zero-filled bar reads as
+     "no bar" rather than "zero". */
   --sunk:#2b3a33; --sunk-ink:#9fb0a7; --na-ink:#a4b5ab; --ink-soft:#c2d0c8;
 
   --g-db:#16302a; --g-bucket:#2c2a1c; --g-cache:#241f33; --g-queue:#16283a; --g-dep:#1a221e;
@@ -124,18 +111,13 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%;
-  /* The top bar is position:sticky and 46px tall. Nothing in either stylesheet
-     reserved room for it, so a focused control scrolled to by the browser
-     could land underneath it (WCAG 2.4.11). Chromium's sequential-focus
-     scrolling happened to keep it clear, which means the guarantee was held by
-     browser behaviour rather than by anything here. scroll-padding states it. */
+  /* The top bar is position:sticky and 46px tall. scroll-padding reserves
+     room for it, so a control the browser scrolls focus to cannot land
+     underneath it (WCAG 2.4.11). */
   scroll-padding-top:58px}
-/* background-attachment was `fixed`. A viewport-anchored background cannot use
-   the browser's fast scroll path: the gradient is re-rasterised across the
-   whole viewport on every frame of every scroll, on every screen, forever --
-   and --glow is rgba(leaf,.16) in light and .05 in dark, a wash you have to
-   look for. The cost was real and constant; the benefit was not. Scrolling
-   with the document keeps the look and gives the frame back. */
+/* Not background-attachment:fixed: a viewport-anchored background cannot use
+   the browser's fast scroll path, so the gradient would be re-rasterised
+   across the whole viewport on every frame of every scroll. */
 body{
   font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); background:var(--cream);
   background-image:radial-gradient(120% 60% at 50% -10%, var(--glow), transparent 60%);
@@ -169,10 +151,8 @@ body.railed{--rail:66px}
   min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
 .nav svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 /* A collapsed rail hides the labels from the eye, never from the accessibility
-   tree. display:none removed them from it, and because every icon is
-   aria-hidden that left all ten navigation buttons with no accessible name at
-   all -- live at any width below 1200px and for anyone who had ever pressed
-   Collapse, since the choice persists. The label is clipped instead.
+   tree: every icon is aria-hidden, so a display:none label would leave a
+   navigation button with no accessible name. The label is clipped instead.
    .navgroup and .mark .txt may still go: the group headings are referenced by
    aria-describedby, and a referenced element is announced even when hidden. */
 .nav-clip{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
@@ -189,11 +169,9 @@ body.railed .nav{justify-content:center;padding:9px 0}
 /* ── Top bar ── */
 .top{display:flex;align-items:center;gap:11px;padding:7px 18px;min-height:46px;
   border-bottom:1px solid rgba(var(--ink-rgb),.07);position:sticky;top:0;z-index:50;
-  /* Opaque, and no backdrop-filter. A blur on a sticky element makes the
+  /* Opaque, and no backdrop-filter: a blur on a sticky element makes the
      compositor re-sample and re-blur that strip on every frame the content
-     behind it moves -- the most expensive declaration in either stylesheet,
-     stacked on the same region as the fixed gradient above. At .9 alpha there
-     was almost nothing to see through it anyway, so the bar is simply opaque. */
+     behind it moves. */
   background:var(--paper)}
 .burger{display:none;border:1px solid rgba(var(--ink-rgb),.14);background:var(--paper);border-radius:10px;
   width:44px;height:44px;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);flex:none}
@@ -224,7 +202,7 @@ body.railed .nav{justify-content:center;padding:9px 0}
 /* ------------------------------------------------------------------------
    Responsive: the rail collapses to icons at 1200px, and becomes an
    off-canvas drawer at 900px. Below 620px the top bar wraps rather than
-   letting the content column overflow, which was bug B1.
+   letting the content column overflow.
    ------------------------------------------------------------------------ */
 
 @media (max-width: 1200px) {
@@ -242,11 +220,9 @@ body.railed .nav{justify-content:center;padding:9px 0}
   .shell { grid-template-columns: minmax(0, 1fr); }
   .side { position: fixed; left: 0; top: 0; width: 272px; transform: translateX(-100%);
     transition: transform .2s; box-shadow: var(--sh-pop); z-index: 95; }
-  /* The scrim is z-index 100 and both live in the root stacking context, so at
-     95 the scrim painted OVER the open drawer: every tap on a navigation item
-     hit the scrim and closed it instead of navigating. Keyboard worked, which
-     is why no suite saw it -- the NAV tests navigate by assigning
-     location.hash. The open drawer has to sit above its own scrim. */
+  /* The scrim is z-index 100 and both live in the root stacking context, so
+     the open drawer has to sit above its own scrim -- otherwise every tap on
+     a navigation item hits the scrim and closes the drawer instead. */
   body.navopen .side { transform: none; z-index: 105; }
   body.navopen .navgroup, body.navopen .mark .txt { display: revert; }
   /* display:revert cannot undo clipping, so the clip is released explicitly. */
@@ -265,14 +241,11 @@ body.railed .nav{justify-content:center;padding:9px 0}
 }
 
 @media (max-width: 620px) {
-  /* Below this width the bar wraps, and a wrapped bar is not a bar: measured
-     at a 320px viewport -- which is what 400% browser zoom gives you on a
-     1280px screen, the WCAG 1.4.10 reflow case -- it is 162px tall against a
-     200px viewport. Sticky, it covered 81% of the screen and every control
-     the browser scrolled focus to landed underneath it on all ten routes.
-     A fixed scroll-padding cannot track a height that depends on how the row
-     happens to wrap, so the bar stops being sticky instead and gives the
-     viewport back. */
+  /* Below this width the bar wraps, and a wrapped sticky bar can cover most
+     of a small viewport (a 320px viewport is what 400% browser zoom gives you
+     on a 1280px screen, the WCAG 1.4.10 reflow case). A fixed scroll-padding
+     cannot track a height that depends on how the row happens to wrap, so the
+     bar stops being sticky instead and gives the viewport back. */
   .top { position: static; }
   .top { flex-wrap: wrap; row-gap: 8px; }
   .crumbs { order: 1; flex: 1 1 auto; }

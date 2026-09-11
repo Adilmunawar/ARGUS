@@ -11,19 +11,14 @@
  * IT NEVER SHOWS A SIZE IT DID NOT MEASURE. SeaweedFS reports usage per
  * COLLECTION, and a bucket nothing has been written to yet has no collection
  * and therefore no volumes -- the topology genuinely knows nothing about it.
- * Rendering that as "0 B" is not a rounding decision, it is the difference
- * between "this bucket is empty" and "we have no idea", and those lead to
- * opposite actions next to a bucket called argus-backups. Unknown stays
- * unknown, and the UI is expected to say so.
+ * Rendering that as "0 B" conflates "this bucket is empty" with "we have no
+ * idea". Unknown stays unknown, and the UI is expected to say so.
  *
  * IT NEVER WALKS A BUCKET TO ANSWER A PAGE LOAD. There is no cheap object
- * count in S3, and a dashboard that quietly issues thousands of ListObjectsV2
- * requests on every refresh is how a storage bill doubles and how a cluster
- * gets a load spike every time somebody leaves a tab open. Counts come from
- * the volume servers -- O(volume servers), not O(objects) -- and are labelled
- * approximate because they include deleted-but-not-compacted space. The one
- * endpoint that does walk is explicitly budgeted and only reachable from a
- * button a human pressed.
+ * count in S3. Counts come from the volume servers -- O(volume servers), not
+ * O(objects) -- and are labelled approximate because they include
+ * deleted-but-not-compacted space. The one endpoint that does walk is
+ * explicitly budgeted and only reachable from a button a human pressed.
  *
  * IT NEVER CALLS A LOCK ENFORCED BECAUSE IT IS CONFIGURED. That verdict comes
  * from storage-init, which attempted a real delete of a real object version
@@ -148,8 +143,7 @@ function s3() {
  *
  * "Failed to fetch" tells an operator nothing. Whether the gateway is down,
  * the credential is wrong, or the clock has drifted are three different
- * problems with three different fixes, and only the last is non-obvious enough
- * that people lose an afternoon to it.
+ * problems with three different fixes.
  */
 function classify(err) {
   const name = (err && (err.name || err.Code)) || 'Error';
@@ -375,8 +369,7 @@ const health = guarded('storage:health', 10000, async () => {
   /* Tri-state, because false has to mean "the master says there is no writable
      volume" and NOT "we never got an answer". Those look identical to an
      operator and mean opposite things: one is a full cluster, the other is a
-     dead master. Returning false for both is the same defect this file exists
-     to prevent, committed by this file. */
+     dead master. */
   const writables = topo ? topo.layouts.reduce((a, l) => a + ((l.writables || []).length), 0) : null;
 
   return {
@@ -525,31 +518,27 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     const agg = byCollection.get(name) || null;
     const applied = initRows.get(name) || null;
 
-    /* The rule this whole file exists for. No volumes for a collection means
-       the topology has nothing to say -- not that the bucket holds nothing. */
+    /* No volumes for a collection means the topology has nothing to say -- not
+       that the bucket holds nothing. */
     const unknownSize = !topologyOk || !agg;
 
     return {
       name,
       createdAt: b.CreationDate ? new Date(b.CreationDate).toISOString() : null,
       /* The ON-DISK FOOTPRINT of the volumes backing this bucket -- NOT the sum
-         of its object sizes, and the gap is large. Measured on this stack:
-         argus-survey-pictures reports 1920 bytes of volume here while a real
-         key walk totals 139 bytes across 7 objects, because the figure includes
+         of its object sizes, and the gap can be large: the figure includes
          each volume's superblock and space still held by superseded versions.
-         It is a genuinely useful number -- it is what fills the disk -- but it
-         is a different quantity from "how much data is in this bucket", so it
-         is named for what it is and the UI must label it that way. */
+         It is a useful number -- it is what fills the disk -- but it is a
+         different quantity from "how much data is in this bucket", so it is
+         named for what it is and the UI must label it that way. */
       diskBytes: unknownSize ? null : agg.sizeBytes,
       diskBytesIsFootprint: true,
 
       /* Deliberately null, always.
          SeaweedFS 3.97 does not populate FileCount on /status -- it reports 0
          for every collection on this cluster, including ones holding objects
-         right now. Passing that through as `objects` produced a hard zero that
-         looked measured, sat next to a bucket called argus-backups, and was
-         wrong for every bucket at once. There is no cheap per-collection count
-         to replace it with, so the honest answer is that we do not know, and
+         right now. There is no cheap per-collection count to replace it with,
+         so the honest answer is that we do not know, and
          /api/storage/prefix-size exists for when somebody needs the real one. */
       objects: null,
       objectsReason: 'SeaweedFS does not report a per-collection object count. Use Calculate on a prefix to walk it.',
@@ -612,7 +601,7 @@ const MAX_KEYS = 200;
  *
  * Applied to the BUCKET only. The same check applied to a prefix rejects every
  * real prefix -- prefixes contain slashes, and legitimately contain spaces,
- * dots and unicode -- which is a way to ship a browser that cannot browse.
+ * dots and unicode.
  */
 function badBucket(name) {
   if (typeof name !== 'string' || name.length < 3 || name.length > 63) return 'Bucket names are 3 to 63 characters.';
@@ -631,17 +620,8 @@ function badKey(key, label) {
   if (typeof key !== 'string') return `${label} must be a string.`;
   if (key.length > 1024) return `${label} is longer than the 1024-character S3 limit.`;
   if (key.includes('..')) return `${label} may not contain "..".`;
-  /* Explicit escapes, never literal control bytes in the source: a raw 0x00
-     in a regex is invisible in every editor, survives review, and is exactly
-     how this line was wrong the first time it was written. */
-  /* Checked by code point, with no escape sequence anywhere.
-
-     The regex form of this line was written twice and mangled twice: the
-     tooling that generated it collapsed the escape into the raw byte it
-     denotes, so the source contained an invisible NUL that every editor
-     renders as nothing and every reviewer reads straight past. A loop over
-     charCodeAt cannot be corrupted that way, because there is nothing in it
-     to corrupt. */
+  /* Checked by code point rather than with a regex, so no escape sequence --
+     and no raw control byte -- appears in the source. */
   for (let i = 0; i < key.length; i += 1) {
     const code = key.charCodeAt(i);
     if (code < 32 || code === 127) return `${label} contains a control character.`;
@@ -659,11 +639,9 @@ function decodeMaybe(s) {
   try {
     /* A space is encoded as "+", not "%20", and decodeURIComponent leaves "+"
        alone -- so decoding without this line turns "survey 900.txt" into
-       "survey+900.txt". That is not a display nit: the corrupted name is what
-       gets sent back as the key for preview and delete, and it matches nothing.
-       Photographs from a survey device are named with spaces essentially
-       always, so this affects most real keys and none of the test ones.
-       Replacing every "+" is safe because a literal plus arrives as %2B. */
+       "survey+900.txt". The corrupted name is what gets sent back as the key
+       for preview and delete, and it matches nothing. Replacing every "+" is
+       safe because a literal plus arrives as %2B. */
     return decodeURIComponent(s.replace(/\+/g, ' '));
   } catch (err) { return s; }
 }
@@ -802,8 +780,7 @@ async function listObjects({ bucket, prefix, cursor }) {
   /* -------------------------------------------------------------- repaired ---
      Server-side collapsing CANNOT be used here. The stored path for a key T is
      dirname(T) + T, so at prefix P the remainder always begins with a repeat of
-     the path and every entry collapses into one meaningless CommonPrefix --
-     which is exactly the "2026/09/mill-04/2026/" that gave this away.
+     the path and every entry collapses into one meaningless CommonPrefix.
      Every stored path for a key under P still BEGINS with P, so a flat listing
      at P finds them all; the directory level is then assembled here.
 
@@ -909,9 +886,7 @@ async function describeObject({ bucket, key }) {
   const held = retention && retention.until && Date.parse(retention.until) > now;
   /* `deletable` has to mean "a delete would succeed", not "the object is not
      locked". The console being read-only is just as real a blocker as
-     retention, and leaving it out produced deletable:true sitting next to a
-     reason explaining that it cannot be deleted -- the exact contradiction this
-     field exists to prevent. Three blockers, one answer. */
+     retention. Three blockers, one answer. */
   const deletable = !held && !legalHold && !!config.allowWrites;
 
   return {

@@ -8,11 +8,11 @@
  *   - A slow call must not be started twice. Without single-flight, a page that
  *     loads six panels at once against a cold cache fires six identical calls,
  *     and the first person to open the dashboard after a deploy pays for all of
- *     them. Concurrent callers now wait on the one in-flight promise.
+ *     them. Concurrent callers wait on the one in-flight promise.
  *
  * Stale-on-error is deliberate: if AWS starts failing, a value from ninety
- * seconds ago with an honest `stale` flag is far more use at three in the
- * morning than an empty panel. The flag is surfaced to the UI, never hidden.
+ * seconds ago with an honest `stale` flag is more use than an empty panel.
+ * The flag is surfaced to the UI, never hidden.
  */
 'use strict';
 

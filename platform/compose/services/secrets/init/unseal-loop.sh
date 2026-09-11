@@ -189,9 +189,9 @@ while true; do
   fi
 
   # "No key" is checked FIRST, and the order is not cosmetic: with the seal
-  # check first, a keyless container facing a 3-of-5 vault announced that it was
-  # holding a key it did not have. Both conditions are failures; the message has
-  # to be about the one that is actually true.
+  # check first, a keyless container facing a 3-of-5 vault would report a key
+  # it does not have. Both conditions are failures; the message has to be about
+  # the one that is actually true.
   if [ ! -f "$KEY_FILE" ]; then
     if [ "$state" != no-key ]; then
       warn "SEALED ($threshold of $shares shares needed), and there is no key at $KEY_FILE."
@@ -236,10 +236,9 @@ while true; do
   # hold that key. It buys no attacker anything they did not already have.
   bao operator unseal "$(cat "$KEY_FILE")" >/dev/null 2>&1
 
-  # The EXIT CODE IS NOT THE ANSWER, and believing it was is how the previous
-  # version of this loop reported "UNSEALED the vault" about a vault it had left
-  # sealed. `bao operator unseal` reports on the SHARE it accepted, not on the
-  # seal. The seal is the thing that matters, so the seal is what gets read.
+  # The EXIT CODE IS NOT THE ANSWER. `bao operator unseal` reports on the SHARE
+  # it accepted, not on the seal. The seal is the thing that matters, so the
+  # seal is what gets read.
   if [ "$(jf "$(bao status -format=json 2>/dev/null)" sealed)" = false ]; then
     log "UNSEALED the vault with the stored key."
     sandbox_banner

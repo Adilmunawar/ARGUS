@@ -15,15 +15,11 @@
 
   /**
    * Everything that would have to re-run after this asset, transitively.
-   *
-   * This was a fixpoint relaxation: an outer loop that rescanned every pipeline
-   * and every one of its upstreams until nothing changed, which for a chain --
-   * and asset graphs are mostly chains -- is O(assets squared x upstreams).
-   * It is called once per failed asset when rendering the failure banner.
+   * Called once per failed asset when rendering the failure banner.
    *
    * A reverse adjacency map built once, then one breadth-first walk, is
-   * O(assets + edges) and gives the same answer. The map is rebuilt only when
-   * the pipeline collection is replaced.
+   * O(assets + edges). The map is rebuilt only when the pipeline collection
+   * is replaced.
    */
   var reverseEdges = null, reverseFor = null;
   function downstreamMap() {
@@ -100,8 +96,7 @@
     ];
 
     return el('div.stack', [
-      // The table below maps failed -> 'bad'. The banner said the same thing
-      // in amber, so the worst state on the screen read as the milder one.
+      // The table below maps failed -> 'bad'; the banner tone has to match.
       failed.length ? el('div.callout.bad', [
         el('strong', { text: failed.map(function (p) { return p.asset; }).join(', ') + ' failed' }),
         el('p', {
@@ -146,9 +141,7 @@
       confirmLabel: 'Promote ' + m.run,
       /* confirmDestructive otherwise states "This cannot be undone from the
          console", which directly contradicts the detail below it: promotion is
-         the one action on this screen the code itself describes as reversible.
-         The ladder is still right -- it repoints live serving -- but the
-         sentence has to be true. */
+         the one action on this screen the code itself describes as reversible. */
       reversible: 'The previous run stays in the registry, so this can be undone by promoting it back.',
       detail: 'Promoting ' + m.run + ' repoints the Ray Serve endpoint at it. Every prediction served after '
         + 'the swap comes from this run, including requests already in flight behind the gateway. The '
@@ -345,11 +338,8 @@
             var q = stacInput.value.trim();
             // Deterministic from the query itself, so the same search always
             // reports the same count in a demo or a screenshot.
-            /* The count was a function of the query LENGTH, so a narrower
-               query claimed more items: the placeholder's own bbox query
-               returned 1,270 against a whole-collection count of 120. It is
-               derived from the mirror's actual coverage now, and a filtered
-               query can only ever return a subset of it. */
+            /* The count is derived from the mirror's actual coverage, so a
+               filtered query can only ever return a subset of it. */
             var whole = 0;
             for (var wi = 0; wi < 8; wi++) whole += 8 + ((wi * 5 + 3) % 7);
             var n = q ? Math.max(1, Math.round(whole * 0.18)) : whole;
@@ -397,9 +387,8 @@
       ], {
         label: 'ML and geospatial sections',
         /* The breadcrumb and the document title already name the segment
-           (#/ops/cost read "Operations / cost" and titled itself "cost"),
-           so the panel has to match it. identity and security have always
-           read it; these three ignored it and opened tab zero. */
+           (#/ops/cost reads "Operations / cost" and titles itself "cost"),
+           so the open panel has to match it. */
         initial: (ctx && ctx.rest && ctx.rest[0]) || null
       }));
     }

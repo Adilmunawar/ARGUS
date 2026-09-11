@@ -86,10 +86,8 @@
      fmt.num runs several times per row per paint. toLocaleString with an
      options bag rebuilds a formatter on essentially every call. One instance
      per distinct shape, built on first use, is the whole optimisation. */
-  /* numeric:true is the one deliberate behaviour change: it sorts hv-2 before
-     hv-10 rather than after it, which is what an operator reading a host list
-     expects. Everything else is left at the default so the ordering matches
-     what localeCompare produced before. */
+  /* numeric:true sorts hv-2 before hv-10 rather than after it, which is what
+     an operator reading a host list expects. */
   var collator = new Intl.Collator('en-GB', { numeric: true });
   var numFormats = {};
   function numFormat(dp) {
@@ -105,9 +103,8 @@
       return numFormat(dp === undefined ? 0 : dp).format(Number(n));
     },
     pct: function (n, dp) { return (n === null || n === undefined) ? '-' : Number(n).toFixed(dp === undefined ? 1 : dp) + '%'; },
-    // Guarded here rather than relying on pct: Number(null) * 100 is 0, so a
-    // missing ratio printed a confident "0.0%" where every sibling formatter
-    // prints "-", and Number(undefined) * 100 printed "NaN%".
+    // Guarded here rather than relying on pct: Number(null) * 100 is 0, and a
+    // missing ratio must print "-" like every sibling formatter, not "0.0%".
     ratioPct: function (n, dp) {
       return (n === null || n === undefined) ? '-' : fmt.pct(Number(n) * 100, dp);
     },
@@ -121,10 +118,8 @@
     dur: function (s) {
       if (s === null || s === undefined) return '-';
       if (s < 60) return Math.round(s) + ' s';
-      // Round to whole minutes FIRST, then split. Flooring the hours while
-      // rounding the remainder independently let the remainder reach 60, so
-      // the elevation countdown read "1 h 60 min left" for the ~30 seconds
-      // either side of the two-hour mark, and "60 min" just under one hour.
+      // Round to whole minutes FIRST, then split: flooring the hours while
+      // rounding the remainder independently lets the remainder reach 60.
       var mins = Math.round(s / 60);
       if (mins < 60) return mins + ' min';
       var h = Math.floor(mins / 60), m = mins % 60;
@@ -192,9 +187,7 @@
    * discoverable: an operator needs to read *why* Approve is unavailable, and
    * a natively disabled button tells them nothing. That only works if the
    * guard is real, so the click handler is always attached and always consults
-   * the live flag. An earlier version captured opts.disabled and checked a
-   * native property that was never set, which made the type-to-confirm step of
-   * every destructive dialog a no-op.
+   * the live flag.
    */
   function btn(label, opts) {
     opts = opts || {};
@@ -241,10 +234,9 @@
         opts.unit ? el('span.tile-unit', { text: ' ' + opts.unit }) : null
       ]),
       opts.delta ? el('div.delta.' + (opts.delta.good ? 'up' : 'down'), [
-        /* The arrow shows DIRECTION and the class shows whether that is good,
-           so a good-but-falling metric renders as a green down arrow and the
-           only thing carrying "good" was the colour. The word makes it
-           readable in greyscale and to a screen reader. */
+        /* The arrow shows DIRECTION and the class shows whether that is good:
+           a good-but-falling metric renders as a green down arrow. The word
+           makes it readable in greyscale and to a screen reader. */
         el('span', { 'aria-hidden': 'true', text: opts.delta.dir === 'up' ? '↑' : '↓' }),
         el('span.sr', { text: (opts.delta.dir === 'up' ? 'up, ' : 'down, ') + (opts.delta.good ? 'good' : 'bad') + ': ' }),
         ' ' + opts.delta.value
@@ -285,21 +277,11 @@
     /**
      * Sort, decorate-sort-undecorate, in the requested direction.
      *
-     * Two things were wrong with sorting a row list directly and reversing it
-     * for descending order:
-     *
-     *   - The comparator called col.sort() on both operands, so the key was
-     *     recomputed 2 n log n times instead of n. Extracting it once per row
-     *     up front is the whole of the decorate-sort-undecorate idiom.
-     *   - Reversing an ascending sort also reverses where the comparator
-     *     deliberately put rows with no value. They are sunk to the bottom on
-     *     purpose; reversed, every blank row floated to the top of a
-     *     "largest first" sort. Descending negates the comparator instead, so
-     *     missing values stay at the bottom in both directions.
-     *
-     * String comparison goes through one cached Intl.Collator. localeCompare
-     * builds a collator per call, and at n log n comparisons that was the
-     * single most expensive thing in a sort click.
+     * The sort key is extracted once per row up front rather than recomputed
+     * in the comparator. Descending negates the comparator rather than
+     * reversing an ascending sort, so rows with no value stay at the bottom
+     * in both directions. String comparison goes through one cached
+     * Intl.Collator; localeCompare builds a collator per call.
      */
     function sortRows(list, col, dir) {
       var decorated = list.map(function (row, i) {
@@ -318,13 +300,10 @@
     }
 
     /*
-     * Row activation is delegated to the tbody rather than bound per row.
-     *
-     * Two listeners on every row, each a closure over the row object, were
-     * registered and thrown away on every paint -- 10,000 registrations for a
-     * 5,000-row table, redone on every sort click. One pair on the container
-     * is O(1) and survives repaints, and `rowIndex` maps the event back to the
-     * row it came from without holding a reference to anything.
+     * Row activation is delegated to the tbody rather than bound per row: one
+     * pair of listeners on the container survives repaints, and `rowIndex`
+     * maps the event back to the row it came from without holding a reference
+     * to anything.
      */
     var rowsShown = [];
     function rowFromEvent(e) {
@@ -351,18 +330,12 @@
     /*
      * Windowed rendering, past a threshold.
      *
-     * Building every row was the thing that would not survive real data. It is
-     * fine for the seven rows a fixture holds and it is not fine for an audit
-     * log, which is the one collection in this product that genuinely grows
-     * without bound -- every action by anyone, kept forever, is the promise the
-     * Audit screen makes. Ten thousand rows is ~180,000 elements, and the
-     * browser pays for all of them on every sort.
-     *
-     * Past VIRTUAL_MIN only the rows near the viewport are built, with a spacer
-     * above and below standing in for the rest so the scrollbar stays honest.
-     * Below the threshold nothing changes -- a windowed table has real costs
-     * (a scroll listener, a measured row height, find-in-page only seeing what
-     * is rendered) and they are not worth paying for thirty rows.
+     * The audit log grows without bound, so past VIRTUAL_MIN only the rows
+     * near the viewport are built, with a spacer above and below standing in
+     * for the rest so the scrollbar stays honest. Below the threshold nothing
+     * changes -- a windowed table has real costs (a scroll listener, a
+     * measured row height, find-in-page only seeing what is rendered) and
+     * they are not worth paying for thirty rows.
      *
      * The accessibility contract is what makes this safe to do at all: the
      * table declares aria-rowcount for the WHOLE set and each rendered row
@@ -389,11 +362,10 @@
       });
       if (opts.onRow) {
         /* No role="link" here. An explicit role REPLACES the implicit `row`,
-           so the tr stopped being a row of its table and its cells lost their
-           header association -- on exactly the rows that are the main way into
-           every detail screen. The row stays a row; it keeps its tabindex so it
-           is still reachable without a mouse, and the listeners live on the
-           tbody. */
+           so the tr would stop being a row of its table and its cells would
+           lose their header association. The row stays a row; it keeps its
+           tabindex so it is still reachable without a mouse, and the listeners
+           live on the tbody. */
         tr.classList.add('is-clickable');
         tr.tabIndex = 0;
       }
@@ -521,13 +493,8 @@
     /** The rows as currently shown, in the order shown. */
     wrap.currentRows = function () { return current.slice(); };
     /**
-     * Swap the data without rebuilding the table.
-     *
-     * Every filter consumer used to clear its host and construct a whole new
-     * ui.table, which threw away the thead, every sort button, and -- because
-     * `state` is per instance -- the sort the operator had chosen. Adding a
-     * filter token silently reset the ordering back to the default, which is a
-     * correctness defect as much as a cost.
+     * Swap the data without rebuilding the table, so the thead, the sort
+     * buttons and the sort the operator has chosen survive a filter change.
      */
     wrap.setRows = function (next) { rows = next || []; paint(); };
     return wrap;
@@ -593,11 +560,9 @@
       clear(panel);
       panel.setAttribute('aria-labelledby', listId + '-' + i);
 
-      /* A panel that throws gets an error state, not a blank rectangle.
+      /* A panel that throws gets an error state, not a blank rectangle:
          app.js wraps `def.render` in a try/catch, but a tab panel is rendered
-         later, on click, outside that guard -- so one bad value left the
-         operator looking at an empty panel with nothing to say what happened
-         and no way to tell it apart from "there is nothing here". */
+         later, on click, outside that guard. */
       try {
         if (A.scopeLeaveHooks) {
           var built;
@@ -671,17 +636,13 @@
     return s;
   }
 
-  /** A horizontal bar, used for utilisation and share-of-total. */
   /**
-   * A horizontal bar.
+   * A horizontal bar, used for utilisation and share-of-total.
    *
-   * The tone says "this has crossed a threshold", and it said it in hue alone:
-   * the value beside the bar tells you it is 87%, not that 87% is over the
-   * line. Validated against the console's own status palette, `warn` and `bad`
-   * separate by a deuteranopic delta-E of 2.9 -- the two states that matter
-   * most in an operations console are close to indistinguishable by colour.
-   * So a toned fill now also carries a texture, and the tone is named in the
-   * accessible label rather than left to the eye.
+   * The tone says "this has crossed a threshold". `warn` and `bad` separate
+   * by a deuteranopic delta-E of 2.9 in this palette, so a toned fill also
+   * carries a texture, and the tone is named in the accessible label rather
+   * than left to the eye.
    */
   var TONE_WORD = { warn: 'over the warning threshold', bad: 'over the critical threshold' };
   function bar(ratio, opts) {
@@ -697,8 +658,7 @@
 
   /**
    * A left-to-right dependency graph. nodes:[{id,label,kind}], edges:[[from,to]].
-   * Rendered as SVG with a text alternative, because a picture of a graph that a
-   * screen reader cannot read is not information, it is decoration.
+   * Rendered as SVG with a text alternative.
    */
   function graph(nodes, edges, opts) {
     opts = opts || {};
@@ -707,11 +667,9 @@
     // Longest-path layering, which is enough for the shallow graphs here.
     var depth = {};
     nodes.forEach(function (n) { depth[n.id] = 0; });
-    // Relax until nothing moves, rather than always running one pass per node.
-    // Depths settle in two or three passes for the shapes drawn here, so the
-    // unconditional O(nodes x edges) loop did most of its work for nothing --
-    // 2.5 million comparisons for a thousand-asset pipeline graph. The pass
-    // ceiling stays as the guard against a cycle in the input.
+    // Relax until nothing moves. Depths settle in two or three passes for the
+    // shapes drawn here; the pass ceiling is the guard against a cycle in the
+    // input.
     for (var pass = 0; pass < nodes.length; pass++) {
       var moved = false;
       for (var ei = 0; ei < edges.length; ei++) {
@@ -762,25 +720,15 @@
 
     // The equivalent, in words, for anyone who cannot see the picture.
     /*
-     * The text alternative.
-     *
-     * Two full scans of `nodes` per edge, each allocating an array, made this
-     * O(edges x nodes); one index makes it O(edges). It also described edges
-     * only, so a node's KIND -- "database", "bucket", "external", and on the
-     * pipeline graph "fresh", "stale", "failed" -- never reached anybody
-     * listening, and a node with no edges was never mentioned at all. The
-     * kinds are drawn as SVG text inside a role="img", so they are dropped
-     * from the accessibility tree and this sentence is the only place they can
+     * The kinds are drawn as SVG text inside a role="img", so they are dropped
+     * from the accessibility tree and this text is the only place they can
      * come back.
      */
     /* The verb has to come from the caller, because the edge direction does.
        apps.js pushes [dependent, dependency] and reads "depends on"; ml.js and
        data.js push [upstream, downstream], where the same sentence is exactly
-       backwards -- the asset graph's text alternative claimed "parcels depends
-       on s2_periods" when parcels FEEDS s2_periods, and said so directly under
-       a label reading "upstream assets on the left". Since the graph is
-       role="img", that sentence is the only description a screen reader gets,
-       so it was reversing the blast radius of every action on the tab. */
+       backwards. Since the graph is role="img", this text is the only
+       description a screen reader gets. */
     var verb = opts.verb || 'depends on';
 
     var byId = Object.create(null);
@@ -836,8 +784,7 @@
     return el('div.timeline', { role: 'img', 'aria-label': opts.label || 'Timeline' },
       segments.map(function (s) {
         return el('span.tl-seg.' + (s.tone || 'ok'), {
-          // `s.weight || 1` gave a zero-length segment the same width as a
-          // normal one -- the falsy-zero trap again, in the component library.
+          // A weight of 0 is meaningful, so only undefined/null fall back to 1.
           style: { flex: String(s.weight === undefined || s.weight === null ? 1 : s.weight) },
           title: s.label
         });
@@ -847,8 +794,8 @@
   /* ----------------------------------------------------- property filter --- */
 
   /**
-   * Token filtering, the one Cloudscape pattern worth copying wholesale:
-   * type a value, get a removable token, combine tokens with AND.
+   * Token filtering: type a value, get a removable token, combine tokens
+   * with AND.
    * fields: [{key, label, options?}]. onChange(activeTokens) repaints the caller.
    */
   function propertyFilter(fields, onChange) {
@@ -882,9 +829,8 @@
     function add() {
       var v = input.value.trim();
       if (!v) {
-        // Pressing "Add filter" with an empty box used to return silently, so
-        // the control looked broken rather than unsatisfied. Say what is
-        // missing and put the cursor where it has to go.
+        // Say what is missing and put the cursor where it has to go, rather
+        // than returning silently.
         input.focus();
         A.announce('Type a value first, then add the filter');
         return;
@@ -927,8 +873,8 @@
    *
    * A table row cannot afford six visible buttons, and a console that hides
    * its secondary actions behind a right-click hides them from keyboard and
-   * touch alike. This is the pattern every mature console settled on, built
-   * to the WAI-ARIA menu-button pattern rather than approximated:
+   * touch alike. Built to the WAI-ARIA menu-button pattern rather than
+   * approximated:
    *
    *  - the trigger owns aria-haspopup and aria-expanded, so assistive tech
    *    announces that there is a menu and whether it is open;
@@ -1029,12 +975,10 @@
         else if (e.key === 'End') { e.preventDefault(); focusAt(list.length - 1); }
         else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
         else if (e.key === 'Tab') {
-          /* Move focus back to the trigger BEFORE removing the popup. Removing
-             it while a menu item held focus left document.activeElement as
-             <body>, and the browser's default Tab then continued from there --
-             to the first tabbable node in the document, which is the skip link
-             at the very top of the page. The component's own doc comment
-             promises "Tab closes it and moves on"; from the trigger, it does. */
+          /* Move focus back to the trigger BEFORE removing the popup: removing
+             it while a menu item holds focus leaves document.activeElement as
+             <body>, and the browser's default Tab then continues from the top
+             of the document rather than from the trigger. */
           if (trigger && trigger.focus) trigger.focus();
           close(false);
         }
@@ -1043,10 +987,8 @@
       /* The menu is mounted on <body> and positioned fixed rather than
        * absolutely inside the row. Every table in the console scrolls
        * horizontally, and an absolutely positioned popup inside a scroll
-       * container is clipped by it: the first build of this menu opened
-       * half off the right edge of the table with its labels sliced in
-       * half. Fixed coordinates computed from the trigger avoid the
-       * clipping entirely. */
+       * container is clipped by it; fixed coordinates computed from the
+       * trigger avoid the clipping entirely. */
       document.body.appendChild(pop);
 
       var r = trigger.getBoundingClientRect();
@@ -1084,10 +1026,8 @@
    *
    * Overview builds "#/security/alerts?id=al-9021" and "#/identity/grants?id=g-442",
    * and the Config tab builds "#/identity/secrets?path=kv/mills/jwt-signing-key".
-   * The right tab opened, and then nothing happened: a link labelled "Open
-   * alert al-9021" landed the operator on an unfiltered list of six and left
-   * them to find it. Tables already stamp data-key on every row, so the row is
-   * findable; this marks it, scrolls it into view and says so.
+   * Tables stamp data-key on every row, so the row is findable; this marks it,
+   * scrolls it into view and says so.
    */
   function revealRow(host, key, opts) {
     opts = opts || {};
@@ -1095,14 +1035,9 @@
     var want = String(key);
 
     /*
-     * The lookup is deferred, not just the scroll.
-     *
-     * ui.tabs selects its initial panel while the screen is still being built,
-     * so a deep link that names a tab AND a row -- which is every one of them,
-     * "#/security/alerts?id=al-9021" -- ran this before the panel was in the
-     * document. The row was never found and the highlight silently did
-     * nothing, which an end-to-end walk of the triage journey caught and no
-     * component test could: every part worked, the sequence did not.
+     * The lookup is deferred, not just the scroll: ui.tabs selects its initial
+     * panel while the screen is still being built, so a deep link that names a
+     * tab AND a row reaches here before the panel is in the document.
      */
     window.setTimeout(function () {
       // Scanned rather than composed into a selector: a key may contain quotes,

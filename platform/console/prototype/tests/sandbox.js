@@ -8,10 +8,8 @@
  * presses every control it can find, on every screen, and watches for anything
  * that throws, navigates nowhere, traps focus, or leaves a timer running.
  *
- * The distinction matters. The console shipped with a sidebar that did nothing
- * on click while a 163-check suite stayed green, because every one of those
- * checks navigated by assigning location.hash. A property test cannot find a
- * control that was never wired; only pressing it can.
+ * A property test cannot find a control that was never wired; only pressing
+ * it can.
  *
  *   ENV     boot integrity in nine environments (viewport x theme x density)
  *   ROUTE   every route and every deep link renders in every environment
@@ -48,9 +46,6 @@ const DEEP = [
   'security/alerts', 'identity/people'
 ];
 
-/* Nine environments. A console that is correct at 1440x900 in light and wrong
-   at 390x844 in dark is not correct; the estate is operated from whatever is
-   to hand during an incident. */
 const ENVS = [
   { id: 'desktop-light', w: 1440, h: 900, theme: 'light', density: 'comfortable' },
   { id: 'desktop-dark', w: 1440, h: 900, theme: 'dark', density: 'comfortable' },
@@ -185,8 +180,7 @@ async function reset(page) {
 
   /* ============================================================== SWEEP === */
 
-  // Press every control on every screen and watch what happens. This is the
-  // pass that would have caught a sidebar wired to nothing.
+  // Press every control on every screen and watch what happens.
   let dead = [], threw = [], swept = 0;
   for (const r of ROUTES) {
     await goRoute(page, r);

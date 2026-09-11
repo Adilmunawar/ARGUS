@@ -237,8 +237,7 @@ const alarms = guarded('cw:alarms', config.cacheTtlMs, async () => {
 /* -------------------------------------------------------------------- cost --- */
 
 /* Cost Explorer charges per request, so it is off unless asked for and cached
-   for hours rather than seconds. A dashboard that refreshes cost every thirty
-   seconds bills you for the privilege of watching your bill. */
+   for hours rather than seconds. */
 const cost = guarded('ce:month', config.costCacheTtlMs, async () => {
   if (!config.costEnabled) {
     return { enabled: false, note: 'Cost Explorer is off. Set ARGUS_COST_ENABLED=1 to enable it; each call is billed.' };

@@ -283,8 +283,7 @@
           id: 'reject-reason', rows: '4', autocomplete: 'off',
           'aria-describedby': 'reject-help'
         });
-        // The reject button stays inert until there is a reason, because
-        // "rejected, no reason given" is how a queue turns into folklore.
+        // The reject button stays inert until there is a reason.
         var rejectOpts = {
           variant: 'danger',
           disabled: true,
@@ -299,10 +298,7 @@
         var close = null;
 
         // ui.btn captures opts.disabled as a boolean at construction and only
-        // setDisabled moves it. Mutating rejectOpts.disabled and painting the
-        // class by hand made the button *look* enabled -- correct class,
-        // aria-disabled="false" -- while the click stayed swallowed by the
-        // guard, so no deployment could ever be rejected.
+        // setDisabled moves it.
         area.addEventListener('input', function () {
           go.setDisabled(area.value.trim().length === 0);
         });
@@ -408,9 +404,6 @@
 
   // app.js is parsed first and defers its boot, so A.screen exists by now. The
   // queued path stays as a guard against the load order regressing.
-  // Screen files are parsed first, so this listener is queued ahead of the
-  // shell's own DOMContentLoaded boot and the route is registered before the
-  // first render.
   if (typeof A.screen === 'function') A.screen('deploys', screen);
   else document.addEventListener('DOMContentLoaded', function () { A.screen('deploys', screen); });
 })();

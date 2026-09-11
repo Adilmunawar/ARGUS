@@ -6,7 +6,7 @@
  * Design notes worth keeping in the code rather than a wiki:
  *
  *  - Every screen is a hash route, so every resource has a link somebody can
- *    paste into an alert or a runbook. Azure's blade state is the anti-pattern.
+ *    paste into an alert or a runbook.
  *  - Navigation is two levels at most: a list, then a detail with tabs. No
  *    stacking panels.
  *  - One live region, announced deliberately. A streaming log on aria-live
@@ -37,11 +37,9 @@
       if (!raw) return;
       var p = JSON.parse(raw);
       if (!p || typeof p !== 'object') return;
-      // Only known keys with known values are taken. localStorage is writable
-      // by anything else served from this origin, and a preference blob was
-      // previously copied in wholesale: a junk value for density put the shell
-      // into a class that no stylesheet defines, with no way back but clearing
-      // storage by hand.
+      // Only known keys with known values are taken: localStorage is writable
+      // by anything else served from this origin, and a junk value for density
+      // would put the shell into a class that no stylesheet defines.
       Object.keys(prefs).forEach(function (k) {
         if (!(k in p)) return;
         if (PREF_VALUES[k]) { if (PREF_VALUES[k].indexOf(p[k]) !== -1) prefs[k] = p[k]; }
@@ -87,9 +85,7 @@
 
   /* ---------------------------------------------------------- timezone --- */
 
-  // The preference existed from the first commit and nothing ever read it, so
-  // every timestamp in the console was UTC whatever an operator chose. Times
-  // are formatted through ui.fmt, so one hook here reaches every screen.
+  // Times are formatted through ui.fmt, so one hook here reaches every screen.
   A.timezone = function () { return prefs.timezone; };
   A.setTimezone = function (tz) {
     if (PREF_VALUES.timezone.indexOf(tz) === -1) return;
@@ -117,15 +113,6 @@
   /*
    * Notifications expire, and the bar has a ceiling.
    *
-   * Neither was true before, and the stress harness put a number on it: one
-   * notification kept per navigation, 60 still on screen after 60 navigations,
-   * 677 live nodes added. render() clears the mount and the breadcrumb and
-   * never touched the flash host, and 38 of the 41 call sites omit the
-   * optional timeout -- so every confirmation an operator triggered stayed on
-   * screen for the life of the tab, above every screen, pushing the content
-   * down. It is the plainest answer to "why does this get worse the longer I
-   * leave it open".
-   *
    * A default expiry rather than clearing on navigation, because an action
    * that navigates should still be able to tell you it worked. Bad news gets
    * longer than good news; anything that must persist passes sticky.
@@ -149,10 +136,8 @@
       }, '×')
     ]);
 
-    // A pending expiry timer holds a reference to its node, so a notification
-    // dismissed by hand or pushed out by the ceiling stayed alive in memory
-    // until its timeout fired anyway -- up to half a minute of detached DOM per
-    // notification. Cancelling the timer on removal releases it immediately.
+    // A pending expiry timer holds a reference to its node, so it is cancelled
+    // on removal to release the node immediately.
     function drop(n) {
       if (n.__flashTimer) { window.clearTimeout(n.__flashTimer); n.__flashTimer = null; }
       n.remove();
@@ -177,11 +162,9 @@
 
   function trapFocus(container, onEscape) {
     function onKey(e) {
-      // stopPropagation matters as much as preventDefault here. Without it the
-      // same keydown reached the document handler, which reads Escape as
-      // "close the recorded session" -- so dismissing a confirm dialog also
-      // tore down the operator's live RDP session, the exact failure the
-      // never-unmounted drawer exists to prevent.
+      // stopPropagation matters as much as preventDefault here: without it the
+      // same keydown reaches the document handler, which reads Escape as
+      // "close the recorded session".
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onEscape(); return; }
       if (e.key !== 'Tab') return;
       var items = Array.prototype.filter.call(container.querySelectorAll(FOCUSABLE), function (n) {
@@ -205,21 +188,12 @@
   var openDialogs = [];
   A.dialog = function (opts) {
     /*
-     * The opener is whatever actually held focus, always.
-     *
-     * Inheriting the outer dialog's opener instead was wrong whenever the outer
-     * dialog stays open: Ctrl+K and ? are not suppressed while a dialog is up,
-     * so opening the palette over the preferences dialog inherited the gear
-     * button, and closing the palette threw focus to a control *behind* the
-     * still-open modal. Focus was then outside the trap, so Tab walked the page
-     * behind the scrim and Escape no longer reached the dialog at all -- it
-     * became unclosable by keyboard.
-     *
-     * Capturing the real activeElement handles both shapes. Focus returns into
-     * whatever is still on screen; and when a dialog was genuinely opened from
-     * a button inside another dialog that has since closed, that button is gone
-     * from the document, so close() falls back down the stack to the nearest
-     * opener that survived.
+     * The opener is whatever actually held focus, always. Ctrl+K and ? are not
+     * suppressed while a dialog is up, so a dialog can open over another that
+     * stays open; capturing the real activeElement means focus returns into
+     * whatever is still on screen. When the opener is gone from the document
+     * by close time, close() falls back down the stack to the nearest opener
+     * that survived.
      */
     var opener = document.activeElement;
     if (!opener || opener === document.body) opener = null;
@@ -277,13 +251,9 @@
   };
 
   /**
-   * Close every open overlay.
-   *
-   * A dialog and an overflow menu both outlive the screen that opened them:
-   * the scrim and the menu are mounted on <body>, not inside main, so a
-   * keyboard shortcut pressed while the shortcuts dialog was open left that
-   * dialog floating over a completely different screen, with body.has-dialog
-   * stuck on and an opener pointing at a control that no longer existed.
+   * Close every open overlay. A dialog and an overflow menu both outlive the
+   * screen that opened them: the scrim and the menu are mounted on <body>,
+   * not inside main, so navigation has to dismiss them explicitly.
    */
   A.dismissOverlays = function () {
     var guard = 0;
@@ -379,8 +349,7 @@
 
   // Anything a screen starts that outlives a single paint (a timer, an
   // interval, a listener on document) is registered here and torn down on the
-  // next navigation. Without it a runbook transcript kept appending to a
-  // detached node and flashed its result over whatever screen you had moved to.
+  // next navigation.
   var leaveHooks = [];
   A.onLeave = function (fn) { if (typeof fn === 'function') leaveHooks.push(fn); };
   function drain(hooks) {
@@ -396,14 +365,9 @@
 
   /**
    * Run fn, capturing anything it registers with onLeave, and hand back a
-   * teardown for just that work.
-   *
-   * Navigation was the only thing that drained the hooks, and switching a tab
-   * does not navigate -- so a tab panel's timers and listeners accumulated for
-   * as long as the operator stayed on the screen. Measured at 50x the dataset:
-   * 60 switches on Security retained 39,412 live DOM nodes and 2,961
-   * listeners, stable across five forced collections and released only when
-   * the route finally changed. Panels can now tear down their own work.
+   * teardown for just that work. Switching a tab does not navigate, so a
+   * panel's timers and listeners are torn down here rather than waiting for
+   * the next route change.
    */
   A.scopeLeaveHooks = function (fn) {
     var outer = leaveHooks;
@@ -418,11 +382,9 @@
 
   /**
    * decodeURIComponent throws URIError on a malformed escape such as "%" or
-   * "%zz". parseHash runs on every hashchange and *before* the try/catch that
-   * guards a screen's render, so an uncaught throw here left the console blank
-   * until a manual reload: pasting a link with a stray percent sign, or a
-   * filter value someone had hand-edited, was enough to brick the router.
-   * Decode defensively and keep the raw text when it cannot be decoded.
+   * "%zz", and parseHash runs on every hashchange, before the try/catch that
+   * guards a screen's render. Decode defensively and keep the raw text when
+   * it cannot be decoded.
    */
   function safeDecode(s) {
     try { return decodeURIComponent(s); } catch (e) { return s; }
@@ -435,9 +397,8 @@
     if (qi !== -1) {
       h.slice(qi + 1).split('&').forEach(function (kv) {
         if (!kv) return;
-        // Split on the first '=' only. Splitting on every '=' truncated any
-        // value that legitimately contains one: a base64 filter such as
-        // "q=YWRtaW4=" arrived as "YWRtaW4" and no longer decoded.
+        // Split on the first '=' only: a value such as a base64 filter
+        // ("q=YWRtaW4=") may legitimately contain one.
         var eq = kv.indexOf('=');
         var k = eq === -1 ? kv : kv.slice(0, eq);
         var v = eq === -1 ? '' : kv.slice(eq + 1);
@@ -445,8 +406,7 @@
       });
       h = h.slice(0, qi);
     }
-    // Path segments are encoded by A.href, so they are decoded here. Without
-    // this a resource whose name contains a space or a slash never resolved.
+    // Path segments are encoded by A.href, so they are decoded here.
     var segs = h.split('/').filter(Boolean).map(safeDecode);
     return { route: segs[0] || 'overview', rest: segs.slice(1), params: params };
   }
@@ -454,8 +414,6 @@
   /** Build a hash link. go('apps', ['mills'], {tab:'logs'}) */
   A.href = function (route, rest, params) {
     // Segments are encoded so that parseHash can decode them symmetrically.
-    // A resource name containing a space, a slash or a percent sign used to
-    // produce a link that never resolved back to the resource it named.
     var h = '#/' + encodeURIComponent(route)
       + (rest && rest.length ? '/' + rest.map(function (s) { return encodeURIComponent(String(s)); }).join('/') : '');
     var q = Object.keys(params || {}).filter(function (k) { return params[k] !== null && params[k] !== undefined && params[k] !== ''; });
@@ -465,15 +423,8 @@
   /**
    * Navigate, and re-render even when the destination is where we already are.
    *
-   * Assigning location.hash only fires hashchange when the value CHANGES, and
-   * render() is wired to hashchange alone. So every "Refresh" and "Try again"
-   * control -- which by definition targets the current route -- silently did
-   * nothing: the click registered, the hash was reassigned, no event fired, no
-   * request was made. Nothing in the UI indicated the button was inert, which
-   * is the worst version of this bug: an operator retrying a failed panel got
-   * the same stale failure back and concluded the system was still broken.
-   *
-   * Assigning first still matters for a real navigation, because that is what
+   * location.hash only fires hashchange when the value changes, so same-route
+   * navigation (Refresh, Try again) re-renders explicitly. Assign first: that
    * writes the history entry the back button needs.
    */
   A.go = function (route, rest, params) {
@@ -492,18 +443,13 @@
   /**
    * Build the screen the hash names.
    *
-   * opts.keepOverlays re-renders in place without dismissing what is open.
-   * A preference change is not a navigation: setTimezone called render(),
-   * render() called dismissOverlays(), and so flipping one radio closed the
-   * preferences dialog the operator was standing in, threw focus to the page
-   * heading and scrolled to the top. Its two siblings in the same dialog,
-   * setTheme and setDensity, each change one attribute and cost nothing.
+   * opts.keepOverlays re-renders in place without dismissing what is open:
+   * a preference change is not a navigation, and the dialog it was made in
+   * stays open.
    */
   function render(opts) {
     opts = opts || {};
     // An in-page anchor such as the skip link sets a hash that is not a route.
-    // Treating it as one used to blank the page and announce "that screen does
-    // not exist" to exactly the keyboard users the skip link exists for.
     if (window.location.hash && !/^#\//.test(window.location.hash)) return;
     if (!opts.keepOverlays) A.dismissOverlays();
     runLeaveHooks();
@@ -518,11 +464,7 @@
 
     clear(mount);
     if (!def) {
-      /* This used to return here, skipping everything below: the breadcrumb
-         still read "Applications / mills" above a page saying the screen does
-         not exist, nothing was announced, focus stayed wherever it was, and on
-         a phone an open navigation drawer stayed open over the message. The
-         not-found state gets the same treatment as any other screen. */
+      /* The not-found state gets the same treatment as any other screen. */
       clear(crumbHost);
       crumbHost.appendChild(el('b', { text: 'Not found' }));
       mount.appendChild(ui.emptyState(
@@ -607,9 +549,7 @@
   }
 
   /** Subsequence match, the behaviour people expect from a palette. */
-  /* `hay` arrives already lowercased. It used to be lowercased here, which
-     allocated a fresh string for every item on every keystroke -- 100,000
-     allocations per keypress against a 50,000-item inventory. */
+  /* `hay` arrives already lowercased. */
   function fuzzy(n, h) {
     if (!n) return 0;
     var direct = h.indexOf(n);
@@ -645,14 +585,6 @@
       var q = input.value.trim();
       /*
        * Score, keep the best forty, and never sort the whole inventory.
-       *
-       * This ran on every keystroke and did, for every item: a string
-       * concatenation, two toLowerCase allocations inside fuzzy, an
-       * intermediate wrapper object, a filter allocation, and then a full
-       * Array.sort over EVERY item -- before slicing to the forty that are
-       * actually shown. Against a production inventory of a few thousand
-       * resources that is the difference between a palette that keeps up with
-       * typing and one that does not.
        *
        * The haystack is precomputed once per open (see paletteItems), and the
        * top forty are kept by insertion into a small ordered list, so the cost
@@ -742,9 +674,8 @@
 
   /**
    * Set the environment. `quiet` paints the pill without announcing a change
-   * or re-rendering: boot used to call this unconditionally, which fired a
-   * toast on every page load telling the operator the environment was the one
-   * they had not changed, and rendered the first screen twice.
+   * or re-rendering; boot passes it so the first load neither announces an
+   * environment the operator did not choose nor renders twice.
    */
   A.setEnv = function (env, quiet) {
     A.state.env = env;
@@ -776,7 +707,7 @@
       A.data.me.elevation = {
         group: group, reason: reason,
         // Wall clock, not the fixed demo clock: tick() counts against the real
-        // time, and mixing the two displayed a two-hour grant as twelve hours.
+        // time.
         expires: new Date(Date.now() + hours * 3600000)
       };
       paintElevation();
@@ -1011,11 +942,10 @@
     var b = document.getElementById('burger');
     if (b) b.setAttribute('aria-expanded', 'false');
     /* Off-canvas is a transform, not display:none, so the nav items stay in
-       the tab order and focus was being left on an invisible button off the
-       left edge of the screen with no visible ring. Hand it back to the
-       control that opened the drawer -- but only when the drawer is being
-       dismissed, not when a navigation closed it, because render() has already
-       moved focus to the new page heading by then. */
+       the tab order. Hand focus back to the control that opened the drawer --
+       but only when the drawer is being dismissed, not when a navigation
+       closed it, because render() has already moved focus to the new page
+       heading by then. */
     if (wasOpen && restoreFocus && b && document.contains(b)) b.focus();
   }
   function openDrawerNav() {
@@ -1039,11 +969,8 @@
   };
 
   /**
-   * Close the session drawer. The shortcuts table has always documented
-   * Escape as closing "a dialog, drawer or palette", but only the navigation
-   * drawer was ever wired to it, so a recorded session could be dismissed only
-   * with the mouse. One helper now serves the close button, the Disconnect
-   * action and the Escape key alike.
+   * Close the session drawer. One helper serves the close button, the
+   * Disconnect action and the Escape key alike.
    */
   A.closeSession = function () {
     var drawer = document.getElementById('drawer');
@@ -1076,13 +1003,7 @@
     if (prefs.density === 'compact') document.body.classList.add('is-compact');
     if (prefs.rail) document.body.classList.add('railed');
 
-    /* The sidebar carries data-go on every button and nothing ever listened
-       for a click on them, so the console's primary navigation did not work
-       with a mouse or a touch screen at all: only the keyboard shortcuts, the
-       command palette and hand-edited URLs moved between screens. The test
-       suite missed it for the same reason it existed -- every test navigated
-       by assigning location.hash rather than by pressing the control a person
-       presses. Delegated from the rail so it survives the rail being rebuilt. */
+    /* Delegated from the rail so it survives the rail being rebuilt. */
     document.querySelector('.side').addEventListener('click', function (e) {
       var btn = e.target.closest && e.target.closest('.nav[data-go]');
       if (!btn) return;
@@ -1101,9 +1022,8 @@
     // the MouseEvent in as restoreFocus, which is truthy, and the argument
     // would work only by accident.
     document.getElementById('scrim').addEventListener('click', function () { closeDrawerNav(true); });
-    /* The label has to be right on boot too, not only after a click. The rail
-       preference persists, so someone who collapsed it last week was told the
-       button collapses a navigation that is already collapsed. */
+    /* The label has to be right on boot too, not only after a click, because
+       the rail preference persists. */
     var railBtn = document.getElementById('railbtn');
     railBtn.setAttribute('aria-label', prefs.rail ? 'Expand navigation' : 'Collapse navigation');
     railBtn.addEventListener('click', function () {

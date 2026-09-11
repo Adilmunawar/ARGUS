@@ -257,7 +257,7 @@ $gen['AZURITE_ACCOUNT_KEY']  = New-Base64Secret 32
 # The break-glass account replaces guacadmin/guacadmin, whose hash is in every
 # copy of the Guacamole schema on the internet. Guacamole stores
 # SHA256(password_bytes + UPPERCASE_HEX(salt)) -- the salt is appended as its
-# uppercase hex TEXT, not as raw bytes, which is the detail everyone gets wrong.
+# uppercase hex TEXT, not as raw bytes.
 $breakglassPassword = New-HexSecret 16
 $saltBytes = New-Object byte[] 32
 $script:Rng.GetBytes($saltBytes)

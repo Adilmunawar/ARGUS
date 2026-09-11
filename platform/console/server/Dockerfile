@@ -10,9 +10,7 @@
 # node_modules is installed at /app, one level ABOVE all three, so Node's
 # directory walk finds it from /app/server/src AND from /app/tools. Installing
 # it into /app/server instead builds an image where the API works and every
-# init container dies on "Cannot find module @aws-sdk/client-s3" -- at 3am, in
-# a depends_on chain, with the failure attributed to the service that was
-# waiting on it.
+# init container dies on "Cannot find module @aws-sdk/client-s3".
 
 ARG NODE_TAG=22-bookworm-slim
 

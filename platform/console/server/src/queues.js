@@ -15,9 +15,9 @@
  * `agent` credential on 4222 can do all three (nats-server.conf says so
  * plainly -- both users hold the same privileges inside the ARGUS account).
  *
- * The cost is stated rather than hidden: message BODIES are not reachable this
- * way. Listing a dead letter and replaying it needs the client port, the
- * password, and a client library, and none of that is here.
+ * Message BODIES are not reachable this way. Listing a dead letter and
+ * replaying it needs the client port, the password, and a client library, and
+ * none of that is here.
  *
  * Four things this file refuses to do, each because the obvious version is
  * actively misleading on a queue dashboard.
@@ -30,20 +30,19 @@
  * that cannot tell you which you are looking at. They are reported side by
  * side, always, and there is no field here that sums them.
  *
- * IT NEVER READS A ZERO OUT OF A DISABLED JETSTREAM. Measured on 2.11.4: a
- * server with JetStream off answers /jsz with HTTP 200 and
+ * IT NEVER READS A ZERO OUT OF A DISABLED JETSTREAM. On 2.11.4, a server with
+ * JetStream off answers /jsz with HTTP 200 and
  * {"disabled":true,"streams":0,"consumers":0,"messages":0}. Rendering that
  * response's counters gives a page that says the estate has no queues and no
- * messages, which is true of a healthy idle server and true of a broker that
- * cannot store anything, and those two want opposite reactions at 3 a.m. The
- * `disabled` flag is checked before any counter in that document is believed.
+ * messages, which is equally true of a healthy idle server and of a broker
+ * that cannot store anything. The `disabled` flag is checked before any
+ * counter in that document is believed.
  *
  * IT NEVER PRINTS THE uint64 SENTINEL AS A SIZE. An account with no JetStream
  * limits reports reserved_memory and reserved_storage as 18446744073709551615
- * -- uint64(-1), meaning "no limit" -- and formatting that as bytes puts "16.0
- * EB" on the screen next to a 512 MB laptop. Measured both ways: with the
- * committed account block those same fields read 33554432 and 1610612736,
- * which are exactly the conf's max_mem and max_file. So the field is the limit
+ * -- uint64(-1), meaning "no limit" -- which formatted as bytes is an
+ * exabyte-scale figure, not a measurement. With the account block set, the
+ * same fields carry the conf's max_mem and max_file. So the field is the limit
  * when it is set and a sentinel when it is not, and the two are separated here.
  *
  * IT NEVER CALLS AN EMPTY STREAM AN UNREADABLE ONE, OR THE REVERSE. A stream
@@ -161,7 +160,7 @@ function getJson(path, options) {
  * "Failed to fetch" tells an operator nothing. The three failures that
  * actually happen here are a NATS that was never started, a URL pointing at
  * the client port, and a URL pointing at nothing -- and each has a different
- * fix, only one of which anybody guesses correctly.
+ * fix.
  */
 function classify(err) {
   const code = (err && err.code) || '';
@@ -170,9 +169,7 @@ function classify(err) {
 
   /* Node reports an HTTP request against a non-HTTP listener as an HPE_ parse
      error. The overwhelmingly likely cause is 4222 in the URL: the client port
-     answers with the NATS protocol's INFO line, which is not HTTP at all.
-     Measured -- a browser calls the same thing "a protocol violation", which
-     names nothing an operator can act on. */
+     answers with the NATS protocol's INFO line, which is not HTTP at all. */
   if (/^HPE_/.test(code) || /Parse Error/i.test(msg)) {
     return {
       reason: 'not-monitoring-port',
@@ -255,8 +252,7 @@ function reader(produce) {
 function limitOf(v) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return { state: 'unknown', value: null };
   /* uint64(-1) survives JSON.parse as 18446744073709551616, past
-     Number.MAX_SAFE_INTEGER. Anything up there is a sentinel, not a size --
-     no ceiling on this estate is measured in exabytes. */
+     Number.MAX_SAFE_INTEGER. Anything up there is a sentinel, not a size. */
   if (v < 0 || v >= Number.MAX_SAFE_INTEGER) return { state: 'unlimited', value: null };
   return { state: 'set', value: v };
 }
@@ -290,10 +286,9 @@ function secondsOf(ns) {
 }
 
 /* Go's `omitempty` elides a zero int, so a counter that is missing from one of
-   these documents is genuinely zero rather than unmeasured -- confirmed by
-   reading the same field present-and-1 on a stream with a subject and absent
-   on one without. This is the ONE place absence may be read as zero, and it is
-   named so that it does not spread to fields where absence means unknown. */
+   these documents is genuinely zero rather than unmeasured. This is the ONE
+   place absence may be read as zero, and it is named so that it does not
+   spread to fields where absence means unknown. */
 function counterOr0(v) {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
@@ -431,8 +426,7 @@ const server = reader(async () => {
   const jsEnabled = !!(js.config && typeof js.config === 'object');
 
   /* connz is fetched separately so that a failure there costs the connection
-     list and nothing else. A server panel that goes blank because one of its
-     four sources blinked is a panel nobody trusts. */
+     list and nothing else. */
   let clients = null;
   let clientsError = null;
   let clientsTotal = null;
@@ -558,22 +552,18 @@ const server = reader(async () => {
 /**
  * What the ARGUS account is using, against what it is allowed to use.
  *
- * This is the limit that matters most and the one least likely to be watched.
  * A STREAM that hits its own max_bytes applies its discard policy and affects
  * only itself. An ACCOUNT that hits max_file refuses publishes to EVERY stream
  * in it -- including ARGUS_DEADLETTER, the one that would have recorded the
- * failure. So the account gauge is the leading indicator for a class of outage
- * whose first symptom is silence.
+ * failure.
  *
- * The limits come from a field that does not look like a limit, and this was
- * measured rather than assumed. In /jsz, account_details[].reserved_memory and
- * reserved_storage carry the ACCOUNT's configured max_mem and max_file: on the
- * committed conf they read 33554432 and 1610612736, exactly the 32MB/1536MB it
- * declares, and they do not move as streams are added. On a server with no
- * account limits the same two fields are uint64(-1). Note that the identically
- * named fields at the TOP level of /jsz mean something else entirely -- the sum
- * of the max_bytes reserved by streams -- so they are not interchangeable and
- * are not read here.
+ * The limits come from a field that does not look like a limit. In /jsz,
+ * account_details[].reserved_memory and reserved_storage carry the ACCOUNT's
+ * configured max_mem and max_file, and they do not move as streams are added.
+ * On a server with no account limits the same two fields are uint64(-1). Note
+ * that the identically named fields at the TOP level of /jsz mean something
+ * else entirely -- the sum of the max_bytes reserved by streams -- so they are
+ * not interchangeable and are not read here.
  */
 const account = reader(async () => {
   const snap = await jszSnapshot();

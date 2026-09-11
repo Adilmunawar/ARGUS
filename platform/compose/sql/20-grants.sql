@@ -42,7 +42,7 @@
 --  readable by argus_app alone, on purpose: a default privilege is a decision
 --  taken now about tables nobody has designed yet.
 --
---  HONEST LIMIT, stated once and not softened: pg_monitor carries
+--  HONEST LIMIT: pg_monitor carries
 --  pg_read_all_stats, and pg_read_all_stats can read QUERY TEXT -- in
 --  pg_stat_activity, and in pg_stat_statements. argus_console and
 --  argus_exporter therefore see the SQL every other role runs, including any
@@ -84,10 +84,9 @@ GRANT pg_monitor TO argus_exporter;
 ALTER ROLE argus_console SET default_transaction_read_only = on;
 ALTER ROLE argus_exporter SET default_transaction_read_only = on;
 
--- A monitoring query that never finishes is not just a slow panel. It holds its
--- snapshot open, and an open snapshot stops vacuum from removing dead rows
--- ACROSS THE WHOLE CLUSTER -- the tool that displays the bloat becomes its
--- cause. 30 s is above ARGUS_UPSTREAM_TIMEOUT_MS (8000), so any query that
+-- A monitoring query that never finishes holds its snapshot open, and an open
+-- snapshot stops vacuum from removing dead rows ACROSS THE WHOLE CLUSTER.
+-- 30 s is above ARGUS_UPSTREAM_TIMEOUT_MS (8000), so any query that
 -- reaches this limit is one the console already gave up waiting for.
 ALTER ROLE argus_console SET statement_timeout = '30s';
 ALTER ROLE argus_console SET idle_in_transaction_session_timeout = '60s';
@@ -159,8 +158,8 @@ GRANT INSERT ON TABLE public.spatial_ref_sys TO argus_app;
 
 -- ── the restart canary ──────────────────────────────────────────────────────
 --
--- This table is created here, in the grants file, for a boring reason worth
--- writing down: pg-init runs exactly three files (see the header of
+-- This table is created here, in the grants file, because pg-init runs
+-- exactly three files (see the header of
 -- 00-roles-and-databases.sql) and a 30-*.sql would never execute until
 -- docker-compose.yml changes. It sits next to the grant that is its entire
 -- purpose.

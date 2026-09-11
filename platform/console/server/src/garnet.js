@@ -8,23 +8,17 @@
  *
  * Four things this file refuses to do. The first two are the reason it exists.
  *
- * IT NEVER REPORTS AN EVICTION COUNT, BECAUSE GARNET DOES NOT EVICT. Redis
- * intuition is wrong here and wrong in the expensive direction. Garnet has no
- * maxmemory and no eviction policy; past the in-memory region of its hybrid
- * log, records are written to disk and stay LIVE -- reading one is a disk read,
- * not a miss. Nothing is thrown away to make room, so there is no count of
- * things thrown away, and any figure printed under that heading would be
- * invented. It would also be invented in the worst direction: an "Evictions: 0"
- * tile tells every operator who has ever run Redis that the cache is
- * comfortable, at exactly the moment the real risks -- the container reaching
- * mem_limit, or the spill directory filling the WSL2 disk -- are climbing. The
- * pressure signal is SPILL, and `memory()` computes it from the log addresses
- * the server actually reports. See the block above spillOf() for the detail,
- * including the one way keys DO disappear here (it is a disk ceiling, not
- * memory pressure, and calling it eviction would attach it to the wrong
- * number). platform/console/prototype/js/data.js still carries a fictional
- * `evictions` field and screens/data.js a comment claiming Garnet evicts under
- * memory pressure: both are false, nothing here feeds them, and they should go.
+ * IT NEVER REPORTS AN EVICTION COUNT, BECAUSE GARNET DOES NOT EVICT. Garnet
+ * has no maxmemory and no eviction policy; past the in-memory region of its
+ * hybrid log, records are written to disk and stay LIVE -- reading one is a
+ * disk read, not a miss. Nothing is thrown away to make room, so there is no
+ * count of things thrown away, and any figure printed under that heading would
+ * be invented. The real risks are the container reaching mem_limit and the
+ * spill directory filling the WSL2 disk. The pressure signal is SPILL, and
+ * `memory()` computes it from the log addresses the server actually reports.
+ * See the block above spillOf() for the detail, including the one way keys DO
+ * disappear here (it is a disk ceiling, not memory pressure, and calling it
+ * eviction would attach it to the wrong number).
  *
  * IT NEVER SHOWS A NUMBER THE SERVER DID NOT GIVE IT. Every figure below is
  * looked up by field name in this server's own INFO output and reported as
@@ -491,10 +485,9 @@ function parseInfo(text) {
 /**
  * Look one number up by name, and say so when it is not there.
  *
- * The whole honesty contract of this module lives in this function. Nothing
- * calls Number(x) || 0 anywhere below: a field this build did not emit comes
- * back as null carrying the names that were tried, and every caller passes
- * that straight through to the UI.
+ * Nothing calls Number(x) || 0 anywhere below: a field this build did not emit
+ * comes back as null carrying the names that were tried, and every caller
+ * passes that straight through to the UI.
  */
 function metric(info, candidates, note) {
   if (!info) {
@@ -549,14 +542,12 @@ function noperm(commandLabel, aclToken, error) {
     'users.acl will not fix it -- check `docker compose logs garnet` and whether this build still has that command.';
 }
 
-/* THE FIELD THAT IS NOT A FIELD.
- *
- * Every reader a cache screen might hang an "Evictions" tile off returns this
+/* Every reader a cache screen might hang an "Evictions" tile off returns this
  * object where the number would have been. It is deliberately not simply
  * omitted: an absent key is defaulted to 0 by whoever writes the screen, and
- * "0 evictions" is a claim -- the wrong one, and reassuring in the direction
- * that costs money. Returning the refusal, with the reason, makes the tile
- * impossible to draw by accident and tells the person who tried why. */
+ * "0 evictions" is the wrong claim. Returning the refusal, with the reason,
+ * makes the tile impossible to draw by accident and tells the person who
+ * tried why. */
 const EVICTIONS_ARE_NOT_A_THING = {
   available: false,
   reason: 'no-such-metric',
@@ -610,9 +601,8 @@ async function probe() {
     const whoami = await conn.call(['ACL', 'WHOAMI'], 'ACL WHOAMI');
 
     /* Clocks. RESP carries no signature so skew does not break the cache the
-       way it breaks S3, but a TTL argued about across two services with
-       different ideas of "now" is a long afternoon. WSL2 drifts after the host
-       sleeps. */
+       way it breaks S3, but it is what makes two services disagree about when
+       a TTL expires. WSL2 drifts after the host sleeps. */
     const time = await conn.call(['TIME'], 'TIME');
     const localAt = Date.now();
 
@@ -620,8 +610,7 @@ async function probe() {
        comes back as an EMPTY array: maxmemory is not unset, it does not exist.
        Asking costs one round trip and turns "the docs say Garnet has no
        maxmemory" into "this server, just now, reported none" -- and it means a
-       future Garnet that grows the parameter will be reported honestly instead
-       of being described by a comment written in 2026. */
+       future Garnet that grows the parameter will be reported honestly. */
     const maxmemory = await conn.call(['CONFIG', 'GET', 'maxmemory'], 'CONFIG GET maxmemory');
     const maxclients = await conn.call(['CONFIG', 'GET', 'maxclients'], 'CONFIG GET maxclients');
 

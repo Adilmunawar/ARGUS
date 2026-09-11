@@ -6,15 +6,13 @@
  *
  * It aggregates the health summaries the console API exposes: the object store
  * today, and PostgreSQL, the queues and the vault as each reader is wired in.
- * Four rules govern everything below, and each exists because the obvious
- * version of this screen is actively misleading during an incident.
+ * Four rules govern everything below.
  *
  * NOT DEPLOYED IS NOT A FAILURE. A service whose reader is not mounted answers
  * 404, and an aggregating dashboard that paints 404 red teaches an operator to
  * ignore red. This stack is built in increments; at any moment some of it does
- * not exist yet, and a screen that cannot say so calmly is a screen that lies
- * about the increments that do exist. Every not-deployed panel carries the
- * command that would change the answer.
+ * not exist yet. Every not-deployed panel carries the command that would
+ * change the answer.
  *
  * CONTAINER HEALTH IS SECONDARY AND IS LABELLED. Every service here has a
  * liveness probe that answers "the process is listening", and for every one of
@@ -35,10 +33,8 @@
  * TWO WARNINGS ARE PERMANENT, NOT FOOTNOTES. If one key on this machine opens
  * every secret in the estate, that is the first thing on the page and it is
  * red. If the console is read-only, that is stated at the top too, because
- * every disabled control on every screen is explained by it and an operator
- * hunting for a permission problem should not have to find that out by
- * clicking. Neither banner may vanish when a read fails: an absent warning
- * reads as a safe one.
+ * every disabled control on every screen is explained by it. Neither banner
+ * may vanish when a read fails: an absent warning reads as a safe one.
  */
 (function () {
   'use strict';
@@ -57,8 +53,7 @@
    * "up/down" cannot express the three answers this screen is most often
    * required to give: the service is reachable and cannot do its job, the
    * service was never deployed, and nothing was measured. Each of those leads
-   * to a different action, and collapsing them into a red dot destroys the
-   * only information the operator came for. */
+   * to a different action. */
   var STATE = {
     working:      { tone: 'ok',   label: 'working' },
     degraded:     { tone: 'warn', label: 'degraded' },
@@ -78,8 +73,7 @@
    *
    * Green is reserved on this screen for something that was proved to work.
    * A liveness probe proves a process answered, which is a different and much
-   * weaker claim -- and rendering the two in the same colour is exactly how an
-   * operator ends up reporting a healthy stack while nothing can write to it. */
+   * weaker claim. */
   function containerPill(up, why) {
     if (up === null || up === undefined) return ui.pill('container: not probed', 'idle', { title: why || '' });
     return ui.pill('container: ' + (up ? 'answers' : 'silent'), up ? 'idle' : 'warn', { title: why || '' });
@@ -359,9 +353,8 @@
       },
       components: comps.map(function (c) {
         /* Tri-state, and null is NOT green. The replication check reports null
-           on a single-node cluster on purpose: there is no replica, and a
-           green tick beside a lag that was never measured is the worst
-           possible rendering of that. */
+           on a single-node cluster on purpose: there is no replica, so no lag
+           was measured. */
         var tone = c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'idle';
         var label = c.ok === true ? 'ok' : c.ok === false ? 'failing' : 'not a verdict';
         return {
@@ -651,10 +644,10 @@
     }
 
     /* The reader decides whether this warrants a permanent banner, and the one
-       case where it says no is a MEASURED multi-share seal -- the good news. It
-       is still stated, as one line rather than as a box: a screen that shows
-       nothing at all there gives an operator no way to tell "measured, and it
-       is a ceremony seal" apart from "this screen forgot to check". */
+       case where it says no is a MEASURED multi-share seal. It is still
+       stated, as one line rather than as a box: a screen that shows nothing at
+       all there gives an operator no way to tell "measured, and it is a
+       ceremony seal" apart from "this screen forgot to check". */
     if (sandbox.banner === false) {
       return el('p.hint', {
         text: 'Unseal posture: ' + String(sandbox.title || 'measured').replace(/\.$/, '') +
@@ -664,8 +657,8 @@
     }
 
     /* Tone follows the reader's severity. `critical` is the measured 1-of-1
-       seal and it is the only red thing on this screen that is not an outage,
-       because it is worse than one: an outage ends. */
+       seal and it is the only red thing on this screen that is not an
+       outage. */
     var tone = sandbox.severity === 'critical' ? 'bad'
       : sandbox.severity === 'warning' ? 'warn'
         : sandbox.severity === 'info' ? 'info' : 'ok';
@@ -832,9 +825,7 @@
 
     (r.notes || []).forEach(function (n) { body.appendChild(el('p.hint', { text: n })); });
 
-    /* Every figure on this screen carries the age of the read it came from.
-       A number without an age is a number an operator trusts for longer than
-       they should. */
+    /* Every figure on this screen carries the age of the read it came from. */
     body.appendChild(el('p.hint', {
       text: 'Measured at ' + stamp(d.at) + (d.cachedAt && d.cachedAt !== d.at ? ', cached at ' + stamp(d.cachedAt) : '') +
         '. Source: ' + svc.path + '.'

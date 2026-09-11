@@ -14,9 +14,9 @@
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
   /* app.js is parsed before the screens and defers its own boot, so A.screen
-     exists by now. The queue below stays as a guard against that regressing
-   * yet when this file is evaluated. Queue the registration and flush it the
-   * moment app.js installs the real registry. */
+     exists by now. The queue below stays as a guard against the load order
+     regressing: the registration is queued and flushed the moment app.js
+     installs the real registry. */
   function registerScreen(id, def) {
     if (typeof A.screen === 'function') { A.screen(id, def); return; }
     var q = (A._screenQueue = A._screenQueue || []);
@@ -51,13 +51,8 @@
   }
 
   /**
-   * The virtual machines actually placed on a host, from the inventory.
-   *
-   * host.vms is a stored count that disagreed with the inventory on every
-   * host -- hv-01 claimed 7 against 4 placed, and the estate claimed 30
-   * against 14 -- so the tile contradicted the table directly beneath it and,
-   * worse, the drain and quarantine dialogs quoted the stored number as the
-   * blast radius an operator sizes the change against. One source of truth.
+   * The virtual machines actually placed on a host, from the inventory --
+   * one source of truth, rather than the stored host.vms count.
    */
   function vmsOn(hostName) {
     return d.vms.filter(function (v) { return v.host === hostName; });
@@ -115,16 +110,14 @@
       { key: 'role', label: 'Role' },
       { key: 'cpu', label: 'CPU', render: function (r) { return utilisation(r.name + ' CPU', r.cpu); } },
       { key: 'mem', label: 'Memory', render: function (r) { return utilisation(r.name + ' memory', r.mem); } },
-      // Derived, not the stored host.vms count, which disagreed with the
-      // inventory on every host. See vmsOn above.
+      // Derived, not the stored host.vms count. See vmsOn above.
       { key: 'vms', label: 'VMs', align: 'right',
         sort: function (r) { return vmsOn(r.name).length; },
         render: function (r) { return fmt.num(vmsOn(r.name).length); } },
       {
         key: 'patchAgeDays', label: 'Patch age', align: 'right',
         render: function (r) {
-          // Over 30 days is outside the patch window, so it stops being a
-          // number in a column and becomes something to act on.
+          // Over 30 days is outside the patch window.
           return r.patchAgeDays > 30
             ? ui.pill(fmt.num(r.patchAgeDays) + ' d', 'warn')
             : el('span', { text: fmt.num(r.patchAgeDays) + ' d' });
@@ -415,7 +408,7 @@
       ]);
     }));
 
-    // The sparklines are the shape; the table is the data. Both, always.
+    // The sparklines are the shape; the table is the data.
     var cols = [
       { key: 'label', label: 'Metric' },
       { key: 'latest', label: 'Now', align: 'right', render: function (r) { return fmt.num(r.latest, 1) + r.unit; } },

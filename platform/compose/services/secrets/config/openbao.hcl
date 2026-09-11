@@ -10,8 +10,7 @@
 # Nothing here can be pre-seeded, defaulted or committed, which is the one
 # property that makes a secrets store worth having in a git repository at all.
 #
-# ── THIS FILE IS THE SAME IN BOTH UNSEAL MODES. THAT IS DELIBERATE, AND IT IS
-#    ALSO THE ONE THING A READER OF THIS FILE MUST NOT FORGET ───────────────
+# ── THIS FILE IS THE SAME IN BOTH UNSEAL MODES. THAT IS DELIBERATE ─────────
 #
 # ARGUS_UNSEAL_MODE (sandbox | ceremony) decides how the vault is INITIALISED
 # and how it is unsealed. Both of those are runtime acts performed by
@@ -185,7 +184,7 @@ log_format = "standard"
 # ───────────────────────────────────────────────────────────────────── audit
 # ADR-0013 requires an audit device, and on OpenBao 2.6 THIS FILE IS THE ONLY
 # PLACE IT CAN BE CREATED. `bao audit enable file ...` -- the line every Vault
-# tutorial and every previous generation of this script used -- is refused:
+# tutorial shows -- is refused:
 #
 #   Code: 400. * cannot enable audit device via API; use declarative,
 #   config-based audit device management instead

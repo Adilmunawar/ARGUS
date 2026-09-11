@@ -5,20 +5,18 @@
  * role that holds pg_monitor and not one table privilege, over a connection
  * this file opens DIRECTLY to 5432 rather than through a pooler -- because
  * pg_stat_activity behind PgBouncer describes the pooler's sessions and not the
- * application's, and the activity screen is precisely where that difference
- * turns a diagnosis into a wrong diagnosis.
+ * application's.
  *
  * Four things this file refuses to do, each because the obvious version is
  * actively misleading on a database dashboard.
  *
  * IT NEVER RENDERS REPLICATION AS A LAG OF ZERO. There is one node here. A
- * standby lag of 0 bytes is exactly what a healthy replica looks like, so
- * printing it for a cluster that has no replica is not a harmless default --
- * it is a green tile that says the thing you most want to be true. When there
- * is no standby, no slot and no WAL receiver, this reports `configured: false`
- * and every lag field is null. The settings that would ALLOW replication
- * (wal_level, max_wal_senders) are reported separately as `capable`, because
- * "could replicate" and "is replicating" are different facts.
+ * standby lag of 0 bytes is exactly what a healthy replica looks like. When
+ * there is no standby, no slot and no WAL receiver, this reports
+ * `configured: false` and every lag field is null. The settings that would
+ * ALLOW replication (wal_level, max_wal_senders) are reported separately as
+ * `capable`, because "could replicate" and "is replicating" are different
+ * facts.
  *
  * IT NEVER RETURNS AN EMPTY SLOW-QUERY LIST IT DID NOT EARN. pg_stat_statements
  * has three distinct unavailable states -- library not preloaded, library
@@ -206,10 +204,10 @@ function poolFor(database) {
        role's own statement_timeout is 30 s, far longer than this console is
        willing to wait, so without this a query the dashboard has already given
        up on keeps running -- holding a snapshot open, which stops vacuum from
-       removing dead rows ACROSS THE WHOLE CLUSTER. The tool that displays the
-       bloat becomes its cause. query_timeout is set slightly higher so the
-       server's own cancellation wins the race and the error that surfaces is
-       57014 with a statement attached, rather than an anonymous client abort. */
+       removing dead rows ACROSS THE WHOLE CLUSTER. query_timeout is set
+       slightly higher so the server's own cancellation wins the race and the
+       error that surfaces is 57014 with a statement attached, rather than an
+       anonymous client abort. */
     statement_timeout: TIMEOUT_MS,
     query_timeout: TIMEOUT_MS + 1000,
     idle_in_transaction_session_timeout: 10000,
@@ -409,8 +407,8 @@ function guarded(key, ttlMs, producer) {
 
 /* node-postgres returns int8 and numeric as STRINGS, because a 64-bit integer
    does not survive a double. Number(null) is 0, and a zero that means "no value
-   came back" is exactly the defect this console refuses to ship -- so nothing
-   is coerced without first being checked for absence. */
+   came back" is misleading -- so nothing is coerced without first being
+   checked for absence. */
 function num(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -499,7 +497,7 @@ const SERVER_SQL = `
 /**
  * Who this cluster is, and what this console is allowed to see of it.
  *
- * `canReadAllStats` is not decoration. Without pg_read_all_stats,
+ * Without pg_read_all_stats,
  * pg_stat_activity shows a role only its OWN sessions and blanks every other
  * session's query text -- so a connection count read by an unprivileged role is
  * "1" on a cluster with a hundred backends. Every reader that counts sessions
@@ -698,8 +696,6 @@ const databases = guarded('pg:databases', 10000, async () => {
       ioTimingMeasured: ioTimed,
       statsResetAt: iso(r.stats_reset),
 
-      /* Transaction id age. The number nobody looks at until it is the only
-         number that matters. */
       transactionIdAge: num(r.xid_age),
 
       /* Whether the CONSOLE may actually open this database -- which decides
@@ -748,9 +744,7 @@ const ROLES_SQL = `
          r.rolvaliduntil AS valid_until, r.rolconfig AS settings,
          -- Constant on every row, and cheap. Without pg_read_all_stats the
          -- session count below is a count of THIS role's own connections, so
-         -- every other role reports zero sessions whether or not it has any --
-         -- and a zero that means "you may not look" is the one number this
-         -- console must never print unlabelled.
+         -- every other role reports zero sessions whether or not it has any.
          pg_has_role(current_user, 'pg_read_all_stats', 'USAGE') AS can_read_all_stats
   FROM pg_roles r
   ORDER BY r.rolname
@@ -861,10 +855,9 @@ const roles = guarded('pg:roles', 30000, async () => {
 
 /* clock_timestamp(), NOT now(). now() is the start of the CURRENT transaction,
    so a session whose query began microseconds after this one's transaction did
-   comes out with a NEGATIVE duration -- which is how the first version of this
-   reader reported "-0.003 s" for a perfectly ordinary query. clock_timestamp()
-   is the wall clock at the moment the row is evaluated, which is what "how long
-   has this been running" actually means. */
+   comes out with a NEGATIVE duration. clock_timestamp() is the wall clock at
+   the moment the row is evaluated, which is what "how long has this been
+   running" actually means. */
 const ACTIVITY_SQL = `
   SELECT a.pid,
          a.datname, a.usename, nullif(a.application_name, '') AS application_name,
@@ -901,9 +894,8 @@ const ACTIVITY_SUMMARY_SQL = `
          -- The console's own reading session is excluded from these two, and
          -- only from these two. It is always active and always has an open
          -- transaction, so leaving it in makes "the longest running query on
-         -- this cluster" a measurement of the monitoring query itself -- which
-         -- is never the answer anybody wants and is never long. The COUNTS above
-         -- keep it, because it genuinely is a connection.
+         -- this cluster" a measurement of the monitoring query itself. The
+         -- COUNTS above keep it, because it genuinely is a connection.
          max(extract(epoch from (clock_timestamp() - query_start)))
            FILTER (WHERE state = 'active' AND pid <> pg_backend_pid())::float8  AS longest_active_seconds,
          max(extract(epoch from (clock_timestamp() - xact_start)))
@@ -920,11 +912,9 @@ const ACTIVITY_LIMIT_DEFAULT = 100;
 /**
  * What the cluster is doing right now.
  *
- * Cached for two seconds and no longer. A dashboard that labels a panel "live"
- * and serves it from a thirty-second cache is lying in the only place where the
- * age of the number changes what an operator does next; two seconds is enough
- * to collapse a burst of panel loads into one query and short enough that the
- * word "live" stays true. `cachedAt` is returned regardless.
+ * Cached for two seconds and no longer: enough to collapse a burst of panel
+ * loads into one query, and short enough that the word "live" stays true.
+ * `cachedAt` is returned regardless.
  */
 const activity = guarded('pg:activity', 2000, async (options) => {
   const opts = options || {};
@@ -1125,7 +1115,7 @@ const statements = guarded('pg:statements', 15000, async (options) => {
 
   /* State one: the library was never loaded. This is the one that cannot be
      fixed without a restart, so the message says so -- CREATE EXTENSION here
-     succeeds and still produces nothing, which is how an afternoon disappears. */
+     succeeds and still produces nothing. */
   if (!preloaded) {
     return {
       available: false,
@@ -1332,9 +1322,8 @@ const RECEIVER_SQL = `
  * THE RULE THIS READER EXISTS FOR: with no standby, every lag field is null and
  * `configured` is false. Not zero. A lag of zero bytes is what a healthy
  * replica looks like, so a zero here would be a green number describing a
- * replica that does not exist -- and the whole point of the screen is to make
- * the absence visible. platform/gitops/storage/buckets.yaml carries the same
- * distinction for object replication, for the same reason.
+ * replica that does not exist. platform/gitops/storage/buckets.yaml carries
+ * the same distinction for object replication, for the same reason.
  *
  * `capable` is reported separately and is a different claim: wal_level=replica
  * and max_wal_senders>0 mean this server COULD serve a standby, which is worth
@@ -1595,7 +1584,7 @@ const tables = guarded('pg:tables', 20000, async (options) => {
     /* EVERY row count here is an estimate maintained by the statistics
        collector, and none of them is a COUNT(*). planner_rows is null when the
        relation has never been analysed, which is a different statement from
-       "it has no rows" and is the reason this file exists. */
+       "it has no rows". */
     rowsEstimated: true,
     plannerRows: num(r.planner_rows),
     liveRowsEstimate: num(r.n_live_tup),
@@ -1734,7 +1723,7 @@ const health = guarded('pg:health', 10000, async () => {
     ok: longestXact === null ? true : longestXact < LONG_XACT_SECONDS,
     /* The warning about vacuum is attached only when the number has earned it.
        Printing it beside a two-second transaction trains an operator to ignore
-       it, which is the only way it can fail to work when it matters. */
+       it. */
     detail: longestXact === null
       ? 'No transaction other than this console\'s own read is open.'
       : longestXact < LONG_XACT_SECONDS
@@ -1758,11 +1747,7 @@ const health = guarded('pg:health', 10000, async () => {
     detail: xidAge === null
       ? 'Transaction id age could not be read.'
       : `The oldest unfrozen transaction id, in ${h.oldest_xid_database}, is ${xidAge} transactions old. ` +
-        /* AGE, not overshoot. The earlier wording said "past its freeze horizon",
-           which inverts the meaning: this counts UP TOWARD the threshold, and
-           on this cluster it reads 224 against a limit of 200,000,000. An
-           operator seeing "past its freeze horizon" would reasonably think
-           wraparound was imminent and start an emergency vacuum. */
+        /* AGE, not overshoot: this counts UP TOWARD the threshold. */
         `against an autovacuum_freeze_max_age of ${freezeMax}.`,
     maxAge: xidAge,
     autovacuumFreezeMaxAge: freezeMax,

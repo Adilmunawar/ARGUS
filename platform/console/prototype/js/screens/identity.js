@@ -209,11 +209,9 @@
     }
 
     function tick() {
-      // The detach check belongs to the interval, not to the first paint. The
-      // first paint used to run this same guard while the node was still
-      // unmounted -- it is returned to the caller and appended afterwards --
-      // so it always bailed out and the cell sat empty for a whole second
-      // before the first interval filled it in.
+      // The detach check belongs to the interval, not to the first paint: the
+      // node is returned to the caller and appended afterwards, so it is not
+      // in the document yet when the first paint runs.
       if (!document.body.contains(node)) { window.clearInterval(timer); return; }
       paint();
     }
@@ -312,7 +310,7 @@
         // aria-disabled via setDisabled, never the native property: a natively
         // disabled button leaves the focus trap's FOCUSABLE list and takes its
         // title -- the only statement of why it is unavailable -- out of reach
-        // of assistive technology. That is defect B7, reintroduced here alone.
+        // of assistive technology (defect B7).
         submit.setDisabled(true);
 
         submit.addEventListener('click', function () {
@@ -492,9 +490,9 @@
           s.rotatedDays + ' days old.'
       });
     }
-    // Proportional, not a fixed ten days. `rotatedDays > policyDays - 10` is
-    // `0 > -9` for a one-day policy, so the two dynamic credentials that
-    // rotate correctly every single day were the only rows flagged amber.
+    // Proportional, not a fixed ten days: `rotatedDays > policyDays - 10` is
+    // `0 > -9` for a one-day policy, so a fixed window would flag a credential
+    // that rotates correctly every day.
     var soon = Math.max(1, Math.round(s.policyDays * 0.1));
     if (s.rotatedDays > s.policyDays - soon) {
       return ui.pill(fmt.num(s.rotatedDays) + ' d', 'warn', {
@@ -585,8 +583,8 @@
         ]));
 
       /* Overview and the Config tab both build links that name a row --
-         "?id=g-442", "?path=kv/mills/jwt-signing-key" -- and until now the
-         right tab opened and the row was left for the operator to find. */
+         "?id=g-442", "?path=kv/mills/jwt-signing-key" -- so the named row is
+         revealed and highlighted when its tab opens. */
       var wanted = (ctx && ctx.params) || {};
       mount.appendChild(ui.tabs([
         { id: 'people', label: 'People', render: peopleTab },
