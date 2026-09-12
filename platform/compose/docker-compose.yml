@@ -1527,7 +1527,7 @@ services:
     # Writes to .tmp and mv's: latest.json is rewritten while the console reads
     # it, and rename() is atomic within a volume.
     command:
-      - 'while true; do psql -v ON_ERROR_STOP=1 -qtAX -f /opt/argus/pg/canary.sql > /var/lib/argus/parity/pg/latest.json.tmp 2>/var/lib/argus/parity/pg/last-error.txt && mv -f /var/lib/argus/parity/pg/latest.json.tmp /var/lib/argus/parity/pg/latest.json; sleep "$$ARGUS_PARITY_INTERVAL_S"; done'
+      - 'mkdir -p /var/lib/argus/parity/pg; while true; do psql -v ON_ERROR_STOP=1 -qtAX -f /opt/argus/pg/canary.sql > /var/lib/argus/parity/pg/latest.json.tmp 2>/var/lib/argus/parity/pg/last-error.txt && mv -f /var/lib/argus/parity/pg/latest.json.tmp /var/lib/argus/parity/pg/latest.json; sleep "$$ARGUS_PARITY_INTERVAL_S"; done'
     mem_limit: 128m
     depends_on:
       postgres: { condition: service_healthy }
