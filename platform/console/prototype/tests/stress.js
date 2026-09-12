@@ -508,7 +508,10 @@ async function suiteSustain(browser) {
     const hasSort = await page.evaluate(() => !!document.querySelector('.th-sort'));
     if (!hasSort) { skip('SUSTAIN', `${view} exposes a sortable column`, 'no sortable header'); continue; }
 
+    await page.evaluate(() => { document.querySelector('.th-sort').click(); });
+    await page.waitForTimeout(150);
     await collectGarbage(cdp);
+    await page.waitForTimeout(40);
     const start = await metrics(cdp);
 
     const times = await page.evaluate((reps) => {
@@ -556,7 +559,12 @@ async function suiteSustain(browser) {
      * End on the tab we started on, so the "after" reading is taken with the
      * same panel on screen as the "before" and only retention is measured.
      */
-    await page.evaluate(() => { document.querySelectorAll('.tab')[0].click(); });
+    await page.evaluate(() => {
+      const t = document.querySelectorAll('.tab');
+      t[1].click();
+      t[0].click();
+    });
+    await page.waitForTimeout(120);
     await collectGarbage(cdp);
     await page.waitForTimeout(60);
     const start = await metrics(cdp);
@@ -602,6 +610,7 @@ async function suiteFlash(browser) {
   if (!wired) { rec('FLASH', 'the console exposes a flash bar', false, 'ARGUS.flash missing'); await ctx.close(); return null; }
 
   await collectGarbage(cdp);
+  await page.waitForTimeout(60);
   const start = await metrics(cdp);
 
   const growth = await page.evaluate((reps) => {
@@ -671,6 +680,7 @@ async function suiteSoak(browser) {
     await page.evaluate(NAVIGATE, view);
     await page.waitForTimeout(300);
     await collectGarbage(cdp);
+    await page.waitForTimeout(60);
     const start = await metrics(cdp);
 
     const samples = [];
