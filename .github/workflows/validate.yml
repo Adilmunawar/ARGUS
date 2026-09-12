@@ -72,7 +72,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
@@ -101,7 +101,7 @@ jobs:
 
       - name: Keep the last stress report
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: console-stress-report
           path: platform/console/prototype/tests/stress-last-run.json
@@ -110,7 +110,7 @@ jobs:
 
       - name: Keep the screenshots from both suites
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: console-screenshots
           path: |
