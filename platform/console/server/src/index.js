@@ -24,12 +24,14 @@ const originGate = require('./auth/origin');
 const proxyAuth = require('./auth/proxy');
 const { audit } = require('./auth/audit');
 
-const { EventStream, RingBuffer, startEventStream, replayPlan } = require('./sse');
+const { EventStream, RingBuffer, startEventStream, replayPlan, openStreamCount } = require('./sse');
+const telemetry = require('./telemetry');
 const logs = require('./logs');
 const metrics = require('./metrics');
 const alerts = require('./alerts');
 const containers = require('./containers');
 const heartbeats = require('./heartbeats');
+const search = require('./search');
 
 env.reportRejections();
 
@@ -282,7 +284,7 @@ const routes = {
       label: 'logs',
       onOpen: (sink, req) => {
         const ring = logRingFor(selector);
-        const plan = replayPlan(ring, req.headers['last-event-id']);
+        const plan = replayPlan(ring, req.headers['last-event-id'] || q.lastEventId);
         if (plan.resumed) {
           if (plan.missed > 0) {
             sink.note('gap', {
@@ -410,6 +412,21 @@ const routes = {
     }
   }),
 
+  'GET /api/search/index': async () => search.index(),
+
+  'GET /metrics': async () => new RawResponse({
+    status: 200,
+    headers: {
+      'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+      'cache-control': 'no-store'
+    },
+    body: telemetry.render({
+      version: require('../package.json').version,
+      uptimeSeconds: Math.round(process.uptime()),
+      openStreams: openStreamCount()
+    })
+  }),
+
   'GET /api/overview': async () => {
     const [identity, instances, buckets, databases, alarms, h] = await Promise.all([
       aws.identity(), aws.instances(), aws.buckets(), aws.databases(), aws.alarms(), host.snapshot()
@@ -465,6 +482,13 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
+function routeLabel(method, pathname) {
+  if (routes[method + ' ' + pathname]) return pathname;
+  if (pathname === authRoutes.LOGIN_PATH || pathname === authRoutes.LOGOUT_PATH
+      || pathname === authRoutes.SESSION_PATH) return pathname;
+  return pathname.startsWith('/api/') ? 'unmatched' : 'static';
+}
+
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const requestId = crypto.randomUUID();
@@ -481,6 +505,11 @@ const server = http.createServer(async (req, res) => {
   const pathname = safeDecode(parsed.pathname);
   const sourceAddress = proxyAuth.sourceAddress(req);
   const context = { requestId, pathname, sourceAddress };
+
+  res.on('finish', () => {
+    const streamed = String(res.getHeader('content-type') || '').startsWith('text/event-stream');
+    telemetry.observe(routeLabel(req.method, pathname), res.statusCode, Date.now() - started, !streamed);
+  });
 
   const stateChanging = authRoutes.WRITE_PATHS.has(pathname) || config.allowWrites;
   const verdict = originGate.decide(req, pathname, { stateChanging });

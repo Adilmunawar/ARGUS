@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ServiceFabricApp",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "unevaluatedProperties": false,
+  "$defs": {
+    "openbaoReference": {
+      "type": "string",
+      "pattern": "^\\{\\{ *openbao:[A-Za-z0-9][A-Za-z0-9/_.-]*#[A-Za-z0-9][A-Za-z0-9_.-]* *\\}\\}$"
+    },
+    "literalCredentialFreeValue": {
+      "type": "string",
+      "allOf": [
+        { "not": { "pattern": "([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Tt][Oo][Kk][Ee][Nn]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Cc][Cc][Oo][Uu][Nn][Tt][Kk][Ee][Yy]|[Ss][Hh][Aa][Rr][Ee][Dd][Aa][Cc][Cc][Ee][Ss][Ss][Kk][Ee][Yy]|[Aa][Pp][Ii][-_]?[Kk][Ee][Yy]|[Aa][Cc][Cc][Ee][Ss][Ss][-_]?[Kk][Ee][Yy]|[Ss][Ee][Cc][Rr][Ee][Tt][-_]?[Kk][Ee][Yy]|[Pp][Rr][Ii][Vv][Aa][Tt][Ee][-_]?[Kk][Ee][Yy]|[Ss][Ii][Gg][Nn][Ii][Nn][Gg][-_]?[Kk][Ee][Yy])[ ]*=[ ]*(?!\\{\\{ *openbao:)[^;\\s]" } },
+        { "not": { "pattern": "://[^/\\s:@]+:[^/\\s:@]+@" } },
+        { "not": { "pattern": "\\b(A3T[A-Z0-9]|AKIA|ASIA|ABIA|ACCA)[A-Z0-9]{16}\\b" } },
+        { "not": { "pattern": "\\bgh[pousr]_[A-Za-z0-9]{36}\\b" } },
+        { "not": { "pattern": "\\bgithub_pat_[A-Za-z0-9_]{82}\\b" } },
+        { "not": { "pattern": "\\bsk-ant-[A-Za-z0-9_-]{24,}\\b" } },
+        { "not": { "pattern": "\\bxox[abprs]-[A-Za-z0-9-]{10,}\\b" } },
+        { "not": { "pattern": "\\bey[A-Za-z0-9_-]{17,}\\.ey[A-Za-z0-9_-]{17,}\\.[A-Za-z0-9_-]{10,}" } },
+        { "not": { "pattern": "-----BEGIN[ A-Z0-9_-]{0,100}PRIVATE KEY( BLOCK)?-----" } },
+        { "not": { "pattern": "\\bAIza[0-9A-Za-z_-]{35}\\b" } }
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "patternProperties": {
+        "[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Pp][Ww][Dd]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Aa][Uu][Tt][Hh]|[Ss][Aa][Ss]|[Cc][Ee][Rr][Tt]|[Pp][Ee][Mm]|[Pp][Ff][Xx]|[Ss][Ii][Gg][Nn][Aa][Tt][Uu][Rr][Ee]": {
+          "$ref": "#/$defs/openbaoReference"
+        }
+      },
+      "unevaluatedProperties": { "$ref": "#/$defs/literalCredentialFreeValue" }
+    },
+    "serviceName": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*$" },
+    "fqdn": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*[a-z0-9]$" }
+  },
+  "properties": {
+    "apiVersion": { "const": "argus/v1" },
+    "kind": { "const": "ServiceFabricApp" },
+    "metadata": {
+      "type": "object",
+      "required": ["name", "owner", "tier"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "display": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "owner": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 _.-]*$" },
+        "repo": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "tier": { "type": "integer", "minimum": 0, "maximum": 2 }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["package", "identity", "services", "health"],
+      "unevaluatedProperties": false,
+      "properties": {
+        "package": {
+          "type": "object",
+          "required": ["bucket", "key", "signature"],
+          "unevaluatedProperties": false,
+          "properties": {
+            "bucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,62}$" },
+            "key": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9/_.-]*/\\{\\{ version \\}\\}\\.sfpkg$" },
+            "signature": { "enum": ["authenticode"] }
+          }
+        },
+        "identity": { "type": "string", "pattern": "^gmsa-[a-z0-9-]+\\$$" },
+        "services": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "exe", "instances", "endpoints"],
+            "unevaluatedProperties": false,
+            "properties": {
+              "name": { "$ref": "#/$defs/serviceName" },
+              "type": { "enum": ["GuestExecutable", "Stateless", "Stateful"] },
+              "exe": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*\\.(exe|js)$" },
+              "args": { "$ref": "#/$defs/literalCredentialFreeValue" },
+              "instances": { "type": "integer", "minimum": 1, "maximum": 64 },
+              "endpoints": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["name", "port"],
+                  "unevaluatedProperties": false,
+                  "properties": {
+                    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+                    "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+                  }
+                }
+              },
+              "env": { "$ref": "#/$defs/environment" },
+              "resources": {
+                "type": "object",
+                "required": ["cpuCores", "memoryMiB"],
+                "unevaluatedProperties": false,
+                "properties": {
+                  "cpuCores": { "type": "integer", "minimum": 1, "maximum": 64 },
+                  "memoryMiB": { "type": "integer", "minimum": 128, "maximum": 262144 }
+                }
+              }
+            }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "required": ["host", "upstream"],
+          "unevaluatedProperties": false,
+          "properties": {
+            "host": { "$ref": "#/$defs/fqdn" },
+            "upstream": { "$ref": "#/$defs/serviceName" },
+            "waf": { "enum": ["owasp-crs", "none"] },
+            "rateLimit": {
+              "type": "object",
+              "required": ["perIpPerMinute"],
+              "unevaluatedProperties": false,
+              "properties": {
+                "perIpPerMinute": { "type": "integer", "minimum": 1, "maximum": 100000 }
+              }
+            }
+          }
+        },
+        "health": {
+          "type": "object",
+          "required": ["probe"],
+          "unevaluatedProperties": false,
+          "properties": {
+            "probe": {
+              "type": "object",
+              "required": ["path", "upstream", "intervalSeconds"],
+              "unevaluatedProperties": false,
+              "properties": {
+                "path": { "type": "string", "pattern": "^/[A-Za-z0-9/_.-]*$" },
+                "upstream": { "$ref": "#/$defs/serviceName" },
+                "intervalSeconds": { "type": "integer", "minimum": 1, "maximum": 3600 }
+              }
+            },
+            "upgradePolicy": {
+              "type": "object",
+              "required": ["failureAction"],
+              "unevaluatedProperties": false,
+              "properties": {
+                "failureAction": { "enum": ["Rollback", "Manual"] },
+                "healthCheckStableDurationSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 },
+                "upgradeDomainTimeoutSeconds": { "type": "integer", "minimum": 0, "maximum": 86400 }
+              }
+            }
+          }
+        },
+        "egress": {
+          "type": "object",
+          "required": ["allow"],
+          "unevaluatedProperties": false,
+          "properties": {
+            "allow": { "type": "array", "items": { "$ref": "#/$defs/fqdn" } }
+          }
+        },
+        "alerts": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+\\.ya?ml$" }
+      }
+    }
+  }
+}

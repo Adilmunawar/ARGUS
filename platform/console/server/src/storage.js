@@ -202,14 +202,42 @@ async function topology() {
   };
 }
 
+const VOL_STATUS_PATH = '/vol/status';
+
+async function collectionTotals() {
+  const doc = await getJson(`${MASTER}${VOL_STATUS_PATH}`);
+  const dataCenters = (doc && doc.Volumes && doc.Volumes.DataCenters) || {};
+  const byCollection = new Map();
+  for (const racks of Object.values(dataCenters)) {
+    for (const nodes of Object.values(racks || {})) {
+      for (const volumes of Object.values(nodes || {})) {
+        for (const v of volumes || []) {
+          if (!v) continue;
+          const key = v.Collection || '';
+          const agg = byCollection.get(key) || {
+            volumes: 0, diskBytes: 0, needles: 0, deletedNeedles: 0, reclaimableBytes: 0
+          };
+          agg.volumes += 1;
+          agg.diskBytes += v.Size || 0;
+          agg.needles += v.FileCount || 0;
+          agg.deletedNeedles += v.DeleteCount || 0;
+          agg.reclaimableBytes += v.DeletedByteCount || 0;
+          byCollection.set(key, agg);
+        }
+      }
+    }
+  }
+  return byCollection;
+}
+
 async function nodeStatuses(nodes) {
   return Promise.all(nodes.map(async (n) => {
     try {
       const s = await getJson(`http://${n.reachAt}/status`, 4000);
-      return { ...n, ok: true, version: s.Version || null, disks: s.DiskStatuses || [], volumeList: s.Volumes || [] };
+      return { ...n, ok: true, version: s.Version || null, disks: s.DiskStatuses || [] };
     } catch (err) {
       return {
-        ...n, ok: false, disks: [], volumeList: [],
+        ...n, ok: false, disks: [],
         error: NODE_URL_MAP.size === 0 && !/^(127\.|localhost)/.test(n.reachAt)
           ? `${n.url} is not reachable from this process. That URL is container-internal: either run the ` +
             `console on the argus network, or set ARGUS_SEAWEED_NODE_URL_MAP.`
@@ -340,25 +368,11 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     : { Buckets: [...dec.map.keys()].map((name) => ({ Name: name, CreationDate: null })) };
   const inventorySource = inventory ? 'storage-init' : 'buckets.yaml (declared, not verified)';
 
-  const byCollection = new Map();
+  let byCollection = new Map();
   let topologyOk = true;
   let topologyError = null;
   try {
-    const topo = await topology();
-    const rows = await nodeStatuses(topo.nodes);
-    for (const n of rows) {
-      if (!n.ok) { topologyOk = false; topologyError = n.error; continue; }
-      for (const v of n.volumeList) {
-        const key = v.Collection || '';
-        const agg = byCollection.get(key) || { sizeBytes: 0, files: 0, deleted: 0, deletedBytes: 0, volumes: 0 };
-        agg.sizeBytes += v.Size || 0;
-        agg.files += v.FileCount || 0;
-        agg.deleted += v.DeleteCount || 0;
-        agg.deletedBytes += v.DeletedByteCount || 0;
-        agg.volumes += 1;
-        byCollection.set(key, agg);
-      }
-    }
+    byCollection = await collectionTotals();
   } catch (err) {
     topologyOk = false;
     topologyError = err.message;
@@ -381,16 +395,24 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     return {
       name,
       createdAt: b.CreationDate ? new Date(b.CreationDate).toISOString() : null,
-      diskBytes: unknownSize ? null : agg.sizeBytes,
+      diskBytes: unknownSize ? null : agg.diskBytes,
       diskBytesIsFootprint: true,
+      reclaimableBytes: unknownSize ? null : agg.reclaimableBytes,
+      liveBytes: unknownSize ? null : agg.diskBytes - agg.reclaimableBytes,
+
+      needles: unknownSize ? null : agg.needles,
+      liveNeedles: unknownSize ? null : agg.needles - agg.deletedNeedles,
+      deletedNeedles: unknownSize ? null : agg.deletedNeedles,
 
       objects: null,
-      objectsReason: 'SeaweedFS does not report a per-collection object count. Use Calculate on a prefix to walk it.',
+      objectsReason: 'These are needles, not objects. The filer splits every file at 4 MB and each version of a ' +
+        'versioned object is stored separately, so a 1 GB backup is about 256 needles. Use Calculate on a prefix ' +
+        'to walk the bucket for a true object count and logical size.',
       unknownSize,
       unknownSizeReason: unknownSize
         ? (topologyOk
-            ? 'Nothing has been written to this bucket yet, so it has no volumes and the topology reports no size. Browse it to see its contents.'
-            : `The volume servers could not be read: ${topologyError}`)
+            ? 'Nothing has been written to this bucket yet, so it has no volumes and the master reports no size. Browse it to see its contents.'
+            : `The SeaweedFS master could not be read: ${topologyError}`)
         : null,
       volumes: agg ? agg.volumes : 0,
 
@@ -424,6 +446,8 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     declaredError: dec.error,
     topologyOk,
     topologyError,
+    countsFrom: `${VOL_STATUS_PATH} on the SeaweedFS master`,
+    countsAreNeedles: true,
     wormVerdict,
     at: new Date().toISOString()
   };
@@ -836,6 +860,14 @@ async function lockStatus() {
     determined: true,
     verdict: worm.verdict,
     detail: worm.detail,
+    filerBypass: worm.filerBypass || 'unknown',
+    filerBypassDetail: worm.filerBypassDetail
+      || 'This run did not probe whether the filer deletes a locked object version. Object Lock is implemented in ' +
+         'the S3 gateway alone, so an unmeasured filer is not a closed one.',
+    defaultRetentionStamped: worm.defaultRetentionStamped || 'unknown',
+    defaultRetentionDetail: worm.defaultRetentionDetail
+      || 'This run did not read retention back off an object written with no lock headers, so whether the bucket ' +
+         'default reaches real objects is unmeasured.',
     probedAt: worm.at || probe.at || null,
     scope: worm.scope || 'unknown',
     profile: probe.profile || null,

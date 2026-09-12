@@ -41,6 +41,7 @@
           "replication": {
             "type": "object",
             "additionalProperties": false,
+            "dependentRequired": { "siteBObjectLockDays": ["siteB"] },
             "properties": {
               "siteB": { "type": "boolean" },
               "siteBObjectLockDays": { "type": "integer", "minimum": 1 }

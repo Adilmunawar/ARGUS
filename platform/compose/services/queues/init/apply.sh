@@ -19,6 +19,36 @@ dur_ns() {
   esac
 }
 
+bytes_of() {
+  v="$1"
+  case "$v" in
+    *GB) n="${v%GB}"; echo $((n * 1073741824)) ;;
+    *MB) n="${v%MB}"; echo $((n * 1048576)) ;;
+    *KB) n="${v%KB}"; echo $((n * 1024)) ;;
+    *)   echo "$v" ;;
+  esac
+}
+
+drift_of() {
+  printf '%s' "$1" | jq -S -r --argjson want "$2" '
+    . as $have
+    | $want
+    | to_entries[]
+    | select($have[.key] != .value)
+    | "\(.key): server=\($have[.key] | tojson) declared=\(.value | tojson)"'
+}
+
+merged_of() {
+  printf '%s' "$1" | jq --argjson want "$2" '. * $want'
+}
+
+show_drift() {
+  printf '%s\n' "$1" | sed 's/^/         /' >&2
+}
+
+STREAM_CFG=/tmp/nats-init-stream.json
+CONSUMER_CFG=/tmp/nats-init-consumer.json
+
 nats_() { nats "$@" </dev/null; }
 
 : "${NATS_URL:?nats-init needs NATS_URL (docker-compose.yml sets it)}"
@@ -56,19 +86,48 @@ create_stream() {
   name="$1"; subjects="$2"; retention="$3"; discard="$4"
   max_age="$5"; max_bytes="$6"; dupe="$7"; desc="$8"
 
+  subjects_json="$(printf '%s\n' $subjects | jq -R . | jq -s -c .)"
+  want="$(jq -n -c \
+    --argjson subjects "$subjects_json" \
+    --arg retention "$retention" \
+    --arg discard "$discard" \
+    --arg desc "$desc" \
+    --argjson max_age "$(dur_ns "$max_age")" \
+    --argjson max_bytes "$(bytes_of "$max_bytes")" \
+    --argjson dupe "$(dur_ns "$dupe")" \
+    --argjson replicas "$REPLICAS" \
+    '{ subjects: $subjects, retention: $retention, discard: $discard, storage: "file",
+       max_age: $max_age, max_bytes: $max_bytes, duplicate_window: $dupe,
+       num_replicas: $replicas, description: $desc }')"
+
   if nats_ stream info "$name" >/dev/null 2>&1; then
-    cfg="$(nats_ stream info "$name" -j)"
-    have_ret="$(printf '%s' "$cfg" | jq -r '.config.retention')"
-    have_dis="$(printf '%s' "$cfg" | jq -r '.config.discard')"
-    have_byt="$(printf '%s' "$cfg" | jq -r '.config.max_bytes')"
-    [ "$have_ret" = "$retention" ] || warn "$name has retention=$have_ret, this file declares $retention.
-          Retention CANNOT be changed in place: the stream must be deleted and recreated, which destroys
-          its messages. Nothing here does that silently."
-    [ "$have_dis" = "$discard" ] || warn "$name has discard=$have_dis, this file declares $discard.
-          Fix with: nats stream edit $name --discard $discard"
-    [ "$have_byt" -gt 0 ] 2>/dev/null || warn "$name has no max_bytes. One runaway publisher on it fills
-          the account limit and stops publishes to EVERY stream, including the dead-letter stream."
-    say "  = $name exists"
+    have="$(nats_ stream info "$name" -j | jq -c '.config')"
+
+    immutable="$(drift_of "$have" "$(printf '%s' "$want" | jq -c '{retention, storage}')")"
+    if [ -n "$immutable" ]; then
+      show_drift "$immutable"
+      die "$name cannot be converged. retention and storage are the two fields JetStream refuses to
+         update on a live stream, so matching this declaration means deleting the stream and
+         recreating it, which destroys every message it still holds. Nothing here does that silently:
+         decide deliberately, then \`nats stream rm $name\` and re-run this one-shot."
+    fi
+
+    drift="$(drift_of "$have" "$want")"
+    if [ -z "$drift" ]; then
+      say "  = $name matches this file"
+      return 0
+    fi
+
+    show_drift "$drift"
+    merged_of "$have" "$want" > "$STREAM_CFG"
+    if converge_output="$(nats_ stream edit "$name" --config "$STREAM_CFG" -f 2>&1)"; then
+      say "  ~ $name converged"
+    else
+      fail "$name drifted from this file and could not be converged: $converge_output
+         Every field listed above is updatable in place on a live stream, so a refusal here is the
+         client or the connection, not JetStream policy. The stream keeps its current configuration
+         until this is resolved."
+    fi
     return 0
   fi
 
@@ -96,9 +155,21 @@ ARGUS_SENTINEL|argus.sentinel.>|limits|old|168h|128MB|2m|Sentinel scene notifica
 ARGUS_DEADLETTER|argus.dlq.> $JS.EVENT.ADVISORY.CONSUMER.MAX_DELIVERIES.>|limits|old|48h|64MB|2m|Dead letters: server max-delivery advisories (pointers) and bodies applications republished.
 STREAMS
 
+is_positive_int() {
+  case "${1:-}" in
+    ''|*[!0-9]*) return 1 ;;
+    *) [ "$1" -gt 0 ] ;;
+  esac
+}
+
 dlq_age="$(nats_ stream info ARGUS_DEADLETTER -j | jq -r '.config.max_age')"
+is_positive_int "$dlq_age" || die "could not read ARGUS_DEADLETTER's max_age from the server; it answered
+         '${dlq_age:-<nothing>}'. The dead-letter retention check below compares numbers, and a
+         non-numeric answer would make it pass without comparing anything."
 for s in ARGUS_INGEST ARGUS_EXPORT ARGUS_PIPELINE ARGUS_AI ARGUS_SENTINEL; do
   src_age="$(nats_ stream info "$s" -j | jq -r '.config.max_age')"
+  is_positive_int "$src_age" || die "could not read $s's max_age from the server; it answered
+         '${src_age:-<nothing>}'. See the note above: an unread max_age silently skips this check."
   if [ "$dlq_age" -ge "$src_age" ]; then
     die "ARGUS_DEADLETTER keeps pointers for ${dlq_age}ns but $s keeps the bodies for only ${src_age}ns.
          Every dead letter older than $s's max_age would point at a message that no longer exists.
@@ -112,20 +183,40 @@ create_consumer() {
   bmin="$6"; bmax="$7"; bsteps="$8"; desc="$9"
 
   if nats_ consumer info "$stream" "$cname" >/dev/null 2>&1; then
-    ccfg="$(nats_ consumer info "$stream" "$cname" -j)"
-    have_md="$(printf '%s' "$ccfg" | jq -r '.config.max_deliver')"
-    have_bo="$(printf '%s' "$ccfg" | jq -r 'if (.config.backoff // []) | length > 0 then "set" else "none" end')"
-    if [ "$have_md" -lt 0 ] 2>/dev/null; then
-      warn "$stream/$cname has max_deliver=$have_md (unlimited): it will retry a poisoned message forever
-            and never dead-letter. Fix with: nats consumer edit $stream $cname --max-deliver $maxdel"
-    fi
+    have="$(nats_ consumer info "$stream" "$cname" -j | jq -c '.config')"
+    have_bo="$(printf '%s' "$have" | jq -r 'if (.backoff // []) | length > 0 then "set" else "none" end')"
     if [ "$have_bo" = "none" ]; then
       warn "$stream/$cname has no backoff policy, so every retry is spaced exactly $ackwait apart. A failing
             upstream then gets $maxdel evenly-spaced hammerings instead of a widening gap. Not dangerous,
             but it is not what this file declares."
     fi
+
+    want="$(jq -n -c \
+      --arg filter "$filter" \
+      --arg desc "$desc" \
+      --argjson ack "$(dur_ns "$ackwait")" \
+      --argjson maxdel "$maxdel" \
+      '{ filter_subject: $filter, description: $desc, ack_wait: $ack, max_deliver: $maxdel }')"
+
+    drift="$(drift_of "$have" "$want")"
+    if [ -z "$drift" ]; then
+      say "  = $stream/$cname matches this file"
+    else
+      show_drift "$drift"
+      merged_of "$have" "$want" \
+        | jq 'if (.backoff // []) | length > 0 then .backoff[0] = .ack_wait else . end' > "$CONSUMER_CFG"
+      if converge_output="$(nats_ consumer add "$stream" "$cname" --config "$CONSUMER_CFG" -f 2>&1)"; then
+        say "  ~ $stream/$cname converged"
+      else
+        fail "$stream/$cname drifted from this file and could not be converged: $converge_output
+         None of the fields above is in the set JetStream refuses to update on a live consumer
+         (deliver policy, start sequence, start time, ack policy, replay policy, heartbeats, flow
+         control, pull/push and max waiting), so a refusal here is the client or the connection.
+         The consumer keeps its current configuration, and its ack and redelivery state, until this
+         is resolved."
+      fi
+    fi
     verify_ack_wait "$stream" "$cname" "$ackwait"
-    say "  = $stream/$cname exists"
     return 0
   fi
 
@@ -140,16 +231,23 @@ create_consumer() {
 }
 
 verify_ack_wait() {
-  want="$(dur_ns "$3")"
-  [ -n "$want" ] || return 0
-  have="$(nats_ consumer info "$1" "$2" -j | jq -r '.config.ack_wait')"
-  [ "$have" = "$want" ] && return 0
-  fail "$1/$2 was declared with ack_wait=$3 (${want}ns) and the server stored ${have}ns.
+  want_ns="$(dur_ns "$3")"
+  [ -n "$want_ns" ] || return 0
+  have_ns="$(nats_ consumer info "$1" "$2" -j | jq -r '.config.ack_wait')"
+  [ "$have_ns" = "$want_ns" ] && return 0
+  fail "$1/$2 was declared with ack_wait=$3 (${want_ns}ns) and the server stored ${have_ns}ns.
          A consumer whose ack_wait is shorter than the work redelivers jobs that are still running and
-         dead-letters them for succeeding slowly. The first backoff step sets ack_wait -- make
-         backoff_min equal the ack_wait column in the table above. Note that \`nats consumer edit\` will
-         NOT repair this one: it refuses with 'consumers with backoff policies do not support editing
-         Ack Wait', so the consumer has to be removed and recreated -- which resets its delivery state."
+         dead-letters them for succeeding slowly.
+         The cause is always the backoff policy: whenever one is set, the server OVERWRITES ack_wait
+         with backoff[0] and reports no error, so an ack_wait and a backoff_min that disagree produce
+         a consumer that silently does not match its declaration. Make the backoff_min column equal
+         the ack_wait column in the table above; this script already writes backoff[0] from ack_wait
+         when it converges an existing consumer.
+         Repairing this does NOT require deleting the consumer and does NOT reset its delivery state.
+         \`nats consumer edit\` refuses with 'consumers with backoff policies do not support editing
+         Ack Wait', but that string is a natscli client-side guard, not a server rule: ack_wait is not
+         among the fields JetStream refuses to update, and the full-config form used above --
+         \`nats consumer add $1 $2 --config <file> -f\` -- applies it in place."
 }
 
 say "nats-init: consumers"

@@ -21,7 +21,7 @@
       "minItems": 1,
       "items": { "type": "string", "pattern": "^[a-z0-9-]+(:[A-Za-z0-9-]+)?$" }
     },
-    "encryption": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "encryption": { "enum": ["aes256-gcm", "aes128-gcm"] },
     "rules": {
       "type": "array",
       "minItems": 1,

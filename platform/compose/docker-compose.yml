@@ -8,11 +8,21 @@ x-hardening: &hardening
   restart: unless-stopped
   security_opt: ["no-new-privileges:true"]
 
+x-oneshot: &oneshot
+  restart: "no"
+  networks: [argus]
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  pids_limit: 128
+
 x-seaweed: &seaweed
   image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-3.97}
   restart: unless-stopped
   networks: [argus]
   logging: *logging
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  pids_limit: 256
 
 networks:
   argus:
@@ -21,6 +31,10 @@ networks:
     ipam:
       config:
         - subnet: ${ARGUS_SUBNET:-172.28.0.0/16}
+  argus_socket:
+    name: argus_socket
+    driver: bridge
+    internal: true
 
 secrets:
   pg_superuser_password:  { file: ./secrets/pg_superuser_password }
@@ -120,6 +134,7 @@ services:
     volumes:
       - argus_seaweed_conf:/etc/seaweedfs
     mem_limit: 64m
+    pids_limit: 64
 
   seaweed-master:
     <<: *seaweed
@@ -203,6 +218,7 @@ services:
       start_period: 25s
 
   storage-init:
+    <<: *oneshot
     image: argus/console-api:${ARGUS_VERSION:-0.1.0}
     build:
       context: ../console
@@ -210,8 +226,8 @@ services:
       args:
         NODE_TAG: ${NODE_TAG:-22-bookworm-slim}
     container_name: argus-storage-init
-    restart: "no"
-    networks: [argus]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     command: ["node", "/app/tools/init-object-storage.js"]
     environment:
       ARGUS_S3_ENDPOINT: http://seaweed-s3:8333
@@ -276,6 +292,7 @@ services:
       - argus_pg_data:/var/lib/postgresql/data
     ports: ["127.0.0.1:${PG_PORT:-5432}:5432"]
     mem_limit: 1024m
+    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -p 5432 -U postgres"]
       interval: 10s
@@ -284,10 +301,10 @@ services:
       start_period: 60s
 
   pg-init:
+    <<: *oneshot
     image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
     container_name: argus-pg-init
-    restart: "no"
-    networks: [argus]
+    pids_limit: 64
     environment:
       PGHOST: postgres
       PGUSER: postgres
@@ -324,6 +341,7 @@ services:
       - ./secrets/garnet:/etc/garnet/secrets:ro
     ports: ["127.0.0.1:${GARNET_PORT:-6379}:6379"]
     mem_limit: ${GARNET_MEM_LIMIT:-768m}
+    pids_limit: 256
     ulimits:
       memlock: -1
       nofile: { soft: 65535, hard: 65535 }
@@ -335,11 +353,11 @@ services:
       start_period: 30s
 
   garnet-init:
+    <<: *oneshot
     profiles: [cache]
     image: valkey/valkey:${VALKEY_TAG:-9.1.2-alpine}
     container_name: argus-garnet-init
-    restart: "no"
-    networks: [argus]
+    pids_limit: 64
     environment:
       GARNET_CONSOLE_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
     volumes:
@@ -368,6 +386,7 @@ services:
       - "127.0.0.1:${NATS_PORT:-4222}:4222"
       - "127.0.0.1:8222:8222"
     mem_limit: 512m
+    pids_limit: 256
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8222/healthz?js-server-only=true"]
@@ -377,11 +396,11 @@ services:
       start_period: 30s
 
   nats-init:
+    <<: *oneshot
     profiles: [queues]
     image: natsio/nats-box:${NATS_BOX_TAG:-0.17.0}
     container_name: argus-nats-init
-    restart: "no"
-    networks: [argus]
+    pids_limit: 64
     environment:
       NATS_URL: nats://nats:4222
       NATS_USER: argus
@@ -412,6 +431,7 @@ services:
       - ./services/secrets/config:/etc/argus/config:ro
     ports: ["127.0.0.1:${OPENBAO_PORT:-8200}:8200"]
     mem_limit: 256m
+    pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"]
       interval: 10s
@@ -435,6 +455,8 @@ services:
       - ../gitops/identity/openbao-policies:/etc/argus/policies:ro
     entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /etc/argus/init/provision.sh > /tmp/p.sh && exec /bin/sh /tmp/p.sh"]
     mem_limit: 128m
+    pids_limit: 64
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       openbao: { condition: service_started }
 
@@ -454,6 +476,8 @@ services:
       - ./services/secrets/init:/etc/argus/init:ro
     entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /etc/argus/init/unseal-loop.sh > /tmp/u.sh && exec /bin/sh /tmp/u.sh"]
     mem_limit: 64m
+    pids_limit: 32
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       openbao: { condition: service_started }
 
@@ -468,6 +492,9 @@ services:
     container_name: argus-console
     networks: [argus]
     logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
     environment:
       TZ: ${TZ:-Asia/Karachi}
       ARGUS_HOST: "0.0.0.0"
@@ -511,6 +538,7 @@ services:
       - argus_console_state:/state:ro
     ports: ["127.0.0.1:${CONSOLE_PORT:-8787}:8787"]
     mem_limit: 320m
+    pids_limit: 512
     depends_on:
       seaweed-s3:   { condition: service_healthy }
       storage-init: { condition: service_completed_successfully }
@@ -539,7 +567,6 @@ services:
       - --web.enable-lifecycle
       - --query.timeout=30s
       - --query.max-samples=5000000
-      - --enable-feature=expand-external-labels
     environment:
       ARGUS_SITE: ${ARGUS_SITE:-site-a}
       ARGUS_ENVIRONMENT: ${ARGUS_ENVIRONMENT:-sandbox}
@@ -549,6 +576,7 @@ services:
       - ../gitops:/etc/prometheus/gitops:ro
     ports: ["127.0.0.1:9090:9090"]
     mem_limit: 1536m
+    pids_limit: 256
     healthcheck:
       test: ["CMD", "promtool", "check", "ready", "--url=http://127.0.0.1:9090"]
       interval: 15s
@@ -573,6 +601,7 @@ services:
     secrets: [console_alert_token]
     ports: ["127.0.0.1:9093:9093"]
     mem_limit: 128m
+    pids_limit: 128
     depends_on:
       mailpit: { condition: service_healthy }
     healthcheck:
@@ -601,6 +630,7 @@ services:
       - argus_mailpit_data:/data
     ports: ["127.0.0.1:8025:8025"]
     mem_limit: 128m
+    pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8025/readyz >/dev/null || exit 1"]
       interval: 15s
@@ -622,6 +652,7 @@ services:
       - argus_loki_data:/loki
       - ./services/observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
     mem_limit: 768m
+    pids_limit: 256
     stop_grace_period: 60s
     healthcheck:
       test: ["CMD", "/busybox/sh", "-c", "wget -q -O- http://127.0.0.1:3100/ready | grep -q ready"]
@@ -635,7 +666,7 @@ services:
     profiles: [observability]
     image: grafana/alloy:${ALLOY_TAG:-v1.9.1}
     container_name: argus-alloy
-    networks: [argus]
+    networks: [argus, argus_socket]
     logging: *logging
     command:
       - run
@@ -650,6 +681,7 @@ services:
       - argus_alloy_data:/var/lib/alloy/data
       - ./services/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
     mem_limit: 256m
+    pids_limit: 256
     depends_on:
       loki: { condition: service_started }
       docker-socket-proxy: { condition: service_started }
@@ -665,7 +697,7 @@ services:
     profiles: [observability]
     image: tecnativa/docker-socket-proxy:${SOCKET_PROXY_TAG:-v0.5.0}
     container_name: argus-docker-socket-proxy
-    networks: [argus]
+    networks: [argus_socket]
     logging: *logging
     environment:
       CONTAINERS: "1"
@@ -680,6 +712,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     mem_limit: 64m
+    pids_limit: 64
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2375/_ping >/dev/null || exit 1"]
       interval: 15s
@@ -718,6 +751,7 @@ services:
       - ./services/observability/grafana/provisioning:/etc/grafana/provisioning:ro
     ports: ["127.0.0.1:3000:3000"]
     mem_limit: 384m
+    pids_limit: 512
     depends_on:
       prometheus: { condition: service_healthy }
       loki:       { condition: service_started }
@@ -748,7 +782,10 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/rootfs:ro,rslave
+    read_only: true
+    cap_drop: [ALL]
     mem_limit: 64m
+    pids_limit: 64
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9100/metrics >/dev/null || exit 1"]
       interval: 30s
@@ -772,7 +809,10 @@ services:
       DATA_SOURCE_USER: argus_exporter
       DATA_SOURCE_PASS_FILE: /run/secrets/pg_exporter_password
     secrets: [pg_exporter_password]
+    read_only: true
+    cap_drop: [ALL]
     mem_limit: 96m
+    pids_limit: 64
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9187/metrics | grep -q '^pg_up 1$$' || exit 1"]
       interval: 30s
@@ -792,7 +832,10 @@ services:
       REDIS_USER: console
       REDIS_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
       REDIS_EXPORTER_INCL_SYSTEM_METRICS: "false"
+    read_only: true
+    cap_drop: [ALL]
     mem_limit: 96m
+    pids_limit: 64
     healthcheck:
       test: ["CMD", "/redis_exporter", "-version"]
       interval: 30s
@@ -807,9 +850,16 @@ services:
     networks: [argus]
     logging: *logging
     command: ["-port=7777", "-varz", "-connz", "-routez", "-healthz", "-jsz=all", "http://nats:8222"]
+    read_only: true
+    cap_drop: [ALL]
     mem_limit: 96m
+    pids_limit: 64
     healthcheck:
-      disable: true
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:7777/metrics >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   guacd:
     <<: *hardening
@@ -824,6 +874,7 @@ services:
       - argus_guac_recordings:/recordings
       - argus_guac_drives:/drives
     mem_limit: 512m
+    pids_limit: 256
     expose: ["4822"]
     depends_on:
       guac-storage-init: { condition: service_completed_successfully }
@@ -835,11 +886,12 @@ services:
       start_period: 15s
 
   guac-storage-init:
+    <<: *oneshot
     profiles: [connect]
     image: alpine:${ALPINE_TAG:-3.21}
     container_name: argus-guac-storage-init
-    restart: "no"
-    networks: [argus]
+    cap_add: [CHOWN, FOWNER]
+    pids_limit: 32
     command:
       - sh
       - -c
@@ -884,6 +936,7 @@ services:
       REMOTE_IP_VALVE_ENABLED: "true"
       PROXY_ALLOWED_IPS_REGEX: ${ARGUS_SUBNET_REGEX:?run bootstrap.ps1}
     mem_limit: 768m
+    pids_limit: 512
     expose: ["8080"]
     depends_on:
       postgres:  { condition: service_healthy }
@@ -897,11 +950,10 @@ services:
       start_period: 120s
 
   guac-init:
+    <<: *oneshot
     profiles: [connect]
     image: guacamole/guacamole:${GUAC_TAG:-1.5.5}
     container_name: argus-guac-init
-    restart: "no"
-    networks: [argus]
     environment:
       PGHOST: postgres
       PGUSER: guacamole_user
@@ -934,6 +986,7 @@ services:
       PASSWORD_ACCESS: "true"
       USER_PASSWORD: ${TARGET_SSH_PASSWORD:?run bootstrap.ps1}
     mem_limit: 128m
+    pids_limit: 128
     expose: ["2222"]
 
   target-rdp:
@@ -948,6 +1001,7 @@ services:
       PGID: "1000"
       TZ: ${TZ:-Asia/Karachi}
     mem_limit: 1024m
+    pids_limit: 1024
     shm_size: 512m
     expose: ["3389"]
 
@@ -988,11 +1042,11 @@ services:
     logging: *logging
     command: ["azurite", "--location=/data", "--blobHost=0.0.0.0", "--queueHost=0.0.0.0", "--tableHost=0.0.0.0"]
     environment:
-      # requires AzureWebJobsStorage.
       AZURITE_ACCOUNTS: "argus:${AZURITE_ACCOUNT_KEY:?run bootstrap.ps1}"
     volumes:
       - argus_azurite_data:/data
     mem_limit: 512m
+    pids_limit: 256
     healthcheck:
       test: ["CMD-SHELL", "node -e \"const n=require('net');let l=3;for(const p of [10000,10001,10002]){const s=n.connect(p,'127.0.0.1');s.on('connect',()=>{s.end();if(--l===0)process.exit(0)});s.on('error',()=>process.exit(1))}\" || exit 1"]
       interval: 10s
@@ -1048,6 +1102,7 @@ services:
     ports: ["127.0.0.1:9781:9781"]
     command: ["node", "src/runner.js"]
     mem_limit: 384m
+    pids_limit: 256
     depends_on:
       seaweed-s3:       { condition: service_healthy }
       nats:             { condition: service_healthy }
@@ -1082,6 +1137,7 @@ services:
       - /tmp:size=256m
     ports: ["127.0.0.1:4566:4566"]
     mem_limit: 768m
+    pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4566/_localstack/init/ready | grep -q '\"completed\": *true'"]
       interval: 10s
@@ -1112,6 +1168,7 @@ services:
     command:
       - 'mkdir -p /var/lib/argus/parity/pg; while true; do psql -v ON_ERROR_STOP=1 -qtAX -f /opt/argus/pg/canary.sql > /var/lib/argus/parity/pg/latest.json.tmp 2>/var/lib/argus/parity/pg/last-error.txt && mv -f /var/lib/argus/parity/pg/latest.json.tmp /var/lib/argus/parity/pg/latest.json; sleep "$$ARGUS_PARITY_INTERVAL_S"; done'
     mem_limit: 128m
+    pids_limit: 64
     depends_on:
       postgres: { condition: service_healthy }
       pg-init:  { condition: service_completed_successfully }

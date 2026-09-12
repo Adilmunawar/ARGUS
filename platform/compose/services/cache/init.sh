@@ -151,6 +151,58 @@ case "$config_reply" in
     ;;
 esac
 
+say "checking that services/cache/garnet.conf is the configuration in force"
+
+config_get_reply=$(as_console CONFIG GET logdir databases expired-key-deletion-scan-freq | tr -d '\r')
+case "$config_get_reply" in
+  *NOPERM*)
+    fail "'$CONSOLE_USER' may not run CONFIG GET, so nothing here can prove which
+             configuration Garnet actually loaded. Add +config|get to the
+             '$CONSOLE_USER' rule in secrets/garnet/users.acl. +config|set stays
+             denied and the check below is the reason +config|get is not optional."
+    ;;
+esac
+
+config_value() {
+  printf '%s\n' "$config_get_reply" \
+    | awk -v want="$1" 'NR % 2 == 1 { name = $0; next } name == want { print; exit }'
+}
+
+log_dir=$(config_value logdir)
+databases=$(config_value databases)
+expiry_scan=$(config_value expired-key-deletion-scan-freq)
+
+if [ -z "$log_dir" ]; then
+  fail "CONFIG GET logdir came back with no value. Garnet drops parameter names it
+             does not recognise from the request instead of erroring, so an empty
+             reply here means this server has no 'logdir' parameter at all and is
+             not the Garnet this stack pins (GARNET_TAG, default 2.1.5)."
+fi
+
+if [ "$log_dir" != "/data" ]; then
+  fail "the server reports logdir='$log_dir', not /data.
+             services/cache/garnet.conf was not the configuration that loaded, so
+             none of the memory, compaction or ACL settings in it are in force
+             either. Check the ./services/cache:/etc/garnet/conf mount and:
+             docker compose logs garnet"
+fi
+
+if [ "$databases" != "1" ]; then
+  fail "the server reports databases='${databases:-<empty>}', and garnet.conf
+             declares MaxDatabases 1. A server with more than one database accepts
+             SELECT, so a client that picks db1 writes into a database nothing else
+             reads and no backup covers. Check the same mount as above."
+fi
+
+if [ "$expiry_scan" != "3600" ]; then
+  fail "the server reports expired-key-deletion-scan-freq='${expiry_scan:-<empty>}',
+             and garnet.conf declares ExpiredKeyDeletionScanFrequencySecs 3600. The
+             Garnet default is -1, which is OFF: expired keys are then reclaimed only
+             when something happens to touch them, so a write-once cache grows
+             without bound on a server that has no eviction to fall back on. Check
+             the same mount as above."
+fi
+
 store=$(as_console INFO STORE | tr -d '\r')
 case "$store" in
   *NOPERM*)
@@ -163,26 +215,18 @@ esac
 
 field() { printf '%s\n' "$store" | sed -n "s|^$1:||p" | head -n 1; }
 
-log_dir=$(field 'LogDir')
 log_max=$(field 'Log[.]MaxMemorySizeBytes')
 log_now=$(field 'Log[.]CurrentMemorySizeBytes')
 addr_begin=$(field 'Log[.]BeginAddress')
 addr_head=$(field 'Log[.]HeadAddress')
 addr_tail=$(field 'Log[.]TailAddress')
 
-if [ "$log_dir" != "/data" ]; then
-  fail "the server reports LogDir='${log_dir:-<empty>}', not /data.
-             services/cache/garnet.conf was not the configuration that loaded, so
-             none of the memory, compaction or ACL settings in it are in force
-             either. Check the ./services/cache:/etc/garnet/conf mount and:
-             docker compose logs garnet"
-fi
-
 say ""
 say "─────────────────────────────────────────────────────────────────────────"
 say "cache is up and the console credential is correctly constrained."
 say ""
 say "  spill directory      $log_dir  (argus_garnet_data volume)"
+say "  databases            $databases   expired-key scan every ${expiry_scan}s"
 say "  in-memory log        ${log_now:-unknown} of ${log_max:-unknown} bytes"
 say "  log addresses        begin=${addr_begin:-unknown} head=${addr_head:-unknown} tail=${addr_tail:-unknown}"
 say ""

@@ -6,8 +6,7 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: validate-${{ github.ref }}
@@ -18,18 +17,41 @@ jobs:
     name: Repository invariants
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
-      - run: pip install --disable-pip-version-check pyyaml jsonschema pglast python-hcl2
+      - run: pip install --disable-pip-version-check pyyaml jsonschema pglast python-hcl2 regress==2026.9.1
 
       - name: Secret scanner passes its own self-test
         run: python3 .github/scripts/scan-secrets.py --self-test
 
       - name: No credentials committed
         run: python3 .github/scripts/scan-secrets.py
+
+      - name: Fetch the pinned gitleaks release
+        env:
+          GITLEAKS_VERSION: '8.30.1'
+          GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
+        run: |
+          curl -fsSL -o "${RUNNER_TEMP}/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  ${RUNNER_TEMP}/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/gitleaks.tar.gz" -C "${RUNNER_TEMP}" gitleaks
+          sudo install -m 0755 "${RUNNER_TEMP}/gitleaks" /usr/local/bin/gitleaks
+
+      - name: No credential has ever been committed
+        run: gitleaks git --no-banner --redact --config .github/gitleaks.toml --exit-code 1
 
       - name: Every YAML and JSON parses
         run: python3 .github/scripts/check-parses.py
@@ -42,6 +64,12 @@ jobs:
 
       - name: Configuration and scripts carry no comments
         run: python3 .github/scripts/check-comments.py
+
+      - name: Pattern dialect checker passes its own self-test
+        run: python3 .github/scripts/check-pattern-dialect.py --self-test
+
+      - name: Schema patterns are ECMA-262 regular expressions
+        run: python3 .github/scripts/check-pattern-dialect.py
 
       - name: GitOps specs validate against their schemas
         run: python3 .github/scripts/check-gitops.py
@@ -62,22 +90,38 @@ jobs:
     name: Console prototype tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
 
+      - name: Resolve the Playwright version the lockfile pins
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Cache Playwright browsers
         id: playwright-cache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
 
-      - run: npx playwright install --with-deps chromium
+      - name: Install the Chromium build and its system libraries
+        run: npx playwright install --with-deps chromium
+
+      - name: JavaScript comment stripper passes its own self-test
+        run: node .github/scripts/check-comments.js --self-test
 
       - name: JavaScript carries no comments
         run: node .github/scripts/check-comments.js
@@ -101,7 +145,7 @@ jobs:
 
       - name: Keep the last stress report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: console-stress-report
           path: platform/console/prototype/tests/stress-last-run.json
@@ -110,7 +154,7 @@ jobs:
 
       - name: Keep the screenshots from both suites
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: console-screenshots
           path: |
@@ -123,9 +167,15 @@ jobs:
     name: Console server tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '22'
           cache: 'npm'

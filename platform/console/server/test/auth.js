@@ -253,7 +253,7 @@ function writeOperatorsFile(dir, record, extra) {
   for (const path of ['/api/host', '/api/storage/buckets', '/api/secrets/seal-status', '/api/pg/roles',
     '/api/cache/clients', '/api/queues/streams', '/api/overview', '/api/storage/preview?bucket=a&key=b',
     '/api/logs/stream?query=%7B%7D', '/api/metrics/series?name=hostCpuBusyRatio', '/api/alerts/active',
-    '/api/containers', '/api/heartbeats']) {
+    '/api/containers', '/api/heartbeats', '/api/search/index']) {
     const r = await call(main, { path });
     check(`${path} is refused without a session`, () => {
       assert.strictEqual(r.status, 401, `status ${r.status}`);
@@ -277,6 +277,13 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(body.auth.mode, 'session');
     assert.strictEqual(body.aws, undefined, 'the AWS block leaked to an anonymous caller');
     assert.strictEqual(body.region, undefined, 'the region leaked to an anonymous caller');
+  });
+
+  const anonymousMetrics = await call(main, { path: '/metrics' });
+  check('the Prometheus scrape endpoint stays public, because a scraper carries no session', () => {
+    assert.strictEqual(anonymousMetrics.status, 200, `status ${anonymousMetrics.status}`);
+    assert.match(String(anonymousMetrics.headers['content-type']), /^text\/plain; version=0\.0\.4/);
+    assert.match(anonymousMetrics.body, /# TYPE argus_console_requests_total counter/);
   });
 
   const crossSiteLogin = await login(main, SUBJECT, PASSWORD, { 'sec-fetch-site': 'cross-site' });

@@ -43,6 +43,11 @@ SHELL_LIKE = {".sh", ".bash", ".conf", ".yml", ".yaml", ".ps1", ".psm1", ".psd1"
 
 BLOCK_SCALAR = re.compile(r"^(\s*)(?:-\s+)?(?:[\w.$-]+\s*:\s*)?[|>][-+]?\d*\s*$")
 
+ACTION_PIN = re.compile(
+    r"^\s*(?:-\s+)?uses:\s+[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*"
+    r"@[0-9a-f]{40} # v\d+(?:\.\d+){0,2}$"
+)
+
 
 def suffix_of(path):
     name = pathlib.Path(path).name
@@ -132,6 +137,9 @@ def strip_text(source, suffix):
         if KEEP_LINE.match(line):
             out.append(line.rstrip())
             continue
+        if suffix in (".yml", ".yaml") and ACTION_PIN.match(line):
+            out.append(line.rstrip())
+            continue
         index = marker_index(line, markers, suffix) if markers else -1
         if index < 0:
             out.append(line.rstrip())
@@ -173,6 +181,19 @@ SELF_TEST = [
     (".sql", "SELECT 'a--b' AS text_with_dashes;\n"),
     (".conf", 'listen = "0.0.0.0:80"\n'),
     (".tf", 'variable "a" {\n  default = "x/*y"\n}\n'),
+    (".yml", "      - uses: actions/checkout@" + "0" * 40 + " # v5.1.0\n"),
+    (".yml", "      - uses: step-security/harden-runner@" + "a" * 40 + " # v2.21.1\n"),
+]
+
+SELF_TEST_STRIP = [
+    (".yml", "      - uses: actions/checkout@v5 # v5.1.0\n", "      - uses: actions/checkout@v5\n"),
+    (".yml", "      - uses: actions/checkout@" + "0" * 40 + " # pinned for safety\n",
+     "      - uses: actions/checkout@" + "0" * 40 + "\n"),
+    (".yml", "      - uses: actions/checkout@" + "0" * 40 + " # v5.1.0 and a word\n",
+     "      - uses: actions/checkout@" + "0" * 40 + "\n"),
+    (".yml", "      - run: echo hi # v5.1.0\n", "      - run: echo hi\n"),
+    (".yml", "jobs:\n  # a plain comment\n  repo:\n", "jobs:\n  repo:\n"),
+    (".sh", "uses: actions/checkout@" + "0" * 40 + " # v5.1.0\n", "uses: actions/checkout@" + "0" * 40 + "\n"),
 ]
 
 
@@ -181,12 +202,17 @@ def self_test():
     for suffix, source in SELF_TEST:
         result = strip_text(source, suffix)
         if result != source:
-            failures.append((suffix, source, result))
-    for suffix, source, result in failures:
-        print(f"self-test changed a comment-free {suffix} file:")
+            failures.append(("changed a comment-free sample", suffix, source, result))
+    for suffix, source, expected in SELF_TEST_STRIP:
+        result = strip_text(source, suffix)
+        if result != expected:
+            failures.append(("did not strip a comment", suffix, source, result))
+    for why, suffix, source, result in failures:
+        print(f"self-test {why} in a {suffix} file:")
         print(f"  before: {source!r}")
         print(f"  after:  {result!r}")
-    print(f"self-test: {len(SELF_TEST) - len(failures)}/{len(SELF_TEST)} comment-free samples left untouched")
+    total = len(SELF_TEST) + len(SELF_TEST_STRIP)
+    print(f"self-test: {total - len(failures)}/{total} samples stripped exactly as intended")
     return 1 if failures else 0
 
 

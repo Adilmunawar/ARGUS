@@ -1,0 +1,59 @@
+title = "Argus secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "argus-env-secret-value"
+description = "An ARGUS_ or GUAC_ environment key assigned a literal hex or base64 value instead of a file reference or a placeholder"
+regex = '''\b((?:ARGUS|GUAC|NATS|GARNET|AZURITE|TARGET)_[A-Z0-9_]*(?:SECRET|PASSWORD|PASSWD|TOKEN|SECRET_KEY|ACCOUNT_KEY|SIGNING_KEY))\s*[:=]\s*['"]?([A-Za-z0-9+/=_-]{16,})['"]?'''
+secretGroup = 2
+entropy = 3.5
+keywords = ["ARGUS_", "GUAC_", "NATS_", "GARNET_", "AZURITE_", "TARGET_"]
+
+[[rules.allowlists]]
+description = "Placeholder and file-reference values carry no credential"
+regexTarget = "secret"
+regexes = [
+  '''^(?:replace-me|change-?me|placeholder|redacted|example|generated|unset)[A-Za-z0-9_-]*$''',
+  '''^/run/secrets/[\w.-]+$''',
+  '''^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$''',
+]
+
+[[allowlists]]
+description = "A value that is only an uppercase identifier is the name of a secret, never its content"
+targetRules = ["generic-api-key", "argus-env-secret-value"]
+regexTarget = "secret"
+regexes = [
+  '''^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$''',
+]
+
+[[allowlists]]
+description = "A value that is a path into the secret store or a Compose file-secret is a reference, never the credential"
+targetRules = ["generic-api-key", "argus-env-secret-value"]
+regexTarget = "secret"
+regexes = [
+  '''^(?:kv|secret|secrets|bao|openbao|vault)/[\w./-]+$''',
+  '''^/run/secrets/[\w.-]+$''',
+  '''^(?:[A-Z][A-Za-z]*)(?:/[A-Z][A-Za-z]*)+$''',
+]
+
+[[allowlists]]
+description = "Scanner self-test fixtures are two-tuples of a synthetic filename and the line under test"
+targetRules = ["generic-api-key", "argus-env-secret-value"]
+regexTarget = "line"
+regexes = [
+  '''^\s*\("[A-Za-z0-9_]+\.[A-Za-z0-9]+",\s*['"].*['"]\),?\s*$''',
+]
+
+[[allowlists]]
+description = "Test fixtures name themselves with the argus-fixture- prefix so no real credential can take their place"
+targetRules = ["generic-api-key", "argus-env-secret-value"]
+regexTarget = "secret"
+regexes = [
+  '''^argus-fixture-[\w-]+$''',
+]
+stopwords = [
+  "correct-horse-battery-staple",
+  "not-the-password-at-all",
+]

@@ -2,6 +2,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const http = require('node:http');
+const https = require('node:https');
 const YAML = require('yaml');
 
 const {
@@ -15,7 +17,8 @@ const {
   GetObjectLockConfigurationCommand,
   PutBucketLifecycleConfigurationCommand,
   PutObjectCommand,
-  DeleteObjectCommand
+  DeleteObjectCommand,
+  GetObjectRetentionCommand
 } = require('@aws-sdk/client-s3');
 
 function positiveIntMs(name, fallback) {
@@ -37,6 +40,7 @@ const BUCKETS_FILE = process.env.ARGUS_BUCKETS_FILE || '/config/buckets.yaml';
 const STATE_DIR   = process.env.ARGUS_STATE_DIR || '/state';
 const PROFILE     = (process.env.ARGUS_PROFILE || 'dev').toLowerCase();
 const PROBE_BUCKET = process.env.ARGUS_WORM_PROBE_BUCKET || 'argus-worm-probe';
+const FILER = process.env.ARGUS_SEAWEED_FILER_URL || 'http://seaweed-filer:8888';
 const READY_TIMEOUT_MS = positiveIntMs('ARGUS_S3_READY_TIMEOUT_MS', 120000);
 const REQUEST_TIMEOUT_MS = positiveIntMs('ARGUS_S3_REQUEST_TIMEOUT_MS', 15000);
 const CONNECT_TIMEOUT_MS = positiveIntMs('ARGUS_S3_CONNECT_TIMEOUT_MS', 3000);
@@ -411,6 +415,97 @@ async function applyBucket(spec, problems) {
   };
 }
 
+function filerRequest(method, target) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try { url = new URL(target, FILER); }
+    catch (err) { return reject(new Error(`ARGUS_SEAWEED_FILER_URL=${FILER} is not a usable URL`)); }
+    const lib = url.protocol === 'https:' ? https : http;
+    const req = lib.request(url, {
+      method,
+      timeout: REQUEST_TIMEOUT_MS,
+      headers: { accept: 'application/json' }
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (d) => { if (body.length < 65536) body += d; });
+      res.on('end', () => resolve({ status: res.statusCode, body, url: url.href }));
+    });
+    req.on('timeout', () => req.destroy(new Error(`${url.href} did not answer within ${REQUEST_TIMEOUT_MS} ms`)));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function probeDefaultRetention(bucket, key, versionId, wantMode) {
+  try {
+    const answer = await s3.send(new GetObjectRetentionCommand({ Bucket: bucket, Key: key, VersionId: versionId }));
+    const mode = answer && answer.Retention ? answer.Retention.Mode : null;
+    const until = answer && answer.Retention ? answer.Retention.RetainUntilDate : null;
+    if (!mode) {
+      return { defaultRetentionStamped: 'not-stamped',
+        defaultRetentionDetail: `The gateway answered with no retention mode for an object PUT with no lock ` +
+          `headers into ${bucket}, which declares ${wantMode}. The bucket default was not applied to the object.` };
+    }
+    if (mode !== wantMode) {
+      return { defaultRetentionStamped: 'not-stamped',
+        defaultRetentionDetail: `The object was stamped ${mode}, not the ${wantMode} the bucket declares.` };
+    }
+    return { defaultRetentionStamped: 'stamped',
+      defaultRetentionDetail: `An object PUT with no lock headers came back stamped ${mode} until ` +
+        `${until ? new Date(until).toISOString() : 'an unreported date'}, so the bucket default reaches real objects.` };
+  } catch (err) {
+    if (isNotFound(err) || /NoSuchObjectLockConfiguration|ObjectLockConfigurationNotFound/i.test(errName(err))) {
+      return { defaultRetentionStamped: 'not-stamped',
+        defaultRetentionDetail: `GetObjectRetention answered ${errName(err)} for an object PUT with no lock headers ` +
+          `into ${bucket}. The bucket configuration reads healthy but nothing was stamped on the object; a PUT that ` +
+          `fails to apply the default retention still returns 200.` };
+    }
+    return { defaultRetentionStamped: 'unknown',
+      defaultRetentionDetail: `GetObjectRetention failed with ${errName(err)} (${err && err.message}), which is ` +
+        `neither a stamp nor the absence of one.` };
+  }
+}
+
+async function probeFilerBypass(bucket, key) {
+  const dir = `/buckets/${bucket}/${key}.versions/`;
+  let target = null;
+  try {
+    const listed = await filerRequest('GET', `${dir}?limit=10`);
+    if (listed.status === 200) {
+      let entries = null;
+      try { entries = JSON.parse(listed.body).Entries; } catch (err) { entries = null; }
+      const first = Array.isArray(entries) ? entries.find((e) => e && e.FullPath) : null;
+      if (first) target = first.FullPath;
+    }
+    if (!target) target = `/buckets/${bucket}/${key}`;
+    const attempt = await filerRequest('DELETE', target);
+    if (attempt.status === 200 || attempt.status === 202 || attempt.status === 204) {
+      return { filerBypass: 'open',
+        filerBypassDetail: `DELETE ${attempt.url} succeeded (${attempt.status}). Object Lock lives entirely in the ` +
+          `S3 gateway, so the filer, the master and the volume servers all delete locked data without consulting it. ` +
+          `The only thing standing between this object and deletion is that the filer port is published on 127.0.0.1 ` +
+          `alone. Configure filer WORM on the bucket prefix to close it.` };
+    }
+    if (attempt.status === 403) {
+      return { filerBypass: 'blocked',
+        filerBypassDetail: `DELETE ${attempt.url} was refused with 403. Filer WORM is configured for this path, so ` +
+          `immutability does not depend on the S3 gateway alone.` };
+    }
+    if (attempt.status === 404) {
+      return { filerBypass: 'unknown',
+        filerBypassDetail: `DELETE ${attempt.url} answered 404, so there was nothing at that path to refuse. That is ` +
+          `not evidence either way about the filer path.` };
+    }
+    return { filerBypass: 'unknown',
+      filerBypassDetail: `DELETE ${attempt.url} answered ${attempt.status}, which is neither a deletion nor a refusal.` };
+  } catch (err) {
+    return { filerBypass: 'unknown',
+      filerBypassDetail: `The filer at ${FILER} could not be reached: ${err.message}. Whether it would delete a ` +
+        `locked object version is therefore unmeasured, not safe.` };
+  }
+}
+
 async function probeWorm() {
   const at = new Date().toISOString();
   const key = `probe-${Date.now()}`;
@@ -441,29 +536,49 @@ async function probeWorm() {
 
     const versionId = put.VersionId;
     if (!versionId) {
-      return { ...base, verdict: 'unknown',
+      return { ...base, verdict: 'unknown', defaultRetentionStamped: 'unknown', filerBypass: 'unknown',
         detail: 'The gateway returned no VersionId, so there is no specific version to attempt to delete. ' +
                 'Versioning may not be in effect on this bucket.' };
     }
 
+    const retention = await probeDefaultRetention(PROBE_BUCKET, key, versionId, 'COMPLIANCE');
+
+    let outcome;
     try {
       await s3.send(new DeleteObjectCommand({ Bucket: PROBE_BUCKET, Key: key, VersionId: versionId }));
-      return { ...base, versionId, verdict: 'not-enforced',
+      outcome = { verdict: 'not-enforced',
         detail: 'A locked object version was deleted successfully. Object Lock is configured but NOT enforced ' +
                 'by this server. Anything that depends on immutability -- ADR-0020 backups above all -- is ' +
                 'unprotected.' };
     } catch (err) {
       const status = err && err.$metadata && err.$metadata.httpStatusCode;
       if (status === 403 || /AccessDenied/i.test(errName(err))) {
-        return { ...base, versionId, verdict: 'enforced',
-          detail: `The versioned delete was refused with ${errName(err)}. Retention is enforced.` };
+        outcome = { verdict: 'enforced',
+          detail: `The versioned delete was refused with ${errName(err)}. Retention is enforced by the S3 gateway.` };
+      } else {
+        outcome = { verdict: 'unknown',
+          detail: `The versioned delete failed with ${errName(err)} (${err && err.message}). That is not a refusal ` +
+                  'and is not evidence of enforcement.' };
       }
-      return { ...base, versionId, verdict: 'unknown',
-        detail: `The versioned delete failed with ${errName(err)} (${err && err.message}). That is not a refusal ` +
-                'and is not evidence of enforcement.' };
     }
+
+    const filer = outcome.verdict === 'not-enforced'
+      ? { filerBypass: 'unknown',
+          filerBypassDetail: 'The S3 gateway deleted the probe version itself, so there was nothing left at the ' +
+            'filer path to attempt. The filer bypass is unmeasured on this run.' }
+      : await probeFilerBypass(PROBE_BUCKET, key);
+
+    return {
+      ...base,
+      versionId,
+      probedMode: 'COMPLIANCE',
+      probedDays: 1,
+      ...retention,
+      ...outcome,
+      ...filer
+    };
   } catch (err) {
-    return { ...base, verdict: 'unknown',
+    return { ...base, verdict: 'unknown', defaultRetentionStamped: 'unknown', filerBypass: 'unknown',
       detail: `The probe could not run: ${errName(err)} (${err && err.message}).` };
   }
 }
@@ -532,6 +647,18 @@ async function run() {
 
   const worm = await probeWorm();
   log(`WORM enforcement: ${worm.verdict.toUpperCase()} -- ${worm.detail}`);
+  log(`bucket default retention on a real object: ${String(worm.defaultRetentionStamped).toUpperCase()} -- ` +
+      `${worm.defaultRetentionDetail || 'not probed'}`);
+  log(`filer bypass: ${String(worm.filerBypass).toUpperCase()} -- ${worm.filerBypassDetail || 'not probed'}`);
+  if (worm.filerBypass === 'open') {
+    warn('object lock is enforced by the S3 gateway only. The filer, the master and the volume servers delete ' +
+         'locked data without consulting it, and the only barrier is that those ports are published on 127.0.0.1 ' +
+         'alone. The console reports this beside the WORM verdict rather than implying more.');
+  }
+  if (worm.defaultRetentionStamped === 'not-stamped') {
+    warn('a bucket default retention rule reads back healthy but is not applied to objects written into it. ' +
+         'Every such object is deletable while every configuration read looks correct.');
+  }
 
   let actual = null;
   let actualError = null;

@@ -94,6 +94,40 @@ module.exports = {
       return {};
     }, { ...admin, expected: { outcome: 'MalformedXML' } });
 
+    await ctx.compare('default-retention-inherited-by-put-object', async (s3) => {
+      const { PutObjectCommand, GetObjectRetentionCommand } = ctx.sdk;
+      await s3.send(new PutObjectLockConfigurationCommand({
+        Bucket: versioned,
+        ObjectLockConfiguration: {
+          ObjectLockEnabled: 'Enabled',
+          Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Days: 1 } },
+        },
+      }));
+      const key = 'inherited-put-object';
+      await s3.send(new PutObjectCommand({ Bucket: versioned, Key: key, Body: 'argus-parity' }));
+      const retention = await s3.send(new GetObjectRetentionCommand({ Bucket: versioned, Key: key }));
+      return { mode: (retention.Retention || {}).Mode || null };
+    }, { ...admin, expected: { outcome: 'ok', detail: { mode: 'GOVERNANCE' } } });
+
+    await ctx.compare('default-retention-inherited-by-copy-object', async (s3) => {
+      const { PutObjectCommand, CopyObjectCommand, GetObjectRetentionCommand } = ctx.sdk;
+      await s3.send(new PutObjectLockConfigurationCommand({
+        Bucket: versioned,
+        ObjectLockConfiguration: {
+          ObjectLockEnabled: 'Enabled',
+          Rule: { DefaultRetention: { Mode: 'GOVERNANCE', Days: 1 } },
+        },
+      }));
+      const source = 'inherited-copy-source';
+      const target = 'inherited-copy-target';
+      await s3.send(new PutObjectCommand({ Bucket: versioned, Key: source, Body: 'argus-parity' }));
+      await s3.send(new CopyObjectCommand({
+        Bucket: versioned, Key: target, CopySource: `${versioned}/${source}`,
+      }));
+      const retention = await s3.send(new GetObjectRetentionCommand({ Bucket: versioned, Key: target }));
+      return { mode: (retention.Retention || {}).Mode || null };
+    }, { ...admin, expected: { outcome: 'ok', detail: { mode: 'GOVERNANCE' } } });
+
     await ctx.compare('default-retention-inherited-by-multipart', async (s3) => {
       const {
         CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand,

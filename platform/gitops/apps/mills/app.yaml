@@ -30,9 +30,9 @@ spec:
         ASPNETCORE_URLS: http://0.0.0.0:5141
         ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=umairv3_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;MultipleActiveResultSets=False;Min Pool Size=5;Packet Size=32767;Connect Timeout=30;Application Name=MillsDashboardApi;"
         ConnectionStrings__Finance: "Server=sql-01.argus.local,1433;Database=FarmerFacilitatorDb;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;"
-        Jwt__SigningKey: "{{ openbao:kv/mills/jwt-signing-key }}"
-        LegacyJwt__SigningKey: "{{ openbao:kv/mills/legacy-jwt }}"
-        Ai__ApiKey: "{{ openbao:kv/mills/anthropic }}"
+        Jwt__SigningKey: "{{ openbao:kv/mills/jwt-signing-key#value }}"
+        LegacyJwt__SigningKey: "{{ openbao:kv/mills/legacy-jwt#value }}"
+        Ai__ApiKey: "{{ openbao:kv/mills/anthropic#value }}"
         OpenRouteService__BaseUrl: http://ors.argus.local:8082/ors
         Cache__Redis: garnet.argus.local:6379,ssl=true
         Nats__Url: nats://nats.argus.local:4222
@@ -49,7 +49,7 @@ spec:
         PORT: "3100"
         HOSTNAME: 0.0.0.0
         MILLS_API_BASE: http://localhost:5141/api/v1
-        EE_BASE64_KEY: "{{ openbao:kv/mills/ee-service-key }}"
+        EE_BASE64_KEY: "{{ openbao:kv/mills/ee-service-key#value }}"
         HTTPS_PROXY: http://egress.argus.local:3128
   ingress:
     host: mills.zaraatdost.pk

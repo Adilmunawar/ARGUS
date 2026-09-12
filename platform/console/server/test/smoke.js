@@ -180,6 +180,47 @@ function send(method, path) {
   const malformed = await get('/api/host?x=%zz');
   check('a malformed escape does not crash the server', () => assert.ok(malformed.status < 500));
 
+  const searchIndex = await get('/api/search/index');
+  check('the search index answers with a reason per source rather than an empty list', () => {
+    assert.strictEqual(searchIndex.status, 200, `status ${searchIndex.status}`);
+    const b = JSON.parse(searchIndex.body);
+    assert.strictEqual(b.ok, true, JSON.stringify(b).slice(0, 300));
+    assert.ok(Array.isArray(b.items), 'no items array');
+    assert.strictEqual(b.count, b.items.length);
+    assert.strictEqual(b.cap, 2000);
+    assert.strictEqual(b.partial, true, 'every upstream is absent here, so this answer is partial');
+    for (const s of b.sources) {
+      if (s.ok) continue;
+      assert.ok(s.reason, `${s.kind} failed with no machine-readable reason`);
+      assert.ok(s.message && s.message.length > 10, `${s.kind} failed with no explanation`);
+    }
+  });
+  check('every search entry carries the route that opens it', () => {
+    for (const item of JSON.parse(searchIndex.body).items) {
+      assert.ok(item.kind && item.label, 'an entry has no kind or label');
+      assert.ok(item.route, `${item.label} has no route`);
+      assert.ok(Array.isArray(item.rest), `${item.label} has no rest segments`);
+      assert.ok(item.params && typeof item.params === 'object', `${item.label} has no params`);
+    }
+  });
+
+  const exposition = await get('/metrics');
+  check('the console publishes its own latency and error rate in Prometheus text format', () => {
+    assert.strictEqual(exposition.status, 200, `status ${exposition.status}`);
+    assert.match(exposition.headers['content-type'], /^text\/plain; version=0\.0\.4/);
+    assert.match(exposition.body, /# TYPE argus_console_build_info gauge/);
+    assert.match(exposition.body, /# TYPE argus_console_request_duration_seconds histogram/);
+    assert.match(exposition.body, /argus_console_request_duration_seconds_bucket\{le="\+Inf"\} \d+/);
+    assert.match(exposition.body, /argus_console_open_streams \d+/);
+  });
+  check('a request that matched a route is labelled by that route', () => {
+    assert.match(exposition.body, /argus_console_requests_total\{route="\/api\/health",status="200"\} \d+/);
+  });
+  check('an unknown path cannot mint a new label, or one scan turns into a cardinality bomb', () => {
+    assert.match(exposition.body, /argus_console_requests_total\{route="unmatched",status="404"\} \d+/);
+    assert.ok(!exposition.body.includes('route="/api/nope"'), 'an unmatched path became its own label');
+  });
+
   const statik = await get('/index.html');
   check('the console itself is served', () => {
     assert.strictEqual(statik.status, 200);

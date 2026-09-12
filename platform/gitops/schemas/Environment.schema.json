@@ -18,7 +18,7 @@
         "additionalProperties": false,
         "properties": {
           "version": { "type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]*$" },
-          "sha256": { "type": "string", "pattern": "^([0-9a-f]{64}|<[A-Za-z ]+>)$" }
+          "sha256": { "type": "string", "pattern": "^([0-9a-f]{64}|<filled by CI>|<catalogued>)$" }
         }
       }
     }
