@@ -1,8 +1,3 @@
-/* Operations: runbooks, backups and drills, maintenance windows, capacity and cost.
- *
- * Classic script, no modules, ES5 only, no network. Runbook output is machine
- * output rendered as text nodes, never as markup.
- */
 (function () {
   'use strict';
 
@@ -23,10 +18,6 @@
   function dayLabel(dt) { return DAYS[dt.getUTCDay()] + ' ' + dt.getUTCDate() + ' ' + MONTHS[dt.getUTCMonth()]; }
   function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-'); }
 
-  /* Plausible PowerShell output per runbook. Each entry is a function of the
-   * parameter values so the transcript names the machine the operator chose.
-   * An unset parameter renders as UNSET rather than a default host name, so
-   * the transcript never names a machine the operator did not choose. */
   var UNSET = '(not specified)';
   function val(v, key) {
     var x = v && v[key];
@@ -154,8 +145,6 @@
     ];
   }
 
-  /* ---------------------------------------------------------- runbooks --- */
-
   function runbooksTab() {
     var d = A.data;
 
@@ -244,10 +233,6 @@
     var logview = el('div.logview', {
       tabindex: '0', role: 'group',
       'aria-label': 'Transcript of ' + rb.id,
-      /* The transcript streams a line at a time. On aria-live="polite" that is a
-       * screen-reader announcement per line, which drowns out everything else and
-       * makes the page unusable while a runbook runs. So it is explicitly off and
-       * the operator asks for the result with the button next to it. */
       'aria-live': 'off'
     });
     logview.appendChild(el('div.logline', { text: 'Not started. Fill in the parameters and select Run.' }));
@@ -256,7 +241,6 @@
     var runOpts;
     var runBtn;
     var timers = [];
-    // Cleared on leave, so a run cannot keep appending to a detached node.
     A.onLeave(function () {
       timers.forEach(function (h) { window.clearTimeout(h); });
       timers = [];
@@ -278,18 +262,8 @@
       Object.keys(fields).forEach(function (k) { values[k] = fields[k].value; });
       var lines = transcriptFor(rb, values);
 
-      // setDisabled is the API: the native disabled property drops the button
-      // out of the tab order and takes its title with it.
       runBtn.setDisabled(true);
 
-      /* A transcript is capped and scrolled without reading layout.
-       *
-       * `scrollTop = scrollHeight` reads a layout-forcing property immediately
-       * after mutating the same element, and the cost of that read grows with
-       * everything already in the container -- so a long transcript pays
-       * O(lines squared) in forced layout. Assigning a large number scrolls to
-       * the end just as well and reads nothing. The cap stops a real streaming
-       * transcript from growing without bound. */
       var TRANSCRIPT_CAP = 500;
       lines.forEach(function (line, i) {
         timers.push(window.setTimeout(function () {
@@ -348,8 +322,6 @@
     ]));
   }
 
-  /* ------------------------------------------------- backups and drills --- */
-
   function backupsTab() {
     var d = A.data;
 
@@ -357,7 +329,6 @@
     var passed = d.drills.filter(function (x) { return x.outcome === 'pass'; }).length;
     var restores = d.drills.filter(function (x) { return x.kind === 'Restore'; })
       .slice().sort(function (a, b) { return b.ran - a.ran; });
-    // The drill cadence is monthly, so the next one is due 30 days after the last.
     var nextDue = restores.length ? new Date(restores[0].ran.getTime() + 30 * 86400000) : null;
     var worstRpo = d.databases.reduce(function (a, x) { return Math.max(a, x.rpoMin); }, 0);
 
@@ -409,8 +380,6 @@
     ]);
   }
 
-  /* -------------------------------------------------------- maintenance --- */
-
   function maintenanceTab() {
     var d = A.data;
     var start = new Date(Date.UTC(d.now.getUTCFullYear(), d.now.getUTCMonth(), d.now.getUTCDate()));
@@ -419,8 +388,8 @@
 
     for (var i = 0; i < 28; i++) {
       var day = new Date(start.getTime() + i * 86400000);
-      var isPatch = day.getUTCDay() === 2;      // every Tuesday
-      var isFreeze = i >= 25;                    // the last three days of the horizon
+      var isPatch = day.getUTCDay() === 2;
+      var isFreeze = i >= 25;
       var chips = [];
 
       if (isPatch) {
@@ -464,8 +433,6 @@
       }))
     ]);
   }
-
-  /* ---------------------------------------------------- capacity and cost --- */
 
   function costTab() {
     var d = A.data, c = d.cost;
@@ -529,8 +496,6 @@
     ]);
   }
 
-  /* -------------------------------------------------------------- screen --- */
-
   A.screen('ops', {
     title: 'Operations',
     crumb: 'Operations',
@@ -549,9 +514,6 @@
         { id: 'cost', label: 'Capacity and cost', render: costTab }
       ], {
         label: 'Operations sections',
-        /* The breadcrumb and the document title already name the segment
-           (#/ops/cost reads "Operations / cost" and titles itself "cost"),
-           so the open panel has to match it. */
         initial: (ctx && ctx.rest && ctx.rest[0]) || null
       }));
     }

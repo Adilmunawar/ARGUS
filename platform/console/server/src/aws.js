@@ -1,25 +1,3 @@
-/*
- * The AWS side of the estate.
- *
- * Three rules shape this file.
- *
- * 1. There are no credentials here and no parameter to pass them in. The SDK's
- *    own provider chain resolves them -- environment, shared config, SSO, or an
- *    instance role -- so this process can run on a short-lived role credential
- *    whose text it never sees, and nothing secret can be committed by accident.
- *
- * 2. Not being configured is a normal state, not an error. A laptop with no
- *    credentials, an expired SSO session and a denied IAM policy must each
- *    produce a panel that says what is wrong and what to do, never a stack
- *    trace and never a blank screen pretending the estate is empty. Every
- *    reader returns {ok, ...} rather than throwing.
- *
- * 3. Every call is bounded. An AWS API that hangs must not hang the dashboard,
- *    so each request carries an AbortSignal on a timer.
- *
- * The clients are required lazily so the server still starts, and still serves
- * host telemetry, when the SDK is not installed at all.
- */
 'use strict';
 
 const config = require('./config');
@@ -51,7 +29,6 @@ function client(kind, Ctor, region) {
   return clients.get(kind);
 }
 
-/** Every AWS call goes through here, so every AWS call is bounded and mapped. */
 async function call(fn) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), config.awsTimeoutMs);
@@ -62,13 +39,6 @@ async function call(fn) {
   }
 }
 
-/**
- * Turn an SDK error into something an operator can act on.
- *
- * The distinction that matters is "you are not connected" versus "you are
- * connected and not allowed" versus "AWS is having a bad day" -- three
- * different next actions, and the raw error message conflates them.
- */
 function classify(err) {
   const name = (err && (err.name || err.Code)) || 'Error';
   const msg = (err && err.message) || String(err);
@@ -97,7 +67,6 @@ function classify(err) {
   return { reason: 'error', message: msg };
 }
 
-/** A reader that never throws: it reports why it could not answer. */
 function guarded(key, ttlMs, producer) {
   return async function () {
     if (!load()) return { ok: false, reason: 'no-sdk', message: sdkError };
@@ -115,9 +84,6 @@ function guarded(key, ttlMs, producer) {
   };
 }
 
-/* --------------------------------------------------------------- identity --- */
-
-/** Who are we, and are we connected at all? Everything else depends on this. */
 const identity = guarded('sts:identity', config.cacheTtlMs, async () => {
   const { STSClient, GetCallerIdentityCommand } = load().STS;
   const out = await call((signal) =>
@@ -125,16 +91,11 @@ const identity = guarded('sts:identity', config.cacheTtlMs, async () => {
   return { account: out.Account, arn: out.Arn, userId: out.UserId, region: config.region };
 });
 
-/* --------------------------------------------------------------------- ec2 --- */
-
 const instances = guarded('ec2:instances', config.cacheTtlMs, async () => {
   const { EC2Client, DescribeInstancesCommand } = load().EC2;
   const c = client('ec2', EC2Client);
   const rows = [];
   let token;
-  // Paginated deliberately: an account with 400 instances returns them in
-  // pages, and a dashboard that reads only the first page is worse than one
-  // that reads none, because it looks complete.
   do {
     const out = await call((signal) =>
       c.send(new DescribeInstancesCommand({ MaxResults: 200, NextToken: token }), { abortSignal: signal }));
@@ -164,16 +125,10 @@ function tag(tags, key) {
   return t ? t.Value : null;
 }
 
-/* ---------------------------------------------------------------------- s3 --- */
-
 const buckets = guarded('s3:buckets', config.cacheTtlMs, async () => {
   const { S3Client, ListBucketsCommand } = load().S3;
   const out = await call((signal) =>
     client('s3', S3Client).send(new ListBucketsCommand({}), { abortSignal: signal }));
-  /* Size and object count are deliberately absent. There is no cheap API for
-     them -- ListObjectsV2 over a large bucket is thousands of requests -- and a
-     dashboard that quietly walks a bucket on page load is how a storage bill
-     doubles. They belong on a CloudWatch daily metric, wired separately. */
   return {
     buckets: (out.Buckets || []).map((b) => ({
       name: b.Name,
@@ -182,8 +137,6 @@ const buckets = guarded('s3:buckets', config.cacheTtlMs, async () => {
     count: (out.Buckets || []).length
   };
 });
-
-/* --------------------------------------------------------------------- rds --- */
 
 const databases = guarded('rds:instances', config.cacheTtlMs, async () => {
   const { RDSClient, DescribeDBInstancesCommand } = load().RDS;
@@ -211,8 +164,6 @@ const databases = guarded('rds:instances', config.cacheTtlMs, async () => {
   } while (marker);
   return { databases: rows, count: rows.length };
 });
-
-/* -------------------------------------------------------------- cloudwatch --- */
 
 const ALARM_PAGE_LIMIT = 20;
 
@@ -252,10 +203,6 @@ const alarms = guarded('cw:alarms', config.cacheTtlMs, async () => {
   };
 });
 
-/* -------------------------------------------------------------------- cost --- */
-
-/* Cost Explorer charges per request, so it is off unless asked for and cached
-   for hours rather than seconds. */
 const cost = guarded('ce:month', config.costCacheTtlMs, async () => {
   if (!config.costEnabled) {
     return { enabled: false, note: 'Cost Explorer is off. Set ARGUS_COST_ENABLED=1 to enable it; each call is billed.' };
@@ -265,7 +212,6 @@ const cost = guarded('ce:month', config.costCacheTtlMs, async () => {
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
   const out = await call((signal) =>
-    // Cost Explorer is only available in us-east-1, whatever the estate region.
     client('ce', CostExplorerClient, 'us-east-1').send(
       new GetCostAndUsageCommand({
         TimePeriod: { Start: start, End: end },

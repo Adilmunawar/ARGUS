@@ -1,28 +1,10 @@
-/* Argus Console: Identity and secrets.
- *
- * People, the service accounts nobody holds a password for, the time-boxed
- * access grants that are the only route to privilege, and the secret paths.
- *
- * The one rule this screen exists to enforce: a secret value is never rendered
- * anywhere in the console, not in a table, not in a dialog, not in a tooltip.
- * The console shows paths and metadata; values are read from OpenBao by the
- * workload that needs them, never proxied through an operator browser.
- *
- * Nothing is built from an HTML string: group names, reasons and secret paths
- * all come from outside the product.
- *
- * Classic script, no modules, ES5 only (ADR-0027).
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data;
   var fmt = ui.fmt;
 
-  // The signed-in principal, in the short form the grant records use.
   var ME = d.me.upn.split('@')[0];
-
-  /* ---------------------------------------------------------- helpers --- */
 
   function mono(text) { return el('span.mono', { text: text }); }
 
@@ -40,8 +22,6 @@
     }
     return ui.pill(p.mfa, 'warn', { title: TOTP_TITLE });
   }
-
-  /* -------------------------------------------------------- people tab --- */
 
   function offboard(p) {
     A.confirmDestructive({
@@ -129,8 +109,6 @@
     ]);
   }
 
-  /* ----------------------------------------------- service accounts tab --- */
-
   function gmsaTab() {
     var cols = [
       { key: 'name', label: 'Account', width: '18%', render: function (r) { return mono(r.name); } },
@@ -177,8 +155,6 @@
     ]);
   }
 
-  /* ------------------------------------------------- access grants tab --- */
-
   var GRANT_TONE = { active: 'warn', expired: 'idle', requested: 'info' };
   var GRANT_TITLE = {
     active: 'Live standing privilege. Every minute this grant is open is a minute the blast radius of a stolen session is larger, which is why it is amber and not green.',
@@ -193,11 +169,6 @@
     'Argus-Console-Approvers'
   ];
 
-  /**
-   * A ticking countdown anchored to the fixed demo clock, so the first paint is
-   * deterministic and the display still moves. The interval removes itself once
-   * the node leaves the document, because screens are replaced on navigation.
-   */
   function countdown(expires) {
     var node = el('span.mono', { text: '' });
     var mountedAt = Date.now();
@@ -209,9 +180,6 @@
     }
 
     function tick() {
-      // The detach check belongs to the interval, not to the first paint: the
-      // node is returned to the caller and appended afterwards, so it is not
-      // in the document yet when the first paint runs.
       if (!document.body.contains(node)) { window.clearInterval(timer); return; }
       paint();
     }
@@ -270,7 +238,6 @@
           el('option', { value: '4', text: '4 hours (maximum)' })
         ]);
 
-        // Held on the dialog options object so the actions builder can reach them.
         requestElevationDialog._group = groupSel;
         requestElevationDialog._reason = reason;
         requestElevationDialog._hours = hoursSel;
@@ -299,18 +266,11 @@
         var reason = requestElevationDialog._reason;
         var hoursSel = requestElevationDialog._hours;
 
-        // No onClick here: ui.btn captures opts.disabled at construction, so the
-        // listener is attached separately and reads the live disabled state,
-        // which is the same pattern confirmDestructive uses.
         var submit = ui.btn('Request elevation', {
           variant: 'primary',
           disabled: true,
           title: 'Give a reason first: it is written to the audit.'
         });
-        // aria-disabled via setDisabled, never the native property: a natively
-        // disabled button leaves the focus trap's FOCUSABLE list and takes its
-        // title -- the only statement of why it is unavailable -- out of reach
-        // of assistive technology (defect B7).
         submit.setDisabled(true);
 
         submit.addEventListener('click', function () {
@@ -386,8 +346,6 @@
       }));
     }
 
-    // The same data-key a table row carries, so ui.revealRow can find the card
-    // a deep link names -- Overview links straight to "#/identity/grants?id=g-442".
     return el('div.grantcard', { data: { key: g.id } }, body);
   }
 
@@ -411,11 +369,8 @@
     ]);
   }
 
-  /* ------------------------------------------------------- secrets tab --- */
-
   var READ_ACTORS = ['gmsa-mills$', 'gmsa-console$', 'reconciler', 'gmsa-ci$', 'gmsa-loan$'];
 
-  /** Recent reads derived from the path, so the list is stable between runs. */
   function recentReads(s) {
     var n = Math.min(4, Math.max(2, s.leases));
     var out = [];
@@ -490,9 +445,6 @@
           s.rotatedDays + ' days old.'
       });
     }
-    // Proportional, not a fixed ten days: `rotatedDays > policyDays - 10` is
-    // `0 > -9` for a one-day policy, so a fixed window would flag a credential
-    // that rotates correctly every day.
     var soon = Math.max(1, Math.round(s.policyDays * 0.1));
     if (s.rotatedDays > s.policyDays - soon) {
       return ui.pill(fmt.num(s.rotatedDays) + ' d', 'warn', {
@@ -566,8 +518,6 @@
     ]);
   }
 
-  /* ------------------------------------------------------------- screen --- */
-
   A.screen('identity', {
     title: 'Identity & secrets',
     crumb: 'Identity & secrets',
@@ -582,9 +532,6 @@
           })
         ]));
 
-      /* Overview and the Config tab both build links that name a row --
-         "?id=g-442", "?path=kv/mills/jwt-signing-key" -- so the named row is
-         revealed and highlighted when its tab opens. */
       var wanted = (ctx && ctx.params) || {};
       mount.appendChild(ui.tabs([
         { id: 'people', label: 'People', render: peopleTab },

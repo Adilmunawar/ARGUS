@@ -50,7 +50,7 @@ function strip(source, parsed) {
     if (had && code.trim() === '') continue;
     kept.push(code.replace(/[ \t]+$/, ''));
   }
-  let out = kept.join('\n').replace(/\n{3,}/g, '\n\n');
+  let out = kept.join('\n').replace(/\n{3,}/g, '\n\n').replace(/^\n+/, '');
   if (source.endsWith('\n') && !out.endsWith('\n')) out += '\n';
   const before = tokenStream(source, parsed.sourceType);
   if (tokenStream(out, parsed.sourceType) !== before) throw new Error('token stream changed');

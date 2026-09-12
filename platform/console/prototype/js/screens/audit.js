@@ -1,9 +1,3 @@
-/* Audit: every action by anyone, kept forever.
- *
- * Classic script, no modules, ES5 only, no network. Actor names, action names
- * and target strings are written by whoever performed the action, including
- * automation outside this codebase, so every one of them is a text node.
- */
 (function () {
   'use strict';
 
@@ -11,7 +5,6 @@
 
   var ROLE_TONE = { System: 'idle', Admin: 'bad', Approver: 'info', Operator: 'ok' };
 
-  /** RFC 4180: quote a field, and double any quote inside it. */
   function csvField(v) {
     var s = v === null || v === undefined ? '' : String(v);
     return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -56,8 +49,6 @@
           text,
           el('p.hint', {
             id: 'audit-csv-note',
-            /* No blob download link on purpose: the prototype runs from file://
-             * under a strict CSP where a download never starts. */
             text: 'The text is shown rather than downloaded because this prototype opens from file:// with '
               + 'downloads blocked, so a download link would silently do nothing. Select all and copy. '
               + 'A real deployment streams the same rows from the API, signed, without loading them into a page.'
@@ -107,8 +98,6 @@
           key: 'at', label: 'When',
           sort: function (r) { return r.at.getTime(); },
           render: function (r) {
-            // Both times, always: relative for reading, absolute UTC for quoting
-            // in an incident report where "3 h ago" means nothing a week later.
             return el('div.col', [
               fmt.time(r.at),
               el('div.muted', el('span.mono', { text: fmt.stamp(r.at) }))
@@ -138,9 +127,6 @@
       var visible = d.audit.slice();
       var table = null;
 
-      /* One table instance for the life of the screen: the sort state lives on
-         the instance, so rebuilding it on a token change would throw away the
-         sort the operator has chosen. */
       function paint(tokens) {
         visible = ui.applyTokens(d.audit, tokens || [], accessors);
         if (table) { table.setRows(visible); return; }
@@ -153,9 +139,6 @@
         tableHost.appendChild(table);
       }
 
-      /* The export dialog claims the CSV is "in the order it is sorted", so it
-         reads the table's own rows: ui.table sorts a private copy, and the
-         filter output is in dataset order. */
       function exportRows() {
         return table && table.currentRows ? table.currentRows() : visible;
       }

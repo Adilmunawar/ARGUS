@@ -178,6 +178,13 @@ function openTail(options, handlers) {
     return () => {};
   }
 
+  let finished = false;
+  function finish(code, reason) {
+    if (finished) return;
+    finished = true;
+    if (handlers.onClose) handlers.onClose(code, reason);
+  }
+
   socket.addEventListener('open', () => handlers.onOpen && handlers.onOpen());
 
   socket.addEventListener('message', (event) => {
@@ -198,14 +205,13 @@ function openTail(options, handlers) {
       message: `${LABEL} did not accept or keep the tail connection. ` +
         'Check `docker compose --profile observability ps loki`.'
     });
+    finish(null, 'the tail socket failed');
   });
 
-  socket.addEventListener('close', (event) => {
-    if (handlers.onClose) handlers.onClose(event && event.code, event && event.reason);
-  });
+  socket.addEventListener('close', (event) => finish(event && event.code, event && event.reason));
 
   return () => {
-    try { socket.close(1000, 'client done'); } catch (err) { handlers.onClose && handlers.onClose(1000, ''); }
+    try { socket.close(1000, 'client done'); } catch (err) { finish(1000, ''); }
   };
 }
 

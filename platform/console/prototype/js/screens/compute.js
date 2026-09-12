@@ -1,22 +1,8 @@
-/* Argus Console: Compute.
- *
- * Hosts, virtual machines, the Service Fabric cluster and the GPU node, plus
- * the two detail views an operator reaches from them. The Connect tab is the
- * point of the screen: connecting to a machine is the most dangerous thing this
- * console offers, so it says out loud what will happen before it happens.
- *
- * Classic script, no modules, no build step, no network (ADR-0027). Every node
- * is built through ui.el; nothing here ever touches innerHTML.
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
-  /* app.js is parsed before the screens and defers its own boot, so A.screen
-     exists by now. The queue below stays as a guard against the load order
-     regressing: the registration is queued and flushed the moment app.js
-     installs the real registry. */
   function registerScreen(id, def) {
     if (typeof A.screen === 'function') { A.screen(id, def); return; }
     var q = (A._screenQueue = A._screenQueue || []);
@@ -32,14 +18,10 @@
     });
   }
 
-  /* ------------------------------------------------------------- shared --- */
-
   function mono(text) { return el('code.mono', { text: String(text) }); }
 
   function named(label, suffix) { return [label, el('span.sr', { text: ' ' + suffix })]; }
 
-  // Indexed rather than a scan per row: this is called once for every host in
-  // the table and re-run on every sort.
   var siteIndex = null, siteIndexFor = null;
   function siteName(id) {
     if (siteIndexFor !== d.sites || !siteIndex) {
@@ -50,10 +32,6 @@
     return siteIndex[id] || String(id);
   }
 
-  /**
-   * The virtual machines actually placed on a host, from the inventory --
-   * one source of truth, rather than the stored host.vms count.
-   */
   function vmsOn(hostName) {
     return d.vms.filter(function (v) { return v.host === hostName; });
   }
@@ -101,8 +79,6 @@
       { proto: proto, name: proto, protocol: proto.toUpperCase(), what: '' };
   }
 
-  /* --------------------------------------------------------- hosts table --- */
-
   function hostsTab() {
     var cols = [
       { key: 'name', label: 'Name', render: function (r) { return A.link(r.name, 'compute', ['host', r.name]); } },
@@ -110,14 +86,12 @@
       { key: 'role', label: 'Role' },
       { key: 'cpu', label: 'CPU', render: function (r) { return utilisation(r.name + ' CPU', r.cpu); } },
       { key: 'mem', label: 'Memory', render: function (r) { return utilisation(r.name + ' memory', r.mem); } },
-      // Derived, not the stored host.vms count. See vmsOn above.
       { key: 'vms', label: 'VMs', align: 'right',
         sort: function (r) { return vmsOn(r.name).length; },
         render: function (r) { return fmt.num(vmsOn(r.name).length); } },
       {
         key: 'patchAgeDays', label: 'Patch age', align: 'right',
         render: function (r) {
-          // Over 30 days is outside the patch window.
           return r.patchAgeDays > 30
             ? ui.pill(fmt.num(r.patchAgeDays) + ' d', 'warn')
             : el('span', { text: fmt.num(r.patchAgeDays) + ' d' });
@@ -134,8 +108,6 @@
       onRow: function (r) { A.go('compute', ['host', r.name]); }
     });
   }
-
-  /* ----------------------------------------------------------- vms table --- */
 
   function vmsTab() {
     var cols = [
@@ -172,16 +144,12 @@
         }
       }
     ];
-    // No row click here: the row carries its own buttons, and a row that
-    // navigates under a button is how operators open the wrong machine.
     return ui.table(cols, d.vms, {
       caption: 'Virtual machines, with placement, replication state and the ways in to each',
       sortKey: 'name',
       rowKey: function (r) { return r.name; }
     });
   }
-
-  /* -------------------------------------------------------------- fabric --- */
 
   function fabricTab() {
     var grid = el('div.nodegrid', d.sfNodes.map(function (n) {
@@ -205,8 +173,6 @@
       grid
     ]);
   }
-
-  /* ----------------------------------------------------------------- gpu --- */
 
   function gpuTab() {
     var cards = el('div.grid.grid-2', d.gpu.cards.map(function (c) {
@@ -240,8 +206,6 @@
     ]);
   }
 
-  /* ---------------------------------------------------------------- list --- */
-
   function renderList(mount) {
     mount.appendChild(ui.pageHeader(
       'Compute',
@@ -254,8 +218,6 @@
       { id: 'gpu', label: 'GPU', render: gpuTab }
     ], { label: 'Compute sections' }));
   }
-
-  /* --------------------------------------------------------- host detail --- */
 
   function confirmDrain(host, ctx) {
     A.confirmDestructive({
@@ -360,10 +322,6 @@
     ]));
   }
 
-  /* ----------------------------------------------------------- vm detail --- */
-
-  /** A stable seed per machine, so the performance series is identical on every
-   *  run. The tests compare rendered output, so Math.random would be a bug. */
   function seedFor(name) {
     var s = 0;
     for (var i = 0; i < name.length; i++) s = (s * 31 + name.charCodeAt(i)) % 100003;
@@ -408,7 +366,6 @@
       ]);
     }));
 
-    // The sparklines are the shape; the table is the data.
     var cols = [
       { key: 'label', label: 'Metric' },
       { key: 'latest', label: 'Now', align: 'right', render: function (r) { return fmt.num(r.latest, 1) + r.unit; } },
@@ -533,8 +490,6 @@
       { id: 'connect', label: 'Connect', render: function () { return connectTab(vm); } }
     ], { label: 'Sections of ' + vm.name }));
   }
-
-  /* ----------------------------------------------------------- register --- */
 
   registerScreen('compute', {
     title: 'Compute',

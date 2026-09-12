@@ -1,4 +1,3 @@
-# sql-01: SQL Server 2022 AG primary. Shielded Generation 2 VM on cluster argus-hvc-a.
 module "sql_01" {
   source     = "./modules/shielded-vm"
   name       = "sql-01"
@@ -6,7 +5,7 @@ module "sql_01" {
   generation = 2
   vcpu       = 16
   memory_mb  = 131072
-  vlan       = 31                                   # DATA
+  vlan       = 31
   shielding  = { enabled = true, hgs = "hgs-01.argus.local" }
   disks = [
     { name = "os",     size_gb = 100,  tier = "nvme" },

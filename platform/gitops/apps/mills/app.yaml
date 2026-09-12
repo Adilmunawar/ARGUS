@@ -1,4 +1,3 @@
-# Service Fabric application: Mills Dashboard
 apiVersion: argus/v1
 kind: ServiceFabricApp
 metadata:
@@ -9,9 +8,9 @@ metadata:
 spec:
   package:
     bucket: argus-artifacts
-    key: mills/{{ version }}.sfpkg          # version comes from environments/*.yaml
-    signature: authenticode                 # reconciler verifies before registering
-  identity: gmsa-mills$                     # RunAs for every service below
+    key: mills/{{ version }}.sfpkg
+    signature: authenticode
+  identity: gmsa-mills$
   services:
     - name: MillsGateway
       type: GuestExecutable

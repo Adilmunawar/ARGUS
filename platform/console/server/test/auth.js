@@ -1,15 +1,3 @@
-/*
- * Argus console API: authentication tests.
- *
- *   node test/auth.js
- *
- * Every server here is a real child process on a real port, because the two
- * highest-value assertions in this file are about a process that REFUSES TO
- * START. An in-process harness cannot observe that at all: the refusal is
- * process.exit(1), and the only honest way to test it is to run it.
- *
- * Exit code is the failure count, so CI can gate on it.
- */
 'use strict';
 
 const http = require('http');
@@ -160,7 +148,7 @@ async function waitForListening(server, timeoutMs) {
     try {
       const r = await call(server, { path: '/api/health' });
       if (r.status === 200) return true;
-    } catch (err) { /* not up yet */ }
+    } catch (err) {  }
     await sleep(100);
   }
   return false;
@@ -194,8 +182,6 @@ function writeOperatorsFile(dir, record, extra) {
 
   const emptyFile = path.join(dir, 'empty.json');
   fs.writeFileSync(emptyFile, JSON.stringify({ operators: [] }));
-
-  /* ----------------------------------------------------- boot refusals --- */
 
   const refuseOpen = launch({ ARGUS_AUTH: 'off', ARGUS_HOST: '0.0.0.0' });
   const refuseOpenCode = await waitForExit(refuseOpen);
@@ -248,8 +234,6 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(body.auth.authenticated, true);
     assert.strictEqual(body.auth.subject, 'local-development');
   });
-
-  /* --------------------------------------------------------- session mode --- */
 
   const main = launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile });
   const mainUp = await waitForListening(main);
@@ -398,8 +382,6 @@ function writeOperatorsFile(dir, record, extra) {
     assert.match(String((forged.headers['set-cookie'] || [])[0] || ''), /Max-Age=0/);
   });
 
-  /* ------------------------------------------------------------- lockout --- */
-
   const lockoutTarget = 'adil';
   const attempts = [];
   for (let i = 0; i < 6; i += 1) {
@@ -434,8 +416,6 @@ function writeOperatorsFile(dir, record, extra) {
       `status ${lockedOutCorrectPassword.status}`);
   });
 
-  /* ------------------------------------------------------------- logout --- */
-
   const logout = await call(main, {
     method: 'POST',
     path: '/api/auth/logout',
@@ -456,8 +436,6 @@ function writeOperatorsFile(dir, record, extra) {
   check('the sign-out is audited', () => {
     assert.ok(auditEvents(main).includes('auth.logout'), auditEvents(main).join(', '));
   });
-
-  /* ------------------------------------------------------------ headers --- */
 
   const REQUIRED_HEADERS = ['content-security-policy', 'x-content-type-options', 'referrer-policy',
     'cross-origin-resource-policy', 'cross-origin-opener-policy', 'x-frame-options',
@@ -517,8 +495,6 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(staticPage.status, 200, `status ${staticPage.status}`);
   });
 
-  /* -------------------------------------------------- nothing secret logged --- */
-
   check('no audit line ever carries a credential, a token or a cookie', () => {
     const text = JSON.stringify(auditLines(main));
     assert.strictEqual(text.includes(PASSWORD), false, 'the password reached the audit stream');
@@ -532,8 +508,6 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(main.err.includes(PASSWORD), false);
   });
 
-  /* ------------------------------------------------- secure cookie profile --- */
-
   const secure = launch({
     ARGUS_AUTH: 'session',
     ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
@@ -546,8 +520,6 @@ function writeOperatorsFile(dir, record, extra) {
     const raw = (secureLogin.headers['set-cookie'] || [])[0] || '';
     assert.match(raw, /^__Host-argus_sid=[A-Za-z0-9_-]{43}; Path=\/; Secure; HttpOnly; SameSite=Strict$/, raw);
   });
-
-  /* ------------------------------------------------------ expiry and renewal --- */
 
   const shortLived = launch({
     ARGUS_AUTH: 'session',
@@ -596,8 +568,6 @@ function writeOperatorsFile(dir, record, extra) {
   check('the renewal is audited', () => {
     assert.ok(auditEvents(renewing).includes('auth.session.renewed'), auditEvents(renewing).join(', '));
   });
-
-  /* ---------------------------------------------------------- proxy mode --- */
 
   const proxied = launch({
     ARGUS_AUTH: 'proxy',
@@ -661,15 +631,11 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(proxyLogin.status, 404, `status ${proxyLogin.status}`);
   });
 
-  /* ------------------------------------------------- read-only carve-out --- */
-
   const readOnlyLogin = await login(main, 'someone-else', WRONG_PASSWORD);
   check('signing in is not refused by the read-only gate', () => {
     assert.notStrictEqual(readOnlyLogin.status, 405,
       'the default read-only deployment would be impossible to sign into');
   });
-
-  /* --------------------------------------------- the scrypt memory cliff --- */
 
   check('the shipped scrypt parameters need an explicit maxmem, and we pass one', () => {
     const crypto = require('node:crypto');
@@ -694,8 +660,6 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(verified, true);
     assert.strictEqual(refused, false);
   });
-
-  /* -------------------------------------------------------------- report --- */
 
   for (const server of spawned) {
     if (server.exitCode === null) server.child.kill('SIGKILL');

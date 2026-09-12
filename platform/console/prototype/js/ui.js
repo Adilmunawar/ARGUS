@@ -1,31 +1,11 @@
-/* Argus Console: the component library every screen is built from.
- *
- * Screens never write HTML strings and never touch innerHTML with data. They
- * build DOM through el(), which escapes by construction, because this console
- * renders alert rules, log lines, commit messages and file names that come from
- * outside the product. One innerHTML on that path is a stored XSS in an admin
- * tool, which is the highest-value target on the platform.
- *
- * Classic script, no modules: the console has to open from file:// with no
- * build step and no network (ADR-0027).
- */
 (function () {
   'use strict';
 
   var A = (window.ARGUS = window.ARGUS || {});
   var UI = {};
 
-  /* ---------------------------------------------------------------- DOM --- */
-
   var SVG_NS = 'http://www.w3.org/2000/svg';
 
-  /**
-   * el('div.card', {attrs}, [children]) builds an element.
-   * The tag accepts a CSS-ish shorthand: 'button.btn.primary', 'span#id.pill'.
-   * Children may be nodes, strings, numbers, arrays, or null (skipped).
-   * Attribute keys: 'class', 'text', 'html' (rejected), 'on' (event map),
-   * 'data' (dataset map), 'aria-*', anything else set as an attribute.
-   */
   function el(tag, attrs, children) {
     var parts = String(tag).split(/(?=[.#])/);
     var name = parts.shift() || 'div';
@@ -79,15 +59,6 @@
 
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); return node; }
 
-  /* ------------------------------------------------------------ format --- */
-
-  /* Intl objects are expensive to construct and cheap to reuse, and both of
-     these sit on hot paths: the collator runs n log n times per sort, and
-     fmt.num runs several times per row per paint. toLocaleString with an
-     options bag rebuilds a formatter on essentially every call. One instance
-     per distinct shape, built on first use, is the whole optimisation. */
-  /* numeric:true sorts hv-2 before hv-10 rather than after it, which is what
-     an operator reading a host list expects. */
   var collator = new Intl.Collator('en-GB', { numeric: true });
   var numFormats = {};
   function numFormat(dp) {
@@ -103,8 +74,6 @@
       return numFormat(dp === undefined ? 0 : dp).format(Number(n));
     },
     pct: function (n, dp) { return (n === null || n === undefined) ? '-' : Number(n).toFixed(dp === undefined ? 1 : dp) + '%'; },
-    // Guarded here rather than relying on pct: Number(null) * 100 is 0, and a
-    // missing ratio must print "-" like every sibling formatter, not "0.0%".
     ratioPct: function (n, dp) {
       return (n === null || n === undefined) ? '-' : fmt.pct(Number(n) * 100, dp);
     },
@@ -118,14 +87,11 @@
     dur: function (s) {
       if (s === null || s === undefined) return '-';
       if (s < 60) return Math.round(s) + ' s';
-      // Round to whole minutes FIRST, then split: flooring the hours while
-      // rounding the remainder independently lets the remainder reach 60.
       var mins = Math.round(s / 60);
       if (mins < 60) return mins + ' min';
       var h = Math.floor(mins / 60), m = mins % 60;
       return h + ' h' + (m ? ' ' + m + ' min' : '');
     },
-    /** Relative time, always with an absolute title so nothing is ambiguous. */
     ago: function (d) {
       if (!d) return 'never';
       var s = Math.round((A.data.now - d) / 1000);
@@ -137,14 +103,6 @@
       else out = Math.round(s / 86400) + ' d';
       return future ? 'in ' + out : out + ' ago';
     },
-    /**
-     * An absolute timestamp, in whichever clock the operator chose.
-     *
-     * Local time always carries its offset. A console that renders a bare
-     * "14:30" is unreadable on a bridge call with a colleague in another zone,
-     * and Argus runs across two sites; the offset is what makes the number
-     * quotable.
-     */
     stamp: function (d) {
       if (!d) return '';
       if (A.timezone && A.timezone() === 'local') {
@@ -158,37 +116,21 @@
       }
       return d.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
     },
-    /** A time element carrying both the relative and the absolute value. */
     time: function (d) {
       if (!d) return el('span.muted', { text: 'never' });
       return el('time', { datetime: d.toISOString(), title: fmt.stamp(d), text: fmt.ago(d) });
     }
   };
 
-  /* --------------------------------------------------------- components --- */
-
-  /** Status pill. Tone is one of ok, warn, bad, info, idle. */
   function pill(text, tone, opts) {
     opts = opts || {};
     var p = el('span.pill.' + (tone || 'idle'), { text: text });
-    // Colour is never the only carrier of meaning: each tone gets a glyph too,
-    // for colour-blind readers and for anyone reading a greyscale printout.
     var glyph = { ok: '●', warn: '▲', bad: '■', info: '◆', idle: '○' }[tone || 'idle'];
     p.insertBefore(el('span.pill-glyph', { 'aria-hidden': 'true', text: glyph }), p.firstChild);
     if (opts.title) p.title = opts.title;
     return p;
   }
 
-  /**
-   * A button.
-   *
-   * Disabled is expressed with aria-disabled rather than the native property,
-   * so the control keeps its place in the tab order and its title stays
-   * discoverable: an operator needs to read *why* Approve is unavailable, and
-   * a natively disabled button tells them nothing. That only works if the
-   * guard is real, so the click handler is always attached and always consults
-   * the live flag.
-   */
   function btn(label, opts) {
     opts = opts || {};
     var disabled = !!opts.disabled;
@@ -213,7 +155,6 @@
     return b;
   }
 
-  /** A page header: title, optional description, optional action cluster. */
   function pageHeader(title, desc, actions) {
     return el('header.pagehead', [
       el('div.pagehead-text', [
@@ -224,7 +165,6 @@
     ]);
   }
 
-  /** A single statistic. delta is {value, dir:'up'|'down', good:boolean}. */
   function statTile(label, value, opts) {
     opts = opts || {};
     return el('div.tile', [
@@ -234,9 +174,6 @@
         opts.unit ? el('span.tile-unit', { text: ' ' + opts.unit }) : null
       ]),
       opts.delta ? el('div.delta.' + (opts.delta.good ? 'up' : 'down'), [
-        /* The arrow shows DIRECTION and the class shows whether that is good:
-           a good-but-falling metric renders as a green down arrow. The word
-           makes it readable in greyscale and to a screen reader. */
         el('span', { 'aria-hidden': 'true', text: opts.delta.dir === 'up' ? '↑' : '↓' }),
         el('span.sr', { text: (opts.delta.dir === 'up' ? 'up, ' : 'down, ') + (opts.delta.good ? 'good' : 'bad') + ': ' }),
         ' ' + opts.delta.value
@@ -256,11 +193,6 @@
     ]);
   }
 
-  /**
-   * A data table.
-   * cols: [{key, label, align, width, render(row) -> node|string, sort(row) -> comparable, th}]
-   * opts: {caption (required, may be sr-only), empty, sortKey, sortDir, onRow, rowKey}
-   */
   function table(cols, rows, opts) {
     opts = opts || {};
     var state = { key: opts.sortKey || null, dir: opts.sortDir || 'asc' };
@@ -274,15 +206,6 @@
     var headRow = el('tr');
     var tbody = el('tbody');
 
-    /**
-     * Sort, decorate-sort-undecorate, in the requested direction.
-     *
-     * The sort key is extracted once per row up front rather than recomputed
-     * in the comparator. Descending negates the comparator rather than
-     * reversing an ascending sort, so rows with no value stay at the bottom
-     * in both directions. String comparison goes through one cached
-     * Intl.Collator; localeCompare builds a collator per call.
-     */
     function sortRows(list, col, dir) {
       var decorated = list.map(function (row, i) {
         return { row: row, k: col.sort ? col.sort(row) : row[col.key], i: i };
@@ -290,8 +213,8 @@
       var sign = dir === 'desc' ? -1 : 1;
       decorated.sort(function (a, b) {
         var av = a.k, bv = b.k;
-        if (av === bv) return a.i - b.i;                       // stable
-        if (av === null || av === undefined) return 1;         // blanks last, both ways
+        if (av === bv) return a.i - b.i;
+        if (av === null || av === undefined) return 1;
         if (bv === null || bv === undefined) return -1;
         if (typeof av === 'number' && typeof bv === 'number') return sign * (av - bv);
         return sign * collator.compare(String(av), String(bv));
@@ -299,12 +222,6 @@
       return decorated.map(function (d) { return d.row; });
     }
 
-    /*
-     * Row activation is delegated to the tbody rather than bound per row: one
-     * pair of listeners on the container survives repaints, and `rowIndex`
-     * maps the event back to the row it came from without holding a reference
-     * to anything.
-     */
     var rowsShown = [];
     function rowFromEvent(e) {
       var tr = e.target && e.target.closest ? e.target.closest('tr') : null;
@@ -313,8 +230,6 @@
     }
     if (opts.onRow) {
       tbody.addEventListener('click', function (e) {
-        // A control inside the row handles its own click; the row is only the
-        // fallback target.
         if (e.target.closest('button, a, input, select, textarea')) return;
         var row = rowFromEvent(e);
         if (row) opts.onRow(row);
@@ -327,22 +242,6 @@
       });
     }
 
-    /*
-     * Windowed rendering, past a threshold.
-     *
-     * The audit log grows without bound, so past VIRTUAL_MIN only the rows
-     * near the viewport are built, with a spacer above and below standing in
-     * for the rest so the scrollbar stays honest. Below the threshold nothing
-     * changes -- a windowed table has real costs (a scroll listener, a
-     * measured row height, find-in-page only seeing what is rendered) and
-     * they are not worth paying for thirty rows.
-     *
-     * The accessibility contract is what makes this safe to do at all: the
-     * table declares aria-rowcount for the WHOLE set and each rendered row
-     * carries its true aria-rowindex, so a screen reader is told "row 4,812 of
-     * 96,000" rather than being quietly handed a window and told it is
-     * everything.
-     */
     var VIRTUAL_MIN = 150;
     var OVERSCAN = 10;
     var rowHeight = 0;
@@ -351,7 +250,6 @@
     function buildRow(row, absoluteIndex) {
       var tr = el('tr');
       tr.dataset.rowIndex = String(absoluteIndex);
-      // 1-based, and the header occupies row 1.
       tr.setAttribute('aria-rowindex', String(absoluteIndex + 2));
       if (opts.rowKey) tr.dataset.key = opts.rowKey(row);
       cols.forEach(function (c) {
@@ -361,11 +259,6 @@
         tr.appendChild(td);
       });
       if (opts.onRow) {
-        /* No role="link" here. An explicit role REPLACES the implicit `row`,
-           so the tr would stop being a row of its table and its cells would
-           lose their header association. The row stays a row; it keeps its
-           tabindex so it is still reachable without a mouse, and the listeners
-           live on the tbody. */
         tr.classList.add('is-clickable');
         tr.tabIndex = 0;
       }
@@ -377,7 +270,6 @@
         el('td', { colspan: String(cols.length), style: { height: height + 'px', padding: '0' } }));
     }
 
-    /** Render the slice of `current` that the viewport can actually show. */
     function renderWindow() {
       var list = current;
       clear(tbody);
@@ -396,8 +288,6 @@
         return;
       }
 
-      // One measurement, reused. Reading it per scroll would be the layout
-      // thrash this is meant to avoid.
       if (!rowHeight) {
         var probe = buildRow(list[0], 0);
         tbody.appendChild(probe);
@@ -430,8 +320,6 @@
         var col = cols.filter(function (c) { return c.key === state.key; })[0];
         if (col) list = sortRows(list, col, state.dir);
       }
-      // The order the operator is looking at, so an export can match the claim
-      // it makes about being "in the order it is sorted".
       current = list;
       rowsShown = list;
 
@@ -441,14 +329,10 @@
       t.setAttribute('aria-rowcount', String(list.length + 1));
       if (windowed && !wasWindowed) wrap.addEventListener('scroll', onScroll);
       if (!windowed && wasWindowed) wrap.removeEventListener('scroll', onScroll);
-      // A re-sort re-orders everything, so the old scroll offset means nothing.
       if (windowed) wrap.scrollTop = 0;
 
       renderWindow();
 
-      // Only a sort the operator asked for is worth announcing. Announcing the
-      // first paint of all 31 tables races the route-change announcement and
-      // silently drops it.
       if (announceNext && state.key) {
         announceNext = false;
         var col2 = cols.filter(function (c) { return c.key === state.key; })[0];
@@ -490,17 +374,11 @@
     wrap.appendChild(t);
     paint();
     wrap.repaint = paint;
-    /** The rows as currently shown, in the order shown. */
     wrap.currentRows = function () { return current.slice(); };
-    /**
-     * Swap the data without rebuilding the table, so the thead, the sort
-     * buttons and the sort the operator has chosen survive a filter change.
-     */
     wrap.setRows = function (next) { rows = next || []; paint(); };
     return wrap;
   }
 
-  /** An honest empty state: what happened, and what to do about it. */
   function emptyState(title, detail, action) {
     return el('div.empty', [
       el('div.empty-title', { text: title }),
@@ -522,19 +400,15 @@
       Array.apply(null, Array(rows || 3)).map(function () { return el('div.skel-row'); }));
   }
 
-  /** Definition list for detail panes. items: [[label, value], ...] */
   function dl(items) {
     return el('dl.deflist', items.filter(Boolean).map(function (kv) {
       return el('div.deflist-row', [el('dt', { text: kv[0] }), el('dd', kv[1])]);
     }));
   }
 
-  /** Tabs. items: [{id, label, render() -> node}]. Follows the ARIA tabs pattern. */
   function tabs(items, opts) {
     opts = opts || {};
     var listId = 'tabs-' + Math.random().toString(36).slice(2, 8);
-    // opts.initial may be a tab id or an index, so #/identity/grants can open
-    // the tab the URL names instead of always landing on the first one.
     var start = 0;
     if (opts.initial !== undefined && opts.initial !== null) {
       items.forEach(function (it, i) { if (it.id === opts.initial) start = i; });
@@ -544,9 +418,6 @@
     var list = el('div.tablist', { role: 'tablist', 'aria-label': opts.label || 'Sections' });
     var buttons = [];
 
-    // Teardown for the panel currently on screen. A tab switch does not go
-    // through the router, so without this nothing ever drained what a panel
-    // registered on render and every switch retained its subtree.
     var disposePanel = null;
 
     function select(i, focus) {
@@ -560,9 +431,6 @@
       clear(panel);
       panel.setAttribute('aria-labelledby', listId + '-' + i);
 
-      /* A panel that throws gets an error state, not a blank rectangle:
-         app.js wraps `def.render` in a try/catch, but a tab panel is rendered
-         later, on click, outside that guard. */
       try {
         if (A.scopeLeaveHooks) {
           var built;
@@ -583,7 +451,6 @@
       if (opts.onSelect) opts.onSelect(items[i].id);
     }
 
-    // The last panel still has to be torn down when the screen itself goes.
     if (A.onLeave) A.onLeave(function () { if (disposePanel) { disposePanel(); disposePanel = null; } });
 
     items.forEach(function (it, i) {
@@ -678,9 +545,13 @@
       ]);
     }
 
+    function unschedule() {
+      if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
+      if (timer !== null) { window.clearTimeout(timer); timer = null; }
+    }
+
     function flush() {
-      frame = null;
-      timer = null;
+      unschedule();
       if (!pending.length) return;
       if (placeholder && placeholder.parentNode === view) {
         view.removeChild(placeholder);
@@ -700,10 +571,7 @@
       if (frame !== null || timer !== null) return;
       if (typeof window.requestAnimationFrame === 'function') {
         frame = window.requestAnimationFrame(flush);
-        timer = window.setTimeout(function () {
-          if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
-          flush();
-        }, 250);
+        timer = window.setTimeout(flush, 250);
         return;
       }
       timer = window.setTimeout(flush, 16);
@@ -717,12 +585,9 @@
         for (var i = 0; i < lines.length; i++) pending.push(lines[i]);
         schedule();
       },
-      flushNow: function () {
-        if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
-        if (timer !== null) { window.clearTimeout(timer); timer = null; }
-        flush();
-      },
+      flushNow: function () { flush(); },
       say: function (text) {
+        unschedule();
         clear(view);
         pending.length = 0;
         latest = null;
@@ -730,6 +595,7 @@
         view.appendChild(placeholder);
       },
       reset: function () {
+        unschedule();
         clear(view);
         pending.length = 0;
         latest = null;
@@ -748,16 +614,12 @@
         if (opts.onFollow) opts.onFollow(pinned);
       },
       stop: function () {
-        if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
-        if (timer !== null) { window.clearTimeout(timer); timer = null; }
+        unschedule();
         pending.length = 0;
       }
     };
   }
 
-  /* ------------------------------------------------------------ charts --- */
-
-  /** An inline sparkline. Decorative by default; pass a label to expose it. */
   function sparkline(values, opts) {
     opts = opts || {};
     var w = opts.width || 120, h = opts.height || 28, pad = 2;
@@ -803,14 +665,6 @@
     return s;
   }
 
-  /**
-   * A horizontal bar, used for utilisation and share-of-total.
-   *
-   * The tone says "this has crossed a threshold". `warn` and `bad` separate
-   * by a deuteranopic delta-E of 2.9 in this palette, so a toned fill also
-   * carries a texture, and the tone is named in the accessible label rather
-   * than left to the eye.
-   */
   var TONE_WORD = { warn: 'over the warning threshold', bad: 'over the critical threshold' };
   function bar(ratio, opts) {
     opts = opts || {};
@@ -947,20 +801,12 @@
     }, kids);
   }
 
-  /**
-   * A left-to-right dependency graph. nodes:[{id,label,kind}], edges:[[from,to]].
-   * Rendered as SVG with a text alternative.
-   */
   function graph(nodes, edges, opts) {
     opts = opts || {};
     var colW = opts.colWidth || 190, rowH = 54, boxW = 156, boxH = 38;
 
-    // Longest-path layering, which is enough for the shallow graphs here.
     var depth = {};
     nodes.forEach(function (n) { depth[n.id] = 0; });
-    // Relax until nothing moves. Depths settle in two or three passes for the
-    // shapes drawn here; the pass ceiling is the guard against a cycle in the
-    // input.
     for (var pass = 0; pass < nodes.length; pass++) {
       var moved = false;
       for (var ei = 0; ei < edges.length; ei++) {
@@ -1009,17 +855,6 @@
       g.appendChild(grp);
     });
 
-    // The equivalent, in words, for anyone who cannot see the picture.
-    /*
-     * The kinds are drawn as SVG text inside a role="img", so they are dropped
-     * from the accessibility tree and this text is the only place they can
-     * come back.
-     */
-    /* The verb has to come from the caller, because the edge direction does.
-       apps.js pushes [dependent, dependency] and reads "depends on"; ml.js and
-       data.js push [upstream, downstream], where the same sentence is exactly
-       backwards. Since the graph is role="img", this text is the only
-       description a screen reader gets. */
     var verb = opts.verb || 'depends on';
 
     var byId = Object.create(null);
@@ -1045,7 +880,6 @@
     ]);
   }
 
-  /** A heat grid: rows x cols of scores, each cell a button opening a detail. */
   function heatgrid(rowLabels, colLabels, scoreFor, opts) {
     opts = opts || {};
     var head = el('tr', [el('th', { scope: 'col', text: opts.corner || '' })].concat(
@@ -1069,26 +903,17 @@
       ]));
   }
 
-  /** A horizontal timeline band, one segment per event. */
   function timeline(segments, opts) {
     opts = opts || {};
     return el('div.timeline', { role: 'img', 'aria-label': opts.label || 'Timeline' },
       segments.map(function (s) {
         return el('span.tl-seg.' + (s.tone || 'ok'), {
-          // A weight of 0 is meaningful, so only undefined/null fall back to 1.
           style: { flex: String(s.weight === undefined || s.weight === null ? 1 : s.weight) },
           title: s.label
         });
       }));
   }
 
-  /* ----------------------------------------------------- property filter --- */
-
-  /**
-   * Token filtering: type a value, get a removable token, combine tokens
-   * with AND.
-   * fields: [{key, label, options?}]. onChange(activeTokens) repaints the caller.
-   */
   function propertyFilter(fields, onChange) {
     var tokens = [];
     var input = el('input.pf-input', {
@@ -1120,8 +945,6 @@
     function add() {
       var v = input.value.trim();
       if (!v) {
-        // Say what is missing and put the cursor where it has to go, rather
-        // than returning silently.
         input.focus();
         A.announce('Type a value first, then add the filter');
         return;
@@ -1147,7 +970,6 @@
     ]);
   }
 
-  /** Applies propertyFilter tokens to a row set. */
   function applyTokens(rows, tokens, accessors) {
     if (!tokens.length) return rows;
     return rows.filter(function (r) {
@@ -1159,30 +981,12 @@
     });
   }
 
-  /**
-   * An overflow menu: the "..." that carries a row's secondary actions.
-   *
-   * A table row cannot afford six visible buttons, and a console that hides
-   * its secondary actions behind a right-click hides them from keyboard and
-   * touch alike. Built to the WAI-ARIA menu-button pattern rather than
-   * approximated:
-   *
-   *  - the trigger owns aria-haspopup and aria-expanded, so assistive tech
-   *    announces that there is a menu and whether it is open;
-   *  - Up/Down/Home/End move within the menu and wrap, Escape closes it and
-   *    returns focus to the trigger, Tab closes it and moves on;
-   *  - a disabled item keeps its place in the order and states its reason,
-   *    for the same reason ui.btn does.
-   *
-   * items: [{label, onSelect, danger, disabled, title, hint}] or 'divider'.
-   */
   var openMenus = [];
 
-  /** Close every open overflow menu. Navigation calls this. */
   UI.closeMenus = function () {
     while (openMenus.length) {
       var fn = openMenus.pop();
-      try { fn(); } catch (e) { /* already gone */ }
+      try { fn(); } catch (e) {  }
     }
   };
 
@@ -1266,27 +1070,16 @@
         else if (e.key === 'End') { e.preventDefault(); focusAt(list.length - 1); }
         else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
         else if (e.key === 'Tab') {
-          /* Move focus back to the trigger BEFORE removing the popup: removing
-             it while a menu item holds focus leaves document.activeElement as
-             <body>, and the browser's default Tab then continues from the top
-             of the document rather than from the trigger. */
           if (trigger && trigger.focus) trigger.focus();
           close(false);
         }
       });
 
-      /* The menu is mounted on <body> and positioned fixed rather than
-       * absolutely inside the row. Every table in the console scrolls
-       * horizontally, and an absolutely positioned popup inside a scroll
-       * container is clipped by it; fixed coordinates computed from the
-       * trigger avoid the clipping entirely. */
       document.body.appendChild(pop);
 
       var r = trigger.getBoundingClientRect();
       var h = pop.offsetHeight, w = pop.offsetWidth, GAP = 5, EDGE = 8;
 
-      // Right-aligned to the trigger, flipped up when the last row of a long
-      // table would otherwise open past the bottom of the viewport.
       var top = r.bottom + GAP;
       if (top + h + EDGE > window.innerHeight) top = Math.max(EDGE, r.top - h - GAP);
       var left = r.right - w;
@@ -1298,8 +1091,6 @@
       offClick = function (e) { if (pop && !pop.contains(e.target) && e.target !== trigger) close(false); };
       document.addEventListener('mousedown', offClick, true);
 
-      // A fixed popup cannot follow its row, so scrolling dismisses it rather
-      // than leaving it floating over unrelated content.
       onScroll = function () { close(false); };
       window.addEventListener('scroll', onScroll, true);
       window.addEventListener('resize', onScroll);
@@ -1312,28 +1103,12 @@
     return wrap;
   }
 
-  /**
-   * Reveal the row a deep link names.
-   *
-   * Overview builds "#/security/alerts?id=al-9021" and "#/identity/grants?id=g-442",
-   * and the Config tab builds "#/identity/secrets?path=kv/mills/jwt-signing-key".
-   * Tables stamp data-key on every row, so the row is findable; this marks it,
-   * scrolls it into view and says so.
-   */
   function revealRow(host, key, opts) {
     opts = opts || {};
     if (!host || !key) return false;
     var want = String(key);
 
-    /*
-     * The lookup is deferred, not just the scroll: ui.tabs selects its initial
-     * panel while the screen is still being built, so a deep link that names a
-     * tab AND a row reaches here before the panel is in the document.
-     */
     window.setTimeout(function () {
-      // Scanned rather than composed into a selector: a key may contain quotes,
-      // brackets or a slash (secret paths do), and building a selector out of
-      // one is how a valid key turns into a syntax error at runtime.
       var scope = host && host.isConnected ? host : document;
       var row = null;
       var candidates = scope.querySelectorAll('[data-key]');

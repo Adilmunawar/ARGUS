@@ -1,9 +1,3 @@
-/* ML and geospatial: Dagster assets, model runs, Ray Serve endpoints, imagery.
- *
- * Classic script, no modules, ES5 only, no network. Nodes are built through
- * ui.el; asset names and model run names come from a pipeline definition that
- * somebody outside this codebase edits, so they are never treated as markup.
- */
 (function () {
   'use strict';
 
@@ -11,16 +5,6 @@
 
   var STATE_TONE = { fresh: 'ok', stale: 'warn', failed: 'bad' };
 
-  /* ------------------------------------------------------------ helpers --- */
-
-  /**
-   * Everything that would have to re-run after this asset, transitively.
-   * Called once per failed asset when rendering the failure banner.
-   *
-   * A reverse adjacency map built once, then one breadth-first walk, is
-   * O(assets + edges). The map is rebuilt only when the pipeline collection
-   * is replaced.
-   */
   var reverseEdges = null, reverseFor = null;
   function downstreamMap() {
     var d = A.data;
@@ -51,8 +35,6 @@
     }
     return out;
   }
-
-  /* ---------------------------------------------------------- pipelines --- */
 
   function pipelinesTab() {
     var d = A.data;
@@ -96,7 +78,6 @@
     ];
 
     return el('div.stack', [
-      // The table below maps failed -> 'bad'; the banner tone has to match.
       failed.length ? el('div.callout.bad', [
         el('strong', { text: failed.map(function (p) { return p.asset; }).join(', ') + ' failed' }),
         el('p', {
@@ -111,8 +92,6 @@
         })
       ]) : null,
       ui.card('Asset dependency graph',
-        // Edges are [upstream, downstream], which is what the drawing needs and
-        // the opposite of "depends on". The verb has to match the direction.
         ui.graph(nodes, edges, {
           label: 'Dagster asset graph, upstream assets on the left',
           verb: 'feeds'
@@ -131,17 +110,12 @@
     ]);
   }
 
-  /* ------------------------------------------------------------- models --- */
-
   function promoteModel(m) {
     A.confirmDestructive({
       title: 'Promote ' + m.run,
       match: m.run,
       environment: A.state.env,
       confirmLabel: 'Promote ' + m.run,
-      /* confirmDestructive otherwise states "This cannot be undone from the
-         console", which directly contradicts the detail below it: promotion is
-         the one action on this screen the code itself describes as reversible. */
       reversible: 'The previous run stays in the registry, so this can be undone by promoting it back.',
       detail: 'Promoting ' + m.run + ' repoints the Ray Serve endpoint at it. Every prediction served after '
         + 'the swap comes from this run, including requests already in flight behind the gateway. The '
@@ -190,8 +164,6 @@
       }))
     ]);
   }
-
-  /* ---------------------------------------------------------- endpoints --- */
 
   function canaryDialog(e) {
     A.dialog({
@@ -273,8 +245,6 @@
     ]);
   }
 
-  /* ----------------------------------------------------------- imagery --- */
-
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
   function dateLabel(dt) {
@@ -287,8 +257,6 @@
     var rows = [];
 
     for (var i = 0; i < 8; i++) {
-      // Deterministic by index: the prototype has no scene catalogue, and a
-      // random value here would change every screenshot and break the tests.
       var cover = 62 + ((i * 17 + 9) % 38);
       var scenes = 8 + ((i * 5 + 3) % 7);
       var end = new Date(d.now.getTime() - i * 14 * 86400000);
@@ -336,10 +304,6 @@
           variant: 'primary',
           onClick: function () {
             var q = stacInput.value.trim();
-            // Deterministic from the query itself, so the same search always
-            // reports the same count in a demo or a screenshot.
-            /* The count is derived from the mirror's actual coverage, so a
-               filtered query can only ever return a subset of it. */
             var whole = 0;
             for (var wi = 0; wi < 8; wi++) whole += 8 + ((wi * 5 + 3) % 7);
             var n = q ? Math.max(1, Math.round(whole * 0.18)) : whole;
@@ -354,8 +318,6 @@
       ])
     ]);
   }
-
-  /* -------------------------------------------------------------- screen --- */
 
   A.screen('ml', {
     title: 'ML & geospatial',
@@ -386,9 +348,6 @@
         { id: 'imagery', label: 'Imagery', render: imageryTab }
       ], {
         label: 'ML and geospatial sections',
-        /* The breadcrumb and the document title already name the segment
-           (#/ops/cost reads "Operations / cost" and titles itself "cost"),
-           so the open panel has to match it. */
         initial: (ctx && ctx.rest && ctx.rest[0]) || null
       }));
     }

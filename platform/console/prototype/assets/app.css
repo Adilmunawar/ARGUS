@@ -1,43 +1,21 @@
-/* ── Tokens: Mills DESIGN.md, verbatim. Never hardcode a hex outside this block. ──
-   Fonts are a local-first stack on purpose: the console runs inside an
-   egress-restricted network and must never fetch from the internet (ADR-0027).
-   Geist and Lora ship as self-hosted WOFF2 in the real build.               */
 :root{
-  /* Base palette (Mills DESIGN.md). */
   --ink:#163026; --muted:#55665d; --pine:#0c2b1f; --cane:#113a2b; --brand:#1e6f4a;
   --leaf:#c8e36f; --cream:#f5f3e9; --paper:#fffefa;
   --c1:#247a52; --c2:#b07f23; --c3:#3f6fa8; --c4:#b25746; --c5:#7757b8; --grid:#e4e1d3;
   --ok:#046c4e; --warn:#92400e; --bad:#991b1b; --info:#075985;
 
-  /* Channel tokens. Every translucent border, hover wash and scrim in the
-     console is one of these hues at some alpha. Keeping the channels separate
-     from the alphas is what makes a second theme a block of overrides rather
-     than a rewrite: the alphas never move, only the hue behind them.
-     --shadow-rgb is deliberately NOT --ink-rgb; a shadow stays dark when the
-     text goes light, or every card grows a halo. */
   --ink-rgb:22,48,38; --leaf-rgb:200,227,111; --brand-rgb:30,111,74;
   --pine-rgb:12,43,31; --paper-rgb:255,254,250; --white-rgb:255,255,255;
   --shadow-rgb:22,48,38;
 
-  /* Channels the dark theme overrides independently:
-
-     --wash-rgb   every hover, highlight and selection wash.
-     --focus-rgb  the focus ring; it has to hold the 3:1 that WCAG 1.4.11
-                  asks for against both themes' surfaces.
-     --scrim-rgb  the modal scrim. */
   --wash-rgb:200,227,111;
   --focus-rgb:30,111,74;
   --scrim-rgb:12,43,31;
 
-  /* The surfaces that carry WHITE text. --brand lightens to #4aa87a in dark,
-     which puts white at 2.93:1 on the primary button, the avatar monogram and
-     the staging pill -- so these need a channel of their own that stays dark
-     enough for white in both themes, rather than following --brand. */
   --on-white-from:#113a2b; --on-white-to:#1e6f4a;
 
   --on-white-from:#113a2b; --on-white-to:#1e6f4a;
 
-  /* Status surfaces: background, softer background, border. */
   --ok-bg:#e3f3ec; --ok-bg-soft:#eef7f2; --ok-line:#bfe3d3; --ok-stroke:#7fc4a6;
   --ok-cell:#dcefe5; --ok-cell-ink:#05543d; --ok-soft:#9fd8bb; --ok-mid:#2f8f63;
   --warn-bg:#fdf1dd; --warn-bg-soft:#fdf6e9; --warn-line:#f0d9ac; --warn-stroke:#d9a441;
@@ -48,13 +26,10 @@
   --idle-bg:#eeece2; --idle-ink:#4c5a52; --idle-line:#ded9c8;
   --danger-fill:#991b1b; --on-danger:#fff;
 
-  /* Neutral surfaces: disabled controls, progress tracks, skeletons. */
   --sunk:#eceadf; --sunk-ink:#6a7871; --na-ink:#5c6a62; --ink-soft:#3a4a41;
 
-  /* Topology node fills. */
   --g-db:#eef5f1; --g-bucket:#f7f2e6; --g-cache:#f2f0fa; --g-queue:#eef3f8; --g-dep:#fbfaf4;
 
-  /* Recorded-session terminal. */
   --term-ink:#dfe9e2; --term-dim:#cfe0d6; --term-fg:#d7e6dc; --term-muted:#a9bdb2;
 
   --card:12px; --field:8px;
@@ -67,12 +42,6 @@
   --glow:rgba(var(--leaf-rgb),.16);
 }
 
-/* ── Dark theme ──────────────────────────────────────────────────────────
-   An operations console is read at three in the morning on a bridge call.
-   Only the tokens change; not one rule below this block is theme-aware.
-
-   The theme is an explicit choice stamped on <html> by app.js, and "system"
-   follows prefers-color-scheme. Both paths land on the same overrides.       */
 :root[data-theme="dark"]{
   --ink:#e6ede9; --muted:#93a49b; --pine:#060f0c; --cane:#123528; --brand:#4aa87a;
   --leaf:#c8e36f; --cream:#0d1714; --paper:#15211c;
@@ -82,8 +51,6 @@
   --ink-rgb:230,237,233; --pine-rgb:6,15,12; --paper-rgb:21,33,28;
   --shadow-rgb:0,0,0;
 
-  /* A wash that darkens rather than lifts, a ring bright enough to find on a
-     dark ground, and a scrim that still has somewhere to go. */
   --wash-rgb:26,72,52;
   --focus-rgb:200,227,111;
   --scrim-rgb:0,0,0;
@@ -99,9 +66,6 @@
   --idle-bg:#1e2a25; --idle-ink:#a3b3aa; --idle-line:#31413a;
   --danger-fill:#a32f2f; --on-danger:#fff;
 
-  /* --sunk has to sit clearly off the card surface, or an N/A heat cell and
-     an empty meter track disappear into it and a zero-filled bar reads as
-     "no bar" rather than "zero". */
   --sunk:#2b3a33; --sunk-ink:#9fb0a7; --na-ink:#a4b5ab; --ink-soft:#c2d0c8;
 
   --g-db:#16302a; --g-bucket:#2c2a1c; --g-cache:#241f33; --g-queue:#16283a; --g-dep:#1a221e;
@@ -111,13 +75,7 @@
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%;
-  /* The top bar is position:sticky and 46px tall. scroll-padding reserves
-     room for it, so a control the browser scrolls focus to cannot land
-     underneath it (WCAG 2.4.11). */
   scroll-padding-top:58px}
-/* Not background-attachment:fixed: a viewport-anchored background cannot use
-   the browser's fast scroll path, so the gradient would be re-rasterised
-   across the whole viewport on every frame of every scroll. */
 body{
   font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); background:var(--cream);
   background-image:radial-gradient(120% 60% at 50% -10%, var(--glow), transparent 60%);
@@ -132,7 +90,6 @@ h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:-.01em}
 .skip:focus{left:12px}
 .sr{position:absolute;left:0;top:0;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
-/* ── App layout: collapsible rail (Cloudscape app-layout / GCP nav) ── */
 .shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:100vh}
 body.railed{--rail:66px}
 .side{background:var(--paper);border-right:1px solid rgba(var(--ink-rgb),.08);padding:11px 8px;
@@ -150,11 +107,6 @@ body.railed{--rail:66px}
 .nav .badge{margin-left:auto;background:var(--danger-fill);color:var(--on-danger);border-radius:999px;font-size:11px;
   min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
 .nav svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-/* A collapsed rail hides the labels from the eye, never from the accessibility
-   tree: every icon is aria-hidden, so a display:none label would leave a
-   navigation button with no accessible name. The label is clipped instead.
-   .navgroup and .mark .txt may still go: the group headings are referenced by
-   aria-describedby, and a referenced element is announced even when hidden. */
 .nav-clip{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
   overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 body.railed .nav .lbl,body.railed .nav .badge,body.railed .railbtn .lbl{
@@ -166,12 +118,8 @@ body.railed .nav{justify-content:center;padding:9px 0}
   padding:8px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:12px;min-height:38px}
 .railbtn:hover{background:rgba(var(--wash-rgb),.26)}
 
-/* ── Top bar ── */
 .top{display:flex;align-items:center;gap:11px;padding:7px 18px;min-height:46px;
   border-bottom:1px solid rgba(var(--ink-rgb),.07);position:sticky;top:0;z-index:50;
-  /* Opaque, and no backdrop-filter: a blur on a sticky element makes the
-     compositor re-sample and re-blur that strip on every frame the content
-     behind it moves. */
   background:var(--paper)}
 .burger{display:none;border:1px solid rgba(var(--ink-rgb),.14);background:var(--paper);border-radius:10px;
   width:44px;height:44px;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);flex:none}
@@ -198,16 +146,8 @@ body.railed .nav{justify-content:center;padding:9px 0}
 .avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(140deg,var(--leaf),var(--brand));
   display:grid;place-items:center;color:var(--pine);font-weight:700;font-size:12px;flex:none}
 
-
-/* ------------------------------------------------------------------------
-   Responsive: the rail collapses to icons at 1200px, and becomes an
-   off-canvas drawer at 900px. Below 620px the top bar wraps rather than
-   letting the content column overflow.
-   ------------------------------------------------------------------------ */
-
 @media (max-width: 1200px) {
   :root { --rail: 66px; }
-  /* Clipped, not removed: see the note on body.railed above. */
   .nav .lbl, .nav .badge, .railbtn .lbl {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -220,12 +160,8 @@ body.railed .nav{justify-content:center;padding:9px 0}
   .shell { grid-template-columns: minmax(0, 1fr); }
   .side { position: fixed; left: 0; top: 0; width: 272px; transform: translateX(-100%);
     transition: transform .2s; box-shadow: var(--sh-pop); z-index: 95; }
-  /* The scrim is z-index 100 and both live in the root stacking context, so
-     the open drawer has to sit above its own scrim -- otherwise every tap on
-     a navigation item hits the scrim and closes the drawer instead. */
   body.navopen .side { transform: none; z-index: 105; }
   body.navopen .navgroup, body.navopen .mark .txt { display: revert; }
-  /* display:revert cannot undo clipping, so the clip is released explicitly. */
   body.navopen .nav .lbl, body.navopen .nav .badge {
     position: static; width: auto; height: auto; margin: 0; clip: auto; overflow: visible;
   }
@@ -241,11 +177,6 @@ body.railed .nav{justify-content:center;padding:9px 0}
 }
 
 @media (max-width: 620px) {
-  /* Below this width the bar wraps, and a wrapped sticky bar can cover most
-     of a small viewport (a 320px viewport is what 400% browser zoom gives you
-     on a 1280px screen, the WCAG 1.4.10 reflow case). A fixed scroll-padding
-     cannot track a height that depends on how the row happens to wrap, so the
-     bar stops being sticky instead and gives the viewport back. */
   .top { position: static; }
   .top { flex-wrap: wrap; row-gap: 8px; }
   .crumbs { order: 1; flex: 1 1 auto; }
@@ -260,7 +191,6 @@ body.railed .nav{justify-content:center;padding:9px 0}
   .top { padding: 8px 12px; }
 }
 
-/* The reserved room goes with the sticky behaviour that needed it. */
 @media (max-width: 620px) { html { scroll-padding-top: 0; } }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

@@ -1,16 +1,8 @@
-/* Argus Console: Deployments.
- *
- * Two modes on one route: the queue (#/deploys) and one deployment
- * (#/deploys/1847). Every write to production arrives here as a pull request,
- * so this screen is where the four-eyes rule is enforced in the interface as
- * well as in the pipeline: the person who opened a deployment cannot approve it.
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt, d = A.data;
 
-  // The signed-in operator, as the deployment records spell it.
   var ME = String(d.me.upn || '').split('@')[0];
 
   var CHECK_ORDER = ['build', 'tests', 'trivy', 'sbom', 'signature', 'vulnerable'];
@@ -21,8 +13,6 @@
   var CHECK_WORD = { pass: 'passed', verified: 'verified', warn: 'warning', fail: 'failed' };
   var CHECK_TONE = { pass: 'pass', verified: 'pass', warn: 'warn', fail: 'fail' };
   var CHECK_GLYPH = { pass: '✓', warn: '▲', fail: '✕' };
-
-  /* ------------------------------------------------------------ helpers --- */
 
   function personName(upn) {
     var p = d.personByUpn(upn);
@@ -46,7 +36,6 @@
     return CHECK_LABEL[key] || (key.charAt(0).toUpperCase() + key.slice(1));
   }
 
-  /** Evidence as a row of chips: a glyph for shape, a word for meaning. */
   function checkRow(dep) {
     return el('div.checkrow', {
       role: 'group',
@@ -115,8 +104,6 @@
     ]);
   }
 
-  /* --------------------------------------------------------------- queue --- */
-
   function renderQueue(mount) {
     var byNewest = function (a, b) { return b.opened - a.opened; };
     var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).sort(byNewest);
@@ -141,8 +128,6 @@
         'Completed and rolled-back deployments stay here so you can see what changed and when.')
     ]));
   }
-
-  /* -------------------------------------------------------------- detail --- */
 
   function planTab(dep) {
     var intro = el('div.callout.info', [
@@ -283,7 +268,6 @@
           id: 'reject-reason', rows: '4', autocomplete: 'off',
           'aria-describedby': 'reject-help'
         });
-        // The reject button stays inert until there is a reason.
         var rejectOpts = {
           variant: 'danger',
           disabled: true,
@@ -297,8 +281,6 @@
         var go = ui.btn('Reject deployment ' + dep.id, rejectOpts);
         var close = null;
 
-        // ui.btn captures opts.disabled as a boolean at construction and only
-        // setDisabled moves it.
         area.addEventListener('input', function () {
           go.setDisabled(area.value.trim().length === 0);
         });
@@ -391,8 +373,6 @@
     ], { label: 'Deployment ' + dep.id + ' detail' }), { flush: true }));
   }
 
-  /* -------------------------------------------------------------- screen --- */
-
   var screen = {
     title: 'Deployments',
     crumb: 'Deployments',
@@ -402,8 +382,6 @@
     }
   };
 
-  // app.js is parsed first and defers its boot, so A.screen exists by now. The
-  // queued path stays as a guard against the load order regressing.
   if (typeof A.screen === 'function') A.screen('deploys', screen);
   else document.addEventListener('DOMContentLoaded', function () { A.screen('deploys', screen); });
 })();

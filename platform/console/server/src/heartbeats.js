@@ -8,6 +8,10 @@ const STATUS = { DOWN: 0, UP: 1, PENDING: 2, MAINTENANCE: 3 };
 
 const STATUS_NAME = { 0: 'down', 1: 'up', 2: 'pending', 3: 'maintenance' };
 
+const MINUTE_MS = 60000;
+const HOUR_MS = 3600000;
+const DAY_MS = 86400000;
+
 const MINUTELY_SLOTS = 24 * 60;
 const HOURLY_SLOTS = 30 * 24;
 const DAILY_SLOTS = 365;
@@ -37,9 +41,13 @@ class Monitor {
 
 const monitors = new Map();
 
-function bucket(series, index) {
-  if (!series[index]) series[index] = { up: 0, down: 0, avgPing: 0 };
-  return series[index];
+function bucket(series, period) {
+  const index = ((period % series.length) + series.length) % series.length;
+  const existing = series[index];
+  if (existing && existing.period === period) return existing;
+  const fresh = { period, up: 0, down: 0, avgPing: 0 };
+  series[index] = fresh;
+  return fresh;
 }
 
 function record(monitor, status, pingMs, at) {
@@ -47,14 +55,10 @@ function record(monitor, status, pingMs, at) {
     : status === STATUS.PENDING ? STATUS.DOWN
       : status;
 
-  const minuteIndex = Math.floor(at / 60000) % monitor.minutely.length;
-  const hourIndex = Math.floor(at / 3600000) % monitor.hourly.length;
-  const dayIndex = Math.floor(at / 86400000) % monitor.daily.length;
-
-  for (const [series, index] of [[monitor.minutely, minuteIndex],
-    [monitor.hourly, hourIndex],
-    [monitor.daily, dayIndex]]) {
-    const b = bucket(series, index);
+  for (const [series, periodMs] of [[monitor.minutely, MINUTE_MS],
+    [monitor.hourly, HOUR_MS],
+    [monitor.daily, DAY_MS]]) {
+    const b = bucket(series, Math.floor(at / periodMs));
     if (flat === STATUS.UP) {
       b.up += 1;
       if (Number.isFinite(pingMs)) b.avgPing = (b.avgPing * (b.up - 1) + pingMs) / b.up;
@@ -75,12 +79,14 @@ function record(monitor, status, pingMs, at) {
   return beat;
 }
 
-function uptimeOver(series, periods) {
+function uptimeOver(series, periods, currentPeriod) {
   let up = 0;
   let down = 0;
-  for (let i = 0; i < Math.min(periods, series.length); i += 1) {
-    const b = series[i];
-    if (!b) continue;
+  for (let back = 0; back < Math.min(periods, series.length); back += 1) {
+    const period = currentPeriod - back;
+    const index = ((period % series.length) + series.length) % series.length;
+    const b = series[index];
+    if (!b || b.period !== period) continue;
     up += b.up;
     down += b.down;
   }
@@ -191,14 +197,24 @@ function snapshot(beatSlots) {
 }
 
 function uptime() {
+  const now = Date.now();
   const list = [];
   for (const monitor of monitors.values()) {
     list.push({
       id: monitor.id,
       label: monitor.label,
-      day: { ratio: uptimeOver(monitor.minutely, MINUTELY_SLOTS), ...coverage(24 * 3600 * 1000) },
-      week: { ratio: uptimeOver(monitor.hourly, 24 * 7), ...coverage(7 * 24 * 3600 * 1000) },
-      month: { ratio: uptimeOver(monitor.daily, 30), ...coverage(30 * 24 * 3600 * 1000) }
+      day: {
+        ratio: uptimeOver(monitor.minutely, MINUTELY_SLOTS, Math.floor(now / MINUTE_MS)),
+        ...coverage(24 * HOUR_MS)
+      },
+      week: {
+        ratio: uptimeOver(monitor.hourly, 24 * 7, Math.floor(now / HOUR_MS)),
+        ...coverage(7 * 24 * HOUR_MS)
+      },
+      month: {
+        ratio: uptimeOver(monitor.daily, 30, Math.floor(now / DAY_MS)),
+        ...coverage(30 * 24 * HOUR_MS)
+      }
     });
   }
   return { uptime: list, persistence: 'memory', startedAt: new Date(started).toISOString() };

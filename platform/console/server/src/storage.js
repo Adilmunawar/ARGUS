@@ -1,29 +1,3 @@
-/*
- * The object store, as the console sees it.
- *
- * This is the S3 replacement's read side: topology and capacity from the
- * SeaweedFS master and volume servers, buckets and objects over the S3 API,
- * and the declared intent from platform/gitops/storage/buckets.yaml.
- *
- * Three things this file refuses to do, each because the obvious version is
- * actively misleading on a storage dashboard.
- *
- * IT NEVER SHOWS A SIZE IT DID NOT MEASURE. SeaweedFS reports usage per
- * COLLECTION, and a bucket nothing has been written to yet has no collection
- * and therefore no volumes -- the topology genuinely knows nothing about it.
- * Rendering that as "0 B" conflates "this bucket is empty" with "we have no
- * idea". Unknown stays unknown, and the UI is expected to say so.
- *
- * IT NEVER WALKS A BUCKET TO ANSWER A PAGE LOAD. There is no cheap object
- * count in S3. Counts come from the volume servers -- O(volume servers), not
- * O(objects) -- and are labelled approximate because they include
- * deleted-but-not-compacted space. The one endpoint that does walk is
- * explicitly budgeted and only reachable from a button a human pressed.
- *
- * IT NEVER CALLS A LOCK ENFORCED BECAUSE IT IS CONFIGURED. That verdict comes
- * from storage-init, which attempted a real delete of a real object version
- * under real retention. See tools/init-object-storage.js.
- */
 'use strict';
 
 const fs = require('node:fs');
@@ -36,8 +10,6 @@ const config = require('./config');
 const cache = require('./cache');
 const { positiveInt } = require('./env');
 
-/* ------------------------------------------------------------------ config --- */
-
 const MASTER = process.env.ARGUS_SEAWEED_MASTER_URL || 'http://seaweed-master:9333';
 const FILER = process.env.ARGUS_SEAWEED_FILER_URL || 'http://seaweed-filer:8888';
 const S3_ENDPOINT = process.env.ARGUS_S3_ENDPOINT || 'http://seaweed-s3:8333';
@@ -47,15 +19,6 @@ const STATE_DIR = process.env.ARGUS_STATE_DIR || '/state';
 const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
 const VOLUME_SIZE_MB = positiveInt('ARGUS_S3_VOLUME_SIZE_MB', 1024);
 
-/* The master hands out CONTAINER-INTERNAL volume-server URLs (seaweed-volume:8080).
-   In network that is exactly right. Running the console on the Windows host for
-   front-end work, it resolves to nothing -- so capacity and per-bucket sizes
-   would silently come back empty and look like an empty cluster.
-
-   This map rewrites them, e.g. ARGUS_SEAWEED_NODE_URL_MAP="seaweed-volume:8080=127.0.0.1:8080".
-   Without it, those fields report `unavailable` with a reason. What is NOT used
-   is SeaweedFS's own -publicUrl: that changes the URL the master gives to EVERY
-   client including the in-network filer, which breaks writes to fix a display. */
 const NODE_URL_MAP = (() => {
   const raw = process.env.ARGUS_SEAWEED_NODE_URL_MAP || '';
   const map = new Map();
@@ -70,18 +33,11 @@ function mapNodeUrl(authority) {
   return NODE_URL_MAP.get(authority) || authority;
 }
 
-/* ------------------------------------------------------------------- http --- */
-
-/** A bounded JSON GET with no dependency and no redirect following. */
 function getJson(url, timeoutMs) {
   return new Promise((resolve, reject) => {
     let parsed;
     try { parsed = new URL(url); } catch (err) { return reject(new Error(`bad url ${url}`)); }
     const lib = parsed.protocol === 'https:' ? https : http;
-    /* The SeaweedFS filer serves a BROWSABLE HTML PAGE on the same paths as its
-       JSON API and picks between them on Accept alone. Without this header the
-       probe gets a valid 200 full of HTML, fails to parse it, and reports a
-       perfectly healthy filer as unreachable. */
     const req = lib.get(url, {
       timeout: timeoutMs || TIMEOUT_MS,
       headers: { accept: 'application/json' }
@@ -92,8 +48,6 @@ function getJson(url, timeoutMs) {
       }
       let body = '';
       res.setEncoding('utf8');
-      /* A volume server with thousands of volumes returns a large document.
-         Cap it rather than let one upstream exhaust the console's heap. */
       let size = 0;
       res.on('data', (d) => {
         size += d.length;
@@ -109,8 +63,6 @@ function getJson(url, timeoutMs) {
     req.on('error', reject);
   });
 }
-
-/* -------------------------------------------------------------------- s3 --- */
 
 let sdk = null;
 let sdkError = null;
@@ -129,9 +81,6 @@ function s3() {
     client = new m.S3Client({
       region: S3_REGION,
       endpoint: S3_ENDPOINT,
-      /* SeaweedFS is path-style only. Virtual-host style resolves
-         bucket.seaweed-s3, which no DNS here answers -- so the failure arrives
-         as ENOTFOUND and looks like a network problem rather than a config one. */
       forcePathStyle: true,
       maxAttempts: 2,
       requestHandler: { requestTimeout: TIMEOUT_MS, connectionTimeout: 3000 }
@@ -140,13 +89,6 @@ function s3() {
   return client;
 }
 
-/**
- * Classify an upstream failure into something with a next action attached.
- *
- * "Failed to fetch" tells an operator nothing. Whether the gateway is down,
- * the credential is wrong, or the clock has drifted are three different
- * problems with three different fixes.
- */
 function classify(err) {
   const name = (err && (err.name || err.Code)) || 'Error';
   const msg = (err && err.message) || String(err);
@@ -184,7 +126,6 @@ function classify(err) {
   return { reason: 'error', message: msg };
 }
 
-/** A reader that reports why it could not answer instead of throwing. */
 function guarded(key, ttlMs, producer) {
   return async function (...args) {
     try {
@@ -197,19 +138,9 @@ function guarded(key, ttlMs, producer) {
   };
 }
 
-/* ------------------------------------------------------------- declared ----- */
-
 let declaredCache = null;
 let declaredAt = 0;
 
-/**
- * What buckets.yaml says the estate should look like.
- *
- * Read from the same committed file storage-init drives from, so the console
- * cannot disagree with what was actually applied. Deliberately NOT read from
- * bucket tags: the map is a file in the repository, and putting a second copy
- * of it in the object store creates two sources that drift.
- */
 function declared() {
   if (declaredCache && Date.now() - declaredAt < 60000) return declaredCache;
   try {
@@ -223,10 +154,6 @@ function declared() {
         versioning: !!b.versioning,
         objectLock: b.objectLock || null,
         lifecycleDays: b.lifecycle && b.lifecycle.expireDays ? Number(b.lifecycle.expireDays) : null,
-        /* Declared intent for Site B. There is no Site B, so this is rendered
-           as "not configured" and never as a replication lag of zero -- a lag
-           of zero is what a healthy replica looks like, and there is no
-           replica. */
         replicationDeclared: !!(b.replication && b.replication.siteB),
         backup: b.backup === 'none' ? null : b.backup || null
       });
@@ -239,17 +166,14 @@ function declared() {
   return declaredCache;
 }
 
-/** The WORM verdict storage-init proved by attempting a real delete. */
 function lockProbe() {
   for (const name of ['storage-init.json', 'worm-verdict.json']) {
     try {
       return JSON.parse(fs.readFileSync(`${STATE_DIR}/${name}`, 'utf8'));
-    } catch (err) { /* try the next one */ }
+    } catch (err) {  }
   }
   return null;
 }
-
-/* ------------------------------------------------------------- topology ----- */
 
 async function topology() {
   const status = await getJson(`${MASTER}/dir/status`);
@@ -278,15 +202,12 @@ async function topology() {
   };
 }
 
-/** Per-volume-server detail. One request per node, never per object. */
 async function nodeStatuses(nodes) {
   return Promise.all(nodes.map(async (n) => {
     try {
       const s = await getJson(`http://${n.reachAt}/status`, 4000);
       return { ...n, ok: true, version: s.Version || null, disks: s.DiskStatuses || [], volumeList: s.Volumes || [] };
     } catch (err) {
-      /* Named explicitly, because the in-network vs on-host distinction is the
-         single most likely reason this fails and the message should say so. */
       return {
         ...n, ok: false, disks: [], volumeList: [],
         error: NODE_URL_MAP.size === 0 && !/^(127\.|localhost)/.test(n.reachAt)
@@ -298,17 +219,6 @@ async function nodeStatuses(nodes) {
   }));
 }
 
-/* ------------------------------------------------------------- endpoints ---- */
-
-/**
- * Is the object store actually usable, and if not, which part is not?
- *
- * Container health checks cannot answer this. The S3 gateway's probe is
- * liveness only -- there is no unauthenticated S3 path that means "ready", and
- * once identities are loaded every anonymous request is a 403 that looks
- * identical to a gateway which has not read its config. The only proof is a
- * signed call, which is what this makes.
- */
 const health = guarded('storage:health', 10000, async () => {
   const components = [];
   const probe = async (name, url) => {
@@ -339,19 +249,12 @@ const health = guarded('storage:health', 10000, async () => {
     }
   }
 
-  /* The signed call. It is separate from reachability on purpose: every
-     component can be up while this fails, and that combination is almost always
-     clock skew after the host slept, which no amount of restarting fixes. */
   let signedCallOk = false;
   let signedReason = null;
   const c = s3();
   if (!c) {
     signedReason = { reason: 'no-sdk', message: sdkError };
   } else {
-    /* NOT ListBuckets: that needs a global Write on SeaweedFS 3.97, which this
-       identity deliberately does not hold. A one-key list against a bucket the
-       console is actually granted proves the same three things -- gateway up,
-       config loaded, signature accepted -- using a privilege it already needs. */
     const first = [...declared().map.keys()][0];
     if (!first) {
       signedReason = { reason: 'no-buckets-declared', message: `${BUCKETS_FILE} declares no buckets to probe with.` };
@@ -365,13 +268,6 @@ const health = guarded('storage:health', 10000, async () => {
     }
   }
 
-  /* Writable means the master has a writable volume for SOME collection. It
-     does not mean this console may write -- the console identity has no Write
-     action anywhere, deliberately. */
-  /* Tri-state, because false has to mean "the master says there is no writable
-     volume" and NOT "we never got an answer". Those look identical to an
-     operator and mean opposite things: one is a full cluster, the other is a
-     dead master. */
   const writables = topo ? topo.layouts.reduce((a, l) => a + ((l.writables || []).length), 0) : null;
 
   return {
@@ -387,15 +283,6 @@ const health = guarded('storage:health', 10000, async () => {
   };
 });
 
-/**
- * Capacity, with the limit that actually binds named.
- *
- * There are two ceilings and the disk is usually not the one you hit. Volumes
- * are pre-sized slots: volumeSizeLimitMB x -max is a hard cap, and past it
- * writes fail with "no writable volumes" while df still shows the disk half
- * empty. Reporting only free bytes means the failure arrives with no warning
- * from this screen.
- */
 const capacity = guarded('storage:capacity', 15000, async () => {
   const topo = await topology();
   const rows = await nodeStatuses(topo.nodes);
@@ -422,8 +309,6 @@ const capacity = guarded('storage:capacity', 15000, async () => {
     freeBytes: reachable.reduce((a, n) => a + n.freeBytes, 0)
   } : null;
 
-  /* Which ceiling is closer. Both are reported; the UI is told which to lead
-     with rather than having to work it out. */
   const slotBytes = topo.slotsFree !== null
     ? topo.slotsFree * VOLUME_SIZE_MB * 1024 * 1024
     : null;
@@ -438,50 +323,23 @@ const capacity = guarded('storage:capacity', 15000, async () => {
     slots: { max: topo.slotsMax, free: topo.slotsFree, volumeSizeMB: VOLUME_SIZE_MB },
     available: totals && slotBytes !== null ? Math.min(totals.freeBytes, slotBytes) : (totals ? totals.freeBytes : null),
     binding,
-    /* Named so nobody compares this with a figure from a real host. Inside
-       WSL2 this is the ext4 VHDX, not the Windows volume. */
     scope: 'the WSL2 virtual disk, not the Windows volume it lives on',
     partial: nodes.some((n) => !n.ok),
     at: new Date().toISOString()
   };
 });
 
-/**
- * Every bucket, with size from the volume topology rather than a walk.
- *
- * SeaweedFS names a bucket's volumes by COLLECTION, so summing the volumes of
- * one collection is the whole cost -- one request per volume server, whatever
- * the object count. It is approximate: volume size includes the file header
- * and space belonging to deleted-but-not-compacted objects. It is labelled so.
- */
 const buckets = guarded('storage:buckets', 15000, async () => {
   const dec = declared();
   const probe = lockProbe();
 
-  /* Deliberately NOT ListBuckets.
-   *
-   * SeaweedFS 3.97 requires a GLOBAL Write action to authorise ListBuckets --
-   * measured, see the s3.json comment in platform/compose/docker-compose.yml.
-   * Global Write means write to every bucket in the store, including any added
-   * after this credential was issued, which is a large privilege to hold for a
-   * screen that lists names.
-   *
-   * So the console holds per-bucket grants and reads the enumeration from what
-   * storage-init recorded while it briefly held admin. That is strictly more
-   * informative than ListBuckets would have been: it carries both what exists
-   * and what was declared, so drift between them is visible instead of being
-   * flattened into one list. */
   const inventory = probe && Array.isArray(probe.actual) ? probe.actual : null;
   const listed = inventory
     ? { Buckets: inventory.filter((b) => b.name !== (probe.probeBucket || 'argus-worm-probe'))
         .map((b) => ({ Name: b.name, CreationDate: b.createdAt })) }
-    /* No record yet. Fall back to the declared set so the screen is not empty,
-       and say which list it is -- an operator must never have to guess whether
-       they are looking at reality or at intent. */
     : { Buckets: [...dec.map.keys()].map((name) => ({ Name: name, CreationDate: null })) };
   const inventorySource = inventory ? 'storage-init' : 'buckets.yaml (declared, not verified)';
 
-  /* Per-collection totals, computed once for every bucket at once. */
   const byCollection = new Map();
   let topologyOk = true;
   let topologyError = null;
@@ -506,8 +364,6 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     topologyError = err.message;
   }
 
-  /* Per-bucket lock state, from what storage-init recorded when it applied and
-     verified the configuration. */
   const initRows = new Map();
   if (probe && Array.isArray(probe.buckets)) {
     for (const b of probe.buckets) initRows.set(b.name, b);
@@ -520,28 +376,14 @@ const buckets = guarded('storage:buckets', 15000, async () => {
     const agg = byCollection.get(name) || null;
     const applied = initRows.get(name) || null;
 
-    /* No volumes for a collection means the topology has nothing to say -- not
-       that the bucket holds nothing. */
     const unknownSize = !topologyOk || !agg;
 
     return {
       name,
       createdAt: b.CreationDate ? new Date(b.CreationDate).toISOString() : null,
-      /* The ON-DISK FOOTPRINT of the volumes backing this bucket -- NOT the sum
-         of its object sizes, and the gap can be large: the figure includes
-         each volume's superblock and space still held by superseded versions.
-         It is a useful number -- it is what fills the disk -- but it is a
-         different quantity from "how much data is in this bucket", so it is
-         named for what it is and the UI must label it that way. */
       diskBytes: unknownSize ? null : agg.sizeBytes,
       diskBytesIsFootprint: true,
 
-      /* Deliberately null, always.
-         SeaweedFS 3.97 does not populate FileCount on /status -- it reports 0
-         for every collection on this cluster, including ones holding objects
-         right now. There is no cheap per-collection count to replace it with,
-         so the honest answer is that we do not know, and
-         /api/storage/prefix-size exists for when somebody needs the real one. */
       objects: null,
       objectsReason: 'SeaweedFS does not report a per-collection object count. Use Calculate on a prefix to walk it.',
       unknownSize,
@@ -556,24 +398,17 @@ const buckets = guarded('storage:buckets', 15000, async () => {
       lock: applied && applied.lock ? applied.lock.mode : null,
       lockDays: applied && applied.lock ? applied.lock.days : null,
       lockDeclared: d && d.objectLock ? `${d.objectLock.mode}/${d.objectLock.days}d` : null,
-      /* Enforcement is a property of the SERVER, proven once per boot against a
-         dedicated probe bucket -- not a property of this bucket. Reporting it
-         per bucket would imply it was tested per bucket. */
       lockEnforced: applied && applied.lock ? wormVerdict : null,
 
       owner: d ? d.owner : null,
       lifecycleDays: applied ? applied.lifecycleDays : (d ? d.lifecycleDays : null),
       backup: d ? d.backup : null,
-      /* Not "0 s lag". There is one node. */
       replication: d && d.replicationDeclared ? 'declared for Site B, not configured' : 'not configured'
     };
   });
 
   rows.sort((a, b) => a.name.localeCompare(b.name));
 
-  /* Drift, stated rather than implied. A bucket in one list and not the other
-     is the interesting case on a storage screen, and merging the two lists
-     silently is how it stops being visible. */
   const declaredNames = new Set(dec.map.keys());
   const actualNames = new Set(rows.map((r) => r.name));
 
@@ -594,36 +429,18 @@ const buckets = guarded('storage:buckets', 15000, async () => {
   };
 });
 
-/* ------------------------------------------------------------- browsing ----- */
-
 const MAX_KEYS = 200;
 
-/**
- * Validate a bucket name against the S3 grammar.
- *
- * Applied to the BUCKET only. The same check applied to a prefix rejects every
- * real prefix -- prefixes contain slashes, and legitimately contain spaces,
- * dots and unicode.
- */
 function badBucket(name) {
   if (typeof name !== 'string' || name.length < 3 || name.length > 63) return 'Bucket names are 3 to 63 characters.';
   if (!/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(name)) return 'That is not a valid bucket name.';
   return null;
 }
 
-/**
- * Validate a prefix or key on the properties that actually matter.
- *
- * Length, traversal and control characters. Not a character allowlist: S3 keys
- * are arbitrary UTF-8 and a real survey photograph is as likely as not to have
- * a space, a bracket or an accent in its name.
- */
 function badKey(key, label) {
   if (typeof key !== 'string') return `${label} must be a string.`;
   if (key.length > 1024) return `${label} is longer than the 1024-character S3 limit.`;
   if (key.includes('..')) return `${label} may not contain "..".`;
-  /* Checked by code point rather than with a regex, so no escape sequence --
-     and no raw control byte -- appears in the source. */
   for (let i = 0; i < key.length; i += 1) {
     const code = key.charCodeAt(i);
     if (code < 32 || code === 127) return `${label} contains a control character.`;
@@ -631,56 +448,13 @@ function badKey(key, label) {
   return null;
 }
 
-/* EncodingType='url' is requested so that a key containing a character which is
-   illegal in XML does not truncate or corrupt the response. The SDK does NOT
-   decode it back -- every Key, Prefix and CommonPrefix has to be decoded here,
-   or the console displays "my%20photo.jpg" and, worse, sends that back as the
-   key for the next request. */
 function decodeMaybe(s) {
   if (typeof s !== 'string') return s;
   try {
-    /* A space is encoded as "+", not "%20", and decodeURIComponent leaves "+"
-       alone -- so decoding without this line turns "survey 900.txt" into
-       "survey+900.txt". The corrupted name is what gets sent back as the key
-       for preview and delete, and it matches nothing. Replacing every "+" is
-       safe because a literal plus arrives as %2B. */
     return decodeURIComponent(s.replace(/\+/g, ' '));
   } catch (err) { return s; }
 }
 
-/* ── SeaweedFS returns corrupted keys when listing a versioned bucket ──────────
- *
- * Measured on clean, unmodified SeaweedFS 3.97, 3.99 and 4.00 (the newest
- * release at the time of writing), so this is upstream and a version bump does
- * not fix it:
- *
- *   PUT  probe/nested/file.txt          into a bucket with versioning Enabled
- *   GET  probe/nested/file.txt          -> OK, the correct bytes
- *   LIST                                -> "probe/nested/probe/nested/file.txt"
- *   GET  that listed key                -> NoSuchKey
- *
- * The stored object is fine. Only the LISTING is wrong, and it is wrong in one
- * specific way: the directory part is emitted twice. For a true key T whose
- * directory is D, the listing returns D + T. Flat keys have an empty D and come
- * back correct, which is why this hides until somebody uses a prefix.
- *
- * This matters here more than it might elsewhere: every object-locked bucket is
- * necessarily versioned, so the buckets this console most needs to browse --
- * backups, logs, sessions, artifacts -- are exactly the affected ones. A
- * browser that shows those keys is showing names that do not exist, and every
- * click on one 404s.
- *
- * The repair is exact rather than heuristic: if the directory part of a listed
- * key is precisely some string repeated twice, the true key is one copy of it
- * plus the basename. But it is NOT applied on the strength of that shape alone
- * -- `a/b/a/b/file.txt` is a legitimate key, and a future SeaweedFS that fixes
- * this would then have its correct keys corrupted BY US, which is a worse
- * failure than the one being worked around.
- *
- * So the server is asked. One HEAD against the repaired candidate decides, and
- * the verdict is cached per bucket. A fixed upstream answers "the listed key is
- * real", the repair switches itself off, and nothing here needs changing.
- */
 const keyRepairVerdict = new Map();
 const KEY_REPAIR_VERDICT_TTL_MS = 10 * 60 * 1000;
 
@@ -700,21 +474,14 @@ function rememberVerdict(bucket, verdict) {
 
 function undoubleKey(listed) {
   const cut = listed.lastIndexOf('/');
-  if (cut < 0) return null;                    // flat key: never affected
-  const dir = listed.slice(0, cut + 1);        // includes the trailing slash
+  if (cut < 0) return null;
+  const dir = listed.slice(0, cut + 1);
   if (dir.length % 2 !== 0) return null;
   const half = dir.length / 2;
   if (dir.slice(0, half) !== dir.slice(half)) return null;
   return dir.slice(0, half) + listed.slice(cut + 1);
 }
 
-/**
- * Decide, once per bucket, whether this server's listing needs repairing.
- *
- * Returns true only when the repaired key exists AND the listed key does not.
- * Anything less certain leaves the keys alone: showing a name that is wrong is
- * bad, and silently renaming a name that was right is worse.
- */
 async function objectExists(bucket, key) {
   const c = s3();
   const m = s3sdk();
@@ -757,10 +524,6 @@ async function listObjects({ bucket, prefix, cursor }) {
   const m = s3sdk();
   const p = prefix || '';
 
-  /* Detect the doubling with one cheap flat read before choosing a strategy.
-     It has to be flat: at a nested prefix the buggy server returns only
-     CommonPrefixes and no keys at all, so a delimiter listing has nothing in it
-     to detect on. */
   let repaired = rememberedVerdict(bucket);
   if (repaired === undefined) {
     const sniff = await c.send(new m.ListObjectsV2Command({
@@ -768,12 +531,9 @@ async function listObjects({ bucket, prefix, cursor }) {
     }));
     const first = (sniff.Contents || []).map((o) => decodeMaybe(o.Key))[0];
     repaired = first ? await needsKeyRepair(bucket, first) : false;
-    if (!first) keyRepairVerdict.delete(bucket);   // nothing to learn from; ask again later
+    if (!first) keyRepairVerdict.delete(bucket);
   }
 
-  /* ---------------------------------------------------------------- normal ---
-     A server that lists correctly gets the correct treatment: one directory
-     level, collapsed by the server, 200 keys whatever the bucket holds. */
   if (!repaired) {
     const out = await c.send(new m.ListObjectsV2Command({
       Bucket: bucket,
@@ -802,16 +562,6 @@ async function listObjects({ bucket, prefix, cursor }) {
     };
   }
 
-  /* -------------------------------------------------------------- repaired ---
-     Server-side collapsing CANNOT be used here. The stored path for a key T is
-     dirname(T) + T, so at prefix P the remainder always begins with a repeat of
-     the path and every entry collapses into one meaningless CommonPrefix.
-     Every stored path for a key under P still BEGINS with P, so a flat listing
-     at P finds them all; the directory level is then assembled here.
-
-     This reads more keys than a delimiter listing would, and that cost is real
-     on a large bucket. It is bounded by SCAN_MAX and reported, rather than
-     hidden. */
   const SCAN_MAX = 2000;
   const seenKeys = new Map();
   const folders = new Set();
@@ -828,9 +578,9 @@ async function listObjects({ bucket, prefix, cursor }) {
       scanned += 1;
       const listedKey = decodeMaybe(o.Key);
       const trueKey = undoubleKey(listedKey) || listedKey;
-      if (!trueKey.startsWith(p)) continue;      // a sibling caught by the prefix
+      if (!trueKey.startsWith(p)) continue;
       const rest = trueKey.slice(p.length);
-      if (!rest) continue;                        // the prefix placeholder itself
+      if (!rest) continue;
       const slash = rest.indexOf('/');
       if (slash >= 0) {
         folders.add(p + rest.slice(0, slash + 1));
@@ -868,13 +618,6 @@ async function listObjects({ bucket, prefix, cursor }) {
   };
 }
 
-/**
- * One object, and specifically whether it can be deleted.
- *
- * `deletable` is computed here rather than in the browser so the UI can disable
- * Delete with "under object lock until 14 October" instead of offering it and
- * turning a 403 into a support question.
- */
 async function describeObject({ bucket, key }) {
   const bad = badBucket(bucket) || badKey(key, 'The key');
   if (bad) throw Object.assign(new Error(bad), { name: 'ValidationError' });
@@ -887,9 +630,6 @@ async function describeObject({ bucket, key }) {
 
   let retention = null;
   let legalHold = null;
-  /* Both are absent on an unlocked object and on a server that does not
-     implement them, and those are different things -- so a failure here is
-     recorded rather than flattened into "no retention". */
   let lockReadable = true;
   try {
     const r = await c.send(new m.GetObjectRetentionCommand({ Bucket: bucket, Key: key }));
@@ -905,13 +645,10 @@ async function describeObject({ bucket, key }) {
   try {
     const h = await c.send(new m.GetObjectLegalHoldCommand({ Bucket: bucket, Key: key }));
     legalHold = h.LegalHold && h.LegalHold.Status === 'ON';
-  } catch (err) { /* absent is the normal case */ }
+  } catch (err) {  }
 
   const now = Date.now();
   const held = retention && retention.until && Date.parse(retention.until) > now;
-  /* `deletable` has to mean "a delete would succeed", not "the object is not
-     locked". The console being read-only is just as real a blocker as
-     retention. Three blockers, one answer. */
   const deletable = !held && !legalHold && !!config.allowWrites;
 
   return {
@@ -938,15 +675,6 @@ async function describeObject({ bucket, key }) {
   };
 }
 
-/* --------------------------------------------------------------- preview ---- */
-
-/* An extension ALLOWLIST, not the object's own Content-Type.
- *
- * These are user-uploaded survey photographs. Serving them from the console's
- * own origin with the content type the uploader chose is stored XSS against the
- * control plane: upload an .html, open its preview, and the script runs with
- * the console's origin. The allowlist decides the type; the object's stated
- * type is ignored entirely. */
 const PREVIEWABLE = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
@@ -963,12 +691,6 @@ function previewType(key) {
   return PREVIEWABLE[key.slice(dot).toLowerCase()] || null;
 }
 
-/**
- * Stream one object to the browser, with every safety the type allows.
- *
- * Returns a descriptor the router turns into a response, so this module never
- * touches ServerResponse and stays testable.
- */
 async function previewObject({ bucket, key }) {
   const bad = badBucket(bucket) || badKey(key, 'The key');
   if (bad) throw Object.assign(new Error(bad), { name: 'ValidationError' });
@@ -1018,13 +740,6 @@ async function readCapped(source, maxBytes) {
   return Buffer.concat(chunks, read);
 }
 
-/* ------------------------------------------------------------ prefix size --- */
-
-/* The one endpoint that walks, and it is budgeted twice over: a key ceiling, a
-   wall-clock ceiling, and a process-wide lock so two operators pressing
-   Calculate cannot double the load. It returns `complete: false` rather than a
-   wrong total when it runs out of either budget -- an under-count presented as
-   a total is worse than an honest partial. */
 const PREFIX_BUDGET_KEYS = 50000;
 const PREFIX_BUDGET_MS = 20000;
 let prefixScanInFlight = false;
@@ -1083,16 +798,6 @@ async function prefixSize({ bucket, prefix }) {
   }
 }
 
-/* ----------------------------------------------------------- lock status ---- */
-
-/**
- * Whether immutability is real, from the probe that actually tested it.
- *
- * ADR-0020 makes immutability the answer to its first threat. Everything else
- * in this file reads configuration; this reads the result of an attempted
- * delete of a locked object version. A configured lock that is not enforced
- * looks identical to an enforced one from every other endpoint.
- */
 async function lockStatus() {
   const probe = lockProbe();
   const dec = declared();
@@ -1116,15 +821,10 @@ async function lockStatus() {
     mode: b.lock.mode,
     days: b.lock.days,
     declared: b.lock.declared,
-    /* One verdict, from one probe, applied to every locked bucket -- and said
-       out loud, because a per-bucket column implies a per-bucket test. */
     enforced: worm.verdict || 'unknown',
     probeError: worm.verdict === 'unknown' ? worm.detail : null
   }));
 
-  /* Any bucket that buckets.yaml says should be locked but which the probe
-     record does not show as locked. This is the case that cannot be repaired
-     in place, so it is surfaced separately rather than as a warning. */
   const appliedNames = new Set((probe.buckets || []).filter((b) => b.lock).map((b) => b.name));
   const missing = [];
   for (const [name, d] of dec.map) {
@@ -1137,7 +837,6 @@ async function lockStatus() {
     verdict: worm.verdict,
     detail: worm.detail,
     probedAt: worm.at || probe.at || null,
-    /* Never let a verdict from a laptop be read as a verdict about production. */
     scope: worm.scope || 'unknown',
     profile: probe.profile || null,
     devOverrides: probe.devOverrides || null,

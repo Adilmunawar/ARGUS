@@ -1,13 +1,3 @@
-/* Argus Console: System.
- *
- * Every other screen renders fixtures. This one asks the console API for the
- * actual machine it is running on and the actual AWS account it can see, and
- * renders whatever comes back -- including nothing, including an error,
- * including a value that is older than it looks.
- *
- * The rule this screen holds to: never show a number without saying where it
- * came from and how old it is.
- */
 (function () {
   'use strict';
 
@@ -28,12 +18,6 @@
 
   function ratioTone(r) { return r >= 0.9 ? 'bad' : r >= 0.75 ? 'warn' : null; }
 
-  /**
-   * A panel that owns its own request and its own four states: loading, ok,
-   * empty and failed. It renders itself immediately as a skeleton, then
-   * replaces itself -- and if the screen is left before the request lands, it
-   * throws the result away rather than writing into a detached node.
-   */
   function livePanel(title, path, render, opts) {
     opts = opts || {};
     var body = el('div');
@@ -82,8 +66,6 @@
 
     return card;
   }
-
-  /* ---------------------------------------------------------------- host --- */
 
   function renderHost(body, h) {
     body.appendChild(el('div.tiles', [
@@ -143,8 +125,6 @@
     }));
   }
 
-  /* ----------------------------------------------------------------- aws --- */
-
   function renderAws(body, d) {
     if (!d.ok) {
       body.appendChild(el('div.callout.warn', [
@@ -156,8 +136,6 @@
     body.appendChild(ui.dl([
       ['Account', el('code.mono', { text: d.account })],
       ['Region', el('code.mono', { text: d.region })],
-      /* The caller ARN names a principal, not a credential. The credential
-         itself never leaves the server and has no route that could return it. */
       ['Signed in as', el('code.mono', { text: d.arn })]
     ]));
   }
@@ -240,8 +218,6 @@
       { ttlMs: 15000, errorTitle: spec.title + ' could not be read' });
   }
 
-  /* -------------------------------------------------------------- screen --- */
-
   registerScreen('system', {
     title: 'System',
     crumb: 'System',
@@ -268,9 +244,6 @@
           }
         })]));
 
-      /* Whether there is an API to read is itself something that has to be
-         found out, so the screen is built after the probe rather than guessing
-         from a mode that may still be 'unknown' on the first paint. */
       mount.appendChild(body);
       A.onLeave(function () { alive = false; });
       repaint();

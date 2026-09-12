@@ -1,37 +1,8 @@
-/**
- * Argus Console: the automated test suite.
- *
- *   node tests/run-tests.js [path-to-index.html]
- *
- * Runs in headless Chromium against the real rendered DOM. Exit code is the
- * number of failures, so CI can gate on it.
- *
- *   BOOT   the shell loads, every screen registers, nothing throws
- *   NAV    every route resolves, deep links work, unknown routes fail honestly
- *   A11Y   axe-core WCAG 2.1 A/AA on every route and on every overlay
- *   KBD    real Tab traversal, focus rings, focus trap, focus restoration
- *   CMD    the command palette: search, arrow keys, activation, escape
- *   TBL    every table has a caption, sortable headers carry aria-sort
- *   STATE  empty, no-match and error states are distinguishable
- *   GUARD  regressions for every defect an adversarial audit found
- *   CON    contrast computed from rendered pixels, gradients included
- *   TXT    nothing below 11px, nothing clipped
- *   RESP   no horizontal overflow at six widths
- *   DENS   a small laptop does not spend its screen on chrome
- *   ZOOM   WCAG 1.4.10 reflow at 200% and 400%
- *   TAP    touch targets at least 24px (WCAG 2.5.8)
- *   MOTION prefers-reduced-motion stops every animation
- *   SEC    CSP present, no external origins, no innerHTML, no inline handlers
- *   DET    the same route renders identically twice (tests may rely on it)
- *   CONS   no console errors, no failed requests
- */
 const { chromium } = require('playwright');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// axe-core ships its bundle next to its entry point; resolve it rather than
-// hardcoding a path, so this runs on a developer machine and on CI alike.
 const AXE = fs.readFileSync(path.join(path.dirname(require.resolve('axe-core')), 'axe.min.js'), 'utf8');
 const FILE = process.argv[2] || path.join(__dirname, '..', 'index.html');
 const URL = 'file://' + path.resolve(FILE).replace(/\\/g, '/');
@@ -41,8 +12,6 @@ const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-console-shots')
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
-// Detail routes matter more than list routes: they are where the hard layout
-// and the destructive actions live.
 const DEEP = [
   'apps/mills', 'apps/agis', 'deploys/1847', 'deploys/1843',
   'compute/host/hv-03', 'compute/vm/sql-01', 'compute/vm/siem-01',
@@ -84,11 +53,7 @@ async function axeOn(page, label) {
   page.on('requestfailed', r => failedReqs.push(r.url() + ' : ' + ((r.failure() || {}).errorText || '')));
 
   await page.goto(URL, { waitUntil: 'load' });
-  // The page's own CSP forbids inline script, which is the point of having it,
-  // so axe goes in through the debugger protocol rather than a <script> tag.
   await page.evaluate(AXE);
-
-  /* ---------------------------------------------------------------- BOOT */
 
   const globals = await page.evaluate(() => ({
     argus: !!window.ARGUS, ui: !!(window.ARGUS && window.ARGUS.ui),
@@ -105,15 +70,11 @@ async function axeOn(page, label) {
     globals.screens.every(s => ROUTES.indexOf(s) !== -1),
     globals.screens.filter(s => ROUTES.indexOf(s) === -1).join(',') || 'none unlisted');
 
-  /* ----------------------------------------------------------------- NAV */
-
   const navTargets = await page.$$eval('.nav[data-go]', ns => ns.map(n => n.dataset.go));
   for (const t of navTargets) {
     rec('NAV', `nav target "${t}" has a screen`, globals.screens.indexOf(t) !== -1);
   }
 
-  // Press the control a person presses. Every other navigation test in this
-  // file assigns location.hash.
   for (const t of navTargets) {
     await page.evaluate(() => { window.location.hash = '#/overview'; });
     await page.waitForTimeout(120);
@@ -162,12 +123,9 @@ async function axeOn(page, label) {
   rec('NAV', 'an unknown route fails honestly rather than blankly',
     await page.evaluate(() => /does not exist/i.test(document.getElementById('main').textContent)));
 
-  /* ---------------------------------------------------------------- A11Y */
-
   for (const r of ROUTES) { await goto(page, r); await axeOn(page, r); }
   for (const d of DEEP.slice(0, 5)) { await goto(page, d); await axeOn(page, d); }
 
-  // Overlays are where focus and labelling usually break.
   await goto(page, 'overview');
   await page.evaluate(() => window.ARGUS.palette());
   await page.waitForSelector('.pal-input');
@@ -188,16 +146,12 @@ async function axeOn(page, label) {
   await axeOn(page, 'elevation dialog');
   await page.keyboard.press('Escape');
 
-  /* ----------------------------------------------------------------- KBD */
-
   await goto(page, 'overview');
   const focusable = await page.$$eval(
     'a[href],button:not([disabled]),input,select,textarea,[tabindex]:not([tabindex="-1"])',
     ns => ns.filter(n => n.offsetParent !== null).length);
   rec('KBD', 'the overview has focusable controls', focusable > 10, `${focusable} found`);
 
-  // :focus-visible only matches keyboard focus, so the traversal has to be real
-  // Tab presses. Calling el.focus() reports a false failure on a working ring.
   await page.evaluate(() => document.querySelector('.skip').focus());
   let noRing = [];
   for (let i = 0; i < 45; i++) {
@@ -206,14 +160,6 @@ async function axeOn(page, label) {
       const a = document.activeElement;
       if (!a || a === document.body) return null;
       if (!a.matches(':focus-visible')) return null;
-      /*
-       * The element is already focused by a real Tab press and has been checked
-       * against :focus-visible, so getComputedStyle(a) ALREADY reflects the
-       * focus styles.
-       *
-       * A box-shadow is not accepted as a ring either -- almost every surface
-       * here carries --sh-card and would satisfy it focused or not.
-       */
       const s = getComputedStyle(a);
       const has = s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) > 0;
       return has ? null : (a.tagName + '.' + (a.className || '')).slice(0, 60);
@@ -234,7 +180,6 @@ async function axeOn(page, label) {
       return bad.length === 0;
     }));
 
-  // Focus trap and restoration.
   await goto(page, 'overview');
   await page.evaluate(() => { document.getElementById('helpbtn').focus(); });
   await page.keyboard.press('Enter');
@@ -250,15 +195,12 @@ async function axeOn(page, label) {
     await page.evaluate(() => document.activeElement && document.activeElement.id === 'helpbtn'),
     await page.evaluate(() => document.activeElement ? document.activeElement.id || document.activeElement.tagName : 'none'));
 
-  // Shortcut keys.
   await page.keyboard.press('g');
   await page.keyboard.press('a');
   await page.waitForTimeout(60);
   rec('KBD', 'the "g then a" shortcut goes to Applications',
     await page.evaluate(() => window.ARGUS.state.route === 'apps'),
     await page.evaluate(() => window.ARGUS.state.route));
-
-  /* ----------------------------------------------------------------- CMD */
 
   await goto(page, 'overview');
   await page.keyboard.down('Control'); await page.keyboard.press('k'); await page.keyboard.up('Control');
@@ -281,8 +223,6 @@ async function axeOn(page, label) {
   rec('CMD', 'Escape closes the palette',
     await page.evaluate(() => !document.querySelector('.pal-input')));
 
-  /* ----------------------------------------------------------------- TBL */
-
   let noCaption = [], noSort = [];
   for (const r of ROUTES.concat(DEEP.slice(0, 5))) {
     await goto(page, r);
@@ -304,7 +244,6 @@ async function axeOn(page, label) {
   rec('TBL', 'every table has a caption', noCaption.length === 0, noCaption.join(' '));
   rec('TBL', 'every sortable header carries aria-sort', noSort.length === 0, noSort.join(' '));
 
-  // Sorting actually reorders, and says so.
   await goto(page, 'apps');
   const sorted = await page.evaluate(() => {
     const th = document.querySelector('#main th[data-col] .th-sort');
@@ -316,8 +255,6 @@ async function axeOn(page, label) {
   });
   rec('TBL', 'sorting a column reorders the rows', !!(sorted && sorted.changed && sorted.rows > 1),
     sorted ? `${sorted.rows} rows` : 'no sortable table found');
-
-  /* --------------------------------------------------------------- STATE */
 
   await goto(page, 'apps');
   const states = await page.evaluate(() => {
@@ -505,11 +442,6 @@ async function axeOn(page, label) {
 
   await goto(page, 'overview');
 
-  /* -------------------------------------------------------------- LAYOUT */
-
-  // A single row should never be taller than a card. This catches the class of
-  // bug where a layout rule leaks into content, which axe and the responsive
-  // checks both sail straight past.
   let fatRows = [], fatPages = [];
   for (const r of ROUTES.concat(DEEP.slice(0, 6))) {
     await goto(page, r);
@@ -522,7 +454,6 @@ async function axeOn(page, label) {
       return { rows: rows.slice(0, 3), page: Math.round(document.getElementById('main').scrollHeight) };
     });
     if (o.rows.length) fatRows.push(r + ': ' + o.rows.join(', '));
-    // Ten rows of data should not make a five-screen page.
     if (o.page > 4200) fatPages.push(r + ': ' + o.page + 'px');
   }
   rec('LAYOUT', 'no table row is taller than 220px', fatRows.length === 0, fatRows.slice(0, 4).join(' | '));
@@ -552,10 +483,6 @@ async function axeOn(page, label) {
       });
       return bad.length === 0;
     }));
-
-  /* --------------------------------------------------------------- GUARD */
-
-  // Every assertion here corresponds to a defect an adversarial audit found.
 
   await goto(page, 'overview');
   rec('GUARD', 'a disabled button does not run its action',
@@ -591,7 +518,6 @@ async function axeOn(page, label) {
     }));
   await page.keyboard.press('Escape');
 
-  // An in-page anchor is not a route.
   await goto(page, 'overview');
   await page.evaluate(() => document.querySelector('.skip').click());
   await page.waitForTimeout(150);
@@ -599,7 +525,6 @@ async function axeOn(page, label) {
     await page.evaluate(() => !/does not exist/i.test(document.getElementById('main').textContent)),
     await page.evaluate(() => document.title));
 
-  // A screen's timers must not outlive it.
   await goto(page, 'ops/runbook/sql-01-restore-drill');
   const ranTranscript = await page.evaluate(() => {
     const b = Array.from(document.querySelectorAll('#main button')).find(x => /^Run /.test(x.textContent));
@@ -616,7 +541,6 @@ async function axeOn(page, label) {
     ranTranscript && await page.evaluate(() => document.getElementById('flashes').children.length === 0),
     await page.evaluate(() => document.getElementById('flashes').textContent.slice(0, 60)));
 
-  // The countdown reads the same clock it counts against.
   rec('GUARD', 'the elevation countdown matches the granted duration',
     await page.evaluate(() => {
       window.ARGUS.data.me.elevation = {
@@ -642,10 +566,6 @@ async function axeOn(page, label) {
       return count <= 2;
     }));
 
-  /* Each regression below is exercised the way an operator meets it, not by
-     inspecting an attribute. */
-
-  // The rail collapses at 1200px and for anyone who ever pressed Collapse.
   await page.setViewportSize({ width: 1100, height: 800 });
   await goto(page, 'overview');
   rec('GUARD', 'a collapsed rail keeps an accessible name on every nav button',
@@ -669,7 +589,6 @@ async function axeOn(page, label) {
     }));
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // ui.btn captures disabled at construction.
   await goto(page, 'deploys/1847');
   rec('GUARD', 'a deployment can actually be rejected once a reason is given',
     await page.evaluate(async () => {
@@ -693,7 +612,6 @@ async function axeOn(page, label) {
       return document.querySelectorAll('#flashes .flash').length > before;
     }));
 
-  // A.dialog builds body() and actions() before the panel is in the document.
   await goto(page, 'security/vulns');
   rec('GUARD', 'the waiver dialog reaches its own fields and can be submitted',
     await page.evaluate(async () => {
@@ -709,7 +627,7 @@ async function axeOn(page, label) {
       const expiry = dlg.querySelector('#waiver-expiry');
       const go = [...dlg.querySelectorAll('button')].find(b => b.textContent.trim() === 'Add waiver');
       if (!owner || !reason || !expiry || !go) return false;
-      if (go.disabled) return false;                       // must use aria-disabled
+      if (go.disabled) return false;
       if (go.getAttribute('aria-disabled') !== 'true') return false;
       owner.value = 'adil'; owner.dispatchEvent(new Event('input', { bubbles: true }));
       reason.value = 'fix is queued'; reason.dispatchEvent(new Event('input', { bubbles: true }));
@@ -717,7 +635,6 @@ async function axeOn(page, label) {
       return go.getAttribute('aria-disabled') === 'false';
     }));
 
-  // Applications is the only screen that emits ?tab=.
   await goto(page, 'apps/mills?tab=logs');
   rec('GUARD', 'the applications screen opens the tab its own links name',
     await page.evaluate(() => {
@@ -745,20 +662,12 @@ async function axeOn(page, label) {
       return order[order.length - 1] === 'b';
     }));
 
-  /* Colour is never the only signal.
-   *
-   * Measured against this palette, `bad` and `warn` separate by a deuteranopic
-   * delta-E of 2.9 -- so the glyph rule is what actually carries severity, and
-   * an assertion is the only thing that keeps it true as screens are added. */
   {
     const colourOnly = [];
     for (const r of ['overview', 'deploys', 'data/cache', 'security/posture', 'compute/host/hv-03', 'ml/pipelines']) {
       await goto(page, r);
       const found = await page.evaluate((route) => {
         const bad = [];
-        // Callouts: a tone in background and border needs a glyph too.
-        /* The glyph has to be one of the shapes the pill vocabulary actually
-           uses. */
         const GLYPHS = ['●', '▲', '■', '◆', '○'];
         document.querySelectorAll('.callout').forEach(n => {
           const raw = getComputedStyle(n, '::before').content;
@@ -771,15 +680,12 @@ async function axeOn(page, label) {
             bad.push(route + ': callout glyph is ' + JSON.stringify(raw) + ', not one of the pill shapes');
           }
         });
-        // Toned bars: the tone says "over a threshold", so it needs a texture
-        // and it needs to say so in the accessible name.
         document.querySelectorAll('.bar-fill.warn, .bar-fill.bad, .meter-fill.warn, .meter-fill.bad').forEach(n => {
           if (getComputedStyle(n).backgroundImage === 'none') bad.push(route + ': toned bar with no texture');
           const host = n.closest('[role="img"]');
           const label = host ? (host.getAttribute('aria-label') || '') : '';
           if (!/threshold/i.test(label)) bad.push(route + ': toned bar whose label omits the threshold');
         });
-        // Pills: the existing rule, asserted rather than assumed.
         document.querySelectorAll('.pill').forEach(n => {
           if (!n.querySelector('.pill-glyph')) bad.push(route + ': pill with no glyph');
         });
@@ -802,7 +708,6 @@ async function axeOn(page, label) {
       return s ? s.textContent : 'none';
     }));
 
-  // The query editor's read-only claim has to be what it enforces.
   await goto(page, 'data/database/umairv3_db');
   const sqlCases = [
     ['SELECT * INTO staff_copy FROM staff', true],
@@ -831,8 +736,6 @@ async function axeOn(page, label) {
   rec('GUARD', 'the query editor enforces the read-only claim it makes',
     sqlBad.length === 0, sqlBad.join(' | '));
 
-  // A class in the markup that no stylesheet defines is either a typo or a
-  // rule someone deleted.
   const cssText = ['assets/app.css', 'assets/components.css']
     .map(f => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
   const definedClasses = new Set((cssText.match(/\.[A-Za-z][A-Za-z0-9_-]*/g) || []).map(s => s.slice(1)));
@@ -853,8 +756,6 @@ async function axeOn(page, label) {
   rec('GUARD', 'every class used in the markup is defined in a stylesheet',
     undefinedClasses.size === 0, Array.from(undefinedClasses).slice(0, 8).join(' '));
 
-  /* ----------------------------------------------------------------- CON */
-
   const RGB = s => { const m = String(s).match(/[\d.]+/g); return m ? m.slice(0, 3).map(Number) : null; };
   const lum = c => { const f = c.map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]; };
   let lowContrast = [];
@@ -862,12 +763,6 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const out = [];
-      /*
-       * Gradients are resolved rather than skipped: each colour stop is a
-       * candidate background, composited over what is behind it, and the
-       * worst stop is the verdict. axe reports a gradient as "incomplete"
-       * rather than a violation.
-       */
       const parse = (v) => {
         const m = String(v).match(/[\d.]+/g);
         if (!m) return null;
@@ -929,18 +824,11 @@ async function axeOn(page, label) {
   }
   rec('CON', 'all text meets WCAG AA contrast', lowContrast.length === 0, lowContrast.slice(0, 6).join(' | '));
 
-  /* ----------------------------------------------------------------- TXT */
-
   let tiny = [], clipped = [];
   for (const r of ROUTES) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const small = [], clip = [];
-      /* The whole document, not just #main.
-       *
-       * offsetParent is an HTMLElement property and is undefined on every
-       * SVGElement; getClientRects() answers the "is it rendered" question
-       * for both. */
       document.querySelectorAll('body *').forEach(n => {
         if (n.closest('.sr') || n.closest('#live')) return;
         if (!n.getClientRects().length) return;
@@ -960,8 +848,6 @@ async function axeOn(page, label) {
   rec('TXT', 'no text below 11px', tiny.length === 0, tiny.slice(0, 6).join(' | '));
   rec('TXT', 'no clipped text', clipped.length === 0, clipped.slice(0, 6).join(' | '));
 
-  /* ------------------------------------------------------- RESP and DENS */
-
   const WIDTHS = [
     { name: 'desktop', w: 1440, h: 900 }, { name: 'laptop-1366', w: 1366, h: 768 },
     { name: 'laptop-1280', w: 1280, h: 800 }, { name: 'small-laptop', w: 1024, h: 768 },
@@ -977,7 +863,6 @@ async function axeOn(page, label) {
         document.querySelectorAll('body *').forEach(n => {
           if (n.closest('.sr') || !n.offsetParent) return;
           const rect = n.getBoundingClientRect();
-          // A container that scrolls its own overflow is doing the right thing.
           const s = getComputedStyle(n);
           if (s.overflowX === 'auto' || s.overflowX === 'scroll') return;
           if (rect.right > document.documentElement.clientWidth + 1) {
@@ -1027,10 +912,6 @@ async function axeOn(page, label) {
     await page.screenshot({ path: `${SHOTS}/${v.name}.png`, fullPage: v.name === 'desktop' }).catch(() => {});
   }
 
-  /* ---------------------------------------------------------------- ZOOM */
-
-  // WCAG 1.4.10: content must reflow without a second scrollbar. 400% zoom at
-  // 1280px is equivalent to a 320px viewport.
   for (const z of [{ label: '200%', w: 640, h: 512 }, { label: '400%', w: 320, h: 256 }]) {
     await ctx.pages()[0].setViewportSize({ width: z.w, height: z.h });
     let bad = [];
@@ -1043,12 +924,6 @@ async function axeOn(page, label) {
     }
     rec('ZOOM', `reflow at ${z.label} zoom (${z.w}px equivalent)`, bad.length === 0, bad.slice(0, 3).join(' | '));
 
-    /* WCAG 2.4.11: and nothing may cover the control that has focus.
-     *
-     * At the 320px equivalent the top bar wraps to 162px against a 200px
-     * viewport. A fixed scroll-padding cannot track a height that depends on
-     * how the row wraps, so below 620px the bar stops being sticky -- and this
-     * asserts the outcome rather than the mechanism. */
     let covered = [];
     for (const r of ROUTES) {
       await goto(page, r);
@@ -1071,8 +946,6 @@ async function axeOn(page, label) {
   }
   await ctx.pages()[0].setViewportSize({ width: 1440, height: 900 });
 
-  /* -------------------------------------------------------------- MOTION */
-
   const reduced = await browser.newContext({ viewport: { width: 1280, height: 800 }, reducedMotion: 'reduce' });
   const rp = await reduced.newPage();
   await rp.goto(URL, { waitUntil: 'load' });
@@ -1089,13 +962,8 @@ async function axeOn(page, label) {
     }));
   await reduced.close();
 
-  /* ----------------------------------------------------------------- SEC */
-
   rec('SEC', 'a Content-Security-Policy is declared',
     await page.evaluate(() => !!document.querySelector('meta[http-equiv="Content-Security-Policy"]')));
-  // Proving the CSP works means violating it on purpose, which logs a console
-  // error. Only the errors this probe itself causes are discarded, by position,
-  // so a genuine violation somewhere else still fails the CONS suite.
   const errorsBeforeProbe = consoleErrors.length;
   rec('SEC', 'the CSP actually blocks an injected inline script',
     await (async () => {
@@ -1114,8 +982,6 @@ async function axeOn(page, label) {
         && /base-uri 'none'/.test(m.content) && /default-src 'none'/.test(m.content);
     }));
 
-  // The source is the authority here: a console that renders alert rules and
-  // commit messages must not build DOM from strings anywhere.
   const srcFiles = [];
   (function walk(dir) {
     for (const f of fs.readdirSync(dir)) {
@@ -1128,7 +994,6 @@ async function axeOn(page, label) {
 
   const innerHtml = srcFiles.filter(f => {
     const s = fs.readFileSync(f, 'utf8');
-    // ui.el throws on an 'html' key; that guard is allowed to mention it.
     return /\.innerHTML\s*=|insertAdjacentHTML|document\.write/.test(s);
   }).map(f => path.relative(ROOT, f));
   rec('SEC', 'no innerHTML, insertAdjacentHTML or document.write in the source',
@@ -1140,7 +1005,7 @@ async function axeOn(page, label) {
     inlineHandlers.length === 0, inlineHandlers.join(' '));
 
   const external = srcFiles.filter(f => /https?:\/\/(?!localhost)/.test(
-    fs.readFileSync(f, 'utf8').replace(/^\s*[*/].*$/gm, '')   // ignore comment lines
+    fs.readFileSync(f, 'utf8').replace(/^\s*[*/].*$/gm, '')
       .replace(/https?:\/\/[a-z0-9.-]*(zaraatdost|argus|anthropic|earthengine|dataspace|firebase|googleapis|w3\.org|localhost)[^\s"')]*/g, '')
   )).map(f => path.relative(ROOT, f));
   rec('SEC', 'no external origins are referenced from the bundle', external.length === 0, external.join(' '));
@@ -1155,11 +1020,6 @@ async function axeOn(page, label) {
       return true;
     })());
 
-  /* --------------------------------------------------------------- ROUTE */
-
-  // parseHash runs on every hashchange and *before* the try/catch that guards
-  // a screen's render, so anything it throws takes the console down until a
-  // manual reload. decodeURIComponent throws URIError on a malformed escape.
   const ROUTE_CASES = [
     { hash: '#/apps?q=%', route: 'apps', why: 'a stray percent sign' },
     { hash: '#/apps?q=%zz', route: 'apps', why: 'an invalid escape' },
@@ -1183,9 +1043,6 @@ async function axeOn(page, label) {
   const eqParam = await page.evaluate(() => window.ARGUS.state.params.q);
   rec('ROUTE', "a '=' inside a query value survives parsing", eqParam === 'YWRtaW4=', String(eqParam));
 
-  // href() encodes each segment and parseHash() decodes it; if the pair does
-  // not round-trip then a resource whose name contains a space, a slash or a
-  // percent sign cannot be linked to at all.
   const roundTrip = await page.evaluate(async () => {
     const awkward = 'a b/c%d';
     window.location.hash = window.ARGUS.href('apps', [awkward]);
@@ -1195,11 +1052,8 @@ async function axeOn(page, label) {
   rec('ROUTE', 'href and parseHash round-trip a segment with space, slash and percent',
     roundTrip.got === roundTrip.want, JSON.stringify(roundTrip));
 
-  // A hash that is not a route at all (the skip link) must be left alone.
   await page.evaluate(() => { window.location.hash = '#/overview'; });
   await page.waitForTimeout(100);
-
-  /* --------------------------------------------------------------- THEME */
 
   await goto(page, 'overview');
   const themes = await page.evaluate(() => {
@@ -1225,8 +1079,6 @@ async function axeOn(page, label) {
   rec('THEME', 'the color-scheme meta follows the resolved theme',
     themes.dark.meta === 'dark', String(themes.dark.meta));
 
-  // A shadow token driven by --ink-rgb would invert with the text and put a
-  // white halo around every card in dark mode.
   const shadowInk = await page.evaluate(() => {
     const v = getComputedStyle(document.documentElement);
     return { shadow: v.getPropertyValue('--shadow-rgb').trim(), ink: v.getPropertyValue('--ink-rgb').trim() };
@@ -1234,7 +1086,6 @@ async function axeOn(page, label) {
   rec('THEME', 'shadows do not invert with the text colour',
     shadowInk.shadow !== shadowInk.ink, JSON.stringify(shadowInk));
 
-  // The theme is a preference, so it has to survive a reload.
   await page.reload({ waitUntil: 'load' });
   await page.evaluate(AXE);
   await page.waitForTimeout(150);
@@ -1242,7 +1093,6 @@ async function axeOn(page, label) {
     await page.evaluate(() => document.documentElement.getAttribute('data-theme') === 'dark'),
     await page.evaluate(() => document.documentElement.getAttribute('data-theme')));
 
-  // Everything the light theme is held to, the dark theme is held to as well.
   for (const r of ['overview', 'security', 'compute', 'apps/mills']) {
     await goto(page, r);
     await axeOn(page, 'dark ' + r);
@@ -1253,8 +1103,6 @@ async function axeOn(page, label) {
     await goto(page, r);
     const found = await page.evaluate(() => {
       const out = [];
-      /* The same scan as CON above -- full document, gradients composited
-         rather than skipped. */
       const parse = (v) => {
         const m = String(v).match(/[\d.]+/g);
         if (!m) return null;
@@ -1325,9 +1173,6 @@ async function axeOn(page, label) {
   await page.evaluate(() => window.ARGUS.setTheme('light'));
   await page.waitForTimeout(80);
 
-  /* --------------------------------------------------------------- PREFS */
-
-  // localStorage is writable by anything else on this origin.
   const prefGuard = await page.evaluate(async () => {
     localStorage.setItem('argus.prefs', JSON.stringify({
       density: '"><img src=x>', theme: 'neon', timezone: 42, rail: 'yes'
@@ -1384,10 +1229,6 @@ async function axeOn(page, label) {
       return ok && !document.querySelector('.dialog[role="dialog"]');
     }));
 
-  /* ------------------------------------------------------------- OVERLAY */
-
-  // A dialog and an overflow menu are both mounted on <body>, so neither is
-  // removed when main is cleared.
   const strandedDialog = await page.evaluate(async () => {
     window.location.hash = '#/overview';
     await new Promise(r => setTimeout(r, 200));
@@ -1425,8 +1266,6 @@ async function axeOn(page, label) {
   rec('OVERLAY', 'navigating away closes an open overflow menu',
     strandedMenu.opened && !strandedMenu.stillOpen, JSON.stringify(strandedMenu));
 
-  // Closing the same dialog twice must not pop the opener stack twice, or the
-  // dialog after it inherits an opener that belongs to something else.
   const doubleClose = await page.evaluate(async () => {
     window.location.hash = '#/overview';
     await new Promise(r => setTimeout(r, 200));
@@ -1469,8 +1308,6 @@ async function axeOn(page, label) {
     emptyFilter.tokensAfter === emptyFilter.tokensBefore && emptyFilter.focused,
     JSON.stringify(emptyFilter));
 
-  /* ---------------------------------------------------------------- MENU */
-
   await goto(page, 'apps');
   const menuOpen = await page.evaluate(async () => {
     const trig = document.querySelector('.tablewrap .menubtn');
@@ -1491,8 +1328,6 @@ async function axeOn(page, label) {
       opened: !!pop,
       items: items.length,
       danger: pop ? !!pop.querySelector('.menuitem.danger') : false,
-      // A popup mounted inside .tablewrap is clipped by its overflow-x; it
-      // has to live on <body>.
       onBody: pop ? pop.parentElement === document.body : false,
       rect: r ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom } : null,
       vw: window.innerWidth, vh: window.innerHeight
@@ -1546,7 +1381,6 @@ async function axeOn(page, label) {
   rec('MENU', 'Escape closes the menu and returns focus to its trigger',
     menuEsc.closed && menuEsc.refocused && menuEsc.expanded === 'false', JSON.stringify(menuEsc));
 
-  // Opening a row menu must not also trigger the row's own navigation.
   const menuRow = await page.evaluate(async () => {
     window.location.hash = '#/apps';
     await new Promise(r => setTimeout(r, 250));
@@ -1561,10 +1395,6 @@ async function axeOn(page, label) {
   rec('MENU', 'opening a row menu does not navigate the row underneath it',
     menuRow.before === menuRow.after, JSON.stringify(menuRow));
 
-  /* ------------------------------------------------------------- SESSION */
-
-  // The shortcuts table documents Escape as closing "a dialog, drawer or
-  // palette".
   const session = await page.evaluate(async () => {
     window.location.hash = '#/compute';
     await new Promise(r => setTimeout(r, 200));
@@ -1592,10 +1422,6 @@ async function axeOn(page, label) {
   rec('SESSION', 'closing the session tears down the terminal it held',
     session.emptied, JSON.stringify(session));
 
-  /* --------------------------------------------------------------- TIMER */
-
-  // Every screen that starts an interval has to stop it on navigation, or the
-  // console accumulates one live timer per visit for the length of a shift.
   const timers = await page.evaluate(async () => {
     let live = 0;
     const mine = new Set();
@@ -1615,8 +1441,6 @@ async function axeOn(page, label) {
   rec('TIMER', 'navigating across every ticking screen leaves no timer behind',
     timers === 0, `net live intervals after the tour: ${timers}`);
 
-  /* ----------------------------------------------------------------- DET */
-
   let nondet = [];
   for (const r of ROUTES) {
     await goto(page, r);
@@ -1628,15 +1452,11 @@ async function axeOn(page, label) {
   }
   rec('DET', 'every route renders identically on a second visit', nondet.length === 0, nondet.join(' '));
 
-  /* ---------------------------------------------------------------- CONS */
-
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));
   rec('CONS', 'no failed requests', realFails.length === 0, realFails.slice(0, 4).join(' | '));
 
   await browser.close();
-
-  /* -------------------------------------------------------------- report */
 
   const bySuite = {};
   results.forEach(r => {

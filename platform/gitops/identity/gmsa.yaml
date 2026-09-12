@@ -1,6 +1,5 @@
 apiVersion: argus/v1
 kind: ServiceAccounts
-# Every service identity. Passwords are managed by AD (30-day rotation); no human knows them.
 accounts:
   - { name: gmsa-sf$,          hosts: [sf-01, sf-02, sf-03, sf-04, sf-05], tier: 1 }
   - { name: gmsa-mills$,       hosts: [sf-*],  tier: 1, sql: [umairv3_db, FarmerFacilitatorDb], s3: [argus-survey-pictures:r] }

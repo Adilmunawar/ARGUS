@@ -1,28 +1,9 @@
-/*
- * Real telemetry for the machine this process is running on.
- *
- * Everything here comes from the operating system, not from a fixture. It is
- * the half of the dashboard that keeps working when AWS is unreachable, which
- * is exactly when somebody is looking at it.
- *
- * Nothing in this file shells out. Spawning `wmic` or `df` per request is how a
- * monitoring endpoint turns into a fork bomb under load, and the values that
- * matter are all available from `os` and `fs` without one.
- */
 'use strict';
 
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
-/*
- * CPU usage needs two samples.
- *
- * os.cpus() reports cumulative jiffies since boot, so a single reading gives
- * the average since the machine started -- which is a number that never moves
- * and tells an operator nothing. The previous sample is kept so each call
- * reports the usage over the interval since the last one.
- */
 let previous = sampleCpu();
 
 function sampleCpu() {
@@ -39,8 +20,6 @@ function cpu() {
   const now = sampleCpu();
   const idleDelta = now.idle - previous.idle;
   const totalDelta = now.total - previous.total;
-  // Two calls in the same millisecond would divide by zero; report the last
-  // known shape rather than NaN.
   const usage = totalDelta > 0 ? 1 - idleDelta / totalDelta : 0;
   const windowMs = now.at - previous.at;
   previous = now;
@@ -49,7 +28,7 @@ function cpu() {
     model: (os.cpus()[0] || {}).model || 'unknown',
     usageRatio: Math.max(0, Math.min(1, usage)),
     sampledOverMs: windowMs,
-    loadAverage: os.loadavg()          // zeros on Windows; reported, not faked
+    loadAverage: os.loadavg()
   };
 }
 
@@ -64,14 +43,6 @@ function memory() {
   };
 }
 
-/*
- * Disk.
- *
- * statfs is available from Node 18 and gives real block counts without a
- * subprocess. It is asynchronous and can reject for a volume that has gone
- * away, so a failing mount degrades to an error on that row rather than taking
- * the whole response down with it.
- */
 async function disks() {
   const roots = process.platform === 'win32'
     ? drivesWindows()
@@ -97,7 +68,6 @@ async function disks() {
   return out;
 }
 
-/** Drive letters that actually exist, without shelling out to wmic. */
 function drivesWindows() {
   const found = [];
   for (let c = 'A'.charCodeAt(0); c <= 'Z'.charCodeAt(0); c++) {
@@ -105,7 +75,7 @@ function drivesWindows() {
     try {
       fs.accessSync(root);
       found.push(root);
-    } catch (err) { /* not present, which is the normal case for most letters */ }
+    } catch (err) {  }
   }
   return found.length ? found : [path.parse(process.cwd()).root];
 }

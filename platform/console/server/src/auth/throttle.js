@@ -7,10 +7,27 @@ const bySource = new Map();
 
 const MAX_TRACKED = 4096;
 
-function entry(map, id) {
+function makeRoom(map, now) {
+  if (map.size < MAX_TRACKED) return true;
+  for (const [id, record] of map) {
+    if (record.lockedUntil <= now && now - record.firstFailureAt > authConfig.lockoutWindowMs) {
+      map.delete(id);
+      if (map.size < MAX_TRACKED) return true;
+    }
+  }
+  for (const [id, record] of map) {
+    if (record.lockedUntil <= now) {
+      map.delete(id);
+      if (map.size < MAX_TRACKED) return true;
+    }
+  }
+  return false;
+}
+
+function entry(map, id, now) {
   let record = map.get(id);
   if (!record) {
-    if (map.size >= MAX_TRACKED) map.delete(map.keys().next().value);
+    if (!makeRoom(map, now)) return null;
     record = { count: 0, firstFailureAt: 0, lockedUntil: 0 };
     map.set(id, record);
   }
@@ -36,7 +53,8 @@ function state(subject, source) {
 }
 
 function penalise(map, id, now) {
-  const record = entry(map, id);
+  const record = entry(map, id, now);
+  if (!record) return { locked: false, forMs: 0, count: 0 };
   if (record.firstFailureAt === 0 || now - record.firstFailureAt > authConfig.lockoutWindowMs) {
     record.count = 0;
     record.firstFailureAt = now;

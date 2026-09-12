@@ -1,31 +1,9 @@
-/* Argus Console: the component layer.
- *
- * app.css carries the tokens, the shell chrome and the responsive and density
- * breakpoints. This file is everything the screens are built from.
- *
- * Rules that are not negotiable, and why:
- *   - Nothing below 11px. An operations console gets read at 3 a.m.
- *   - Every interactive target is at least 24px, 44px on touch (WCAG 2.5.8).
- *   - Colour is never the only signal. Every status pill carries a glyph.
- *   - Sticky things reserve space so they cannot cover the focused element
- *     (WCAG 2.4.11 Focus Not Obscured).
- *   - No transitions survive prefers-reduced-motion.
- */
-
-/* A class that sets display beats the user-agent rule for [hidden]. This
-   has to come before anything that sets display. */
 [hidden] { display: none !important; }
 
-/* Inline SVG with no intrinsic size falls back to 300x150. Every icon in the
-   chrome is constrained here rather than per-component. */
 .kbar svg, .railbtn svg, .burger svg, .iconbtn svg, .nav svg { width: 17px; height: 17px; flex: none; }
 .kbar svg, .railbtn svg, .burger svg, .iconbtn svg { stroke: currentColor; fill: none; }
 
-/* ------------------------------------------------------------- layout --- */
-
 .shellcol { display: flex; flex-direction: column; min-width: 0; min-height: 100vh; }
-/* A stacking utility for cell and card content. Deliberately not the shell
-   column. */
 .col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .main { padding: 18px 22px 64px; min-width: 0; flex: 1; outline: none; }
 .main:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: -3px; }
@@ -46,16 +24,12 @@
 @media (max-width: 1000px) { .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: minmax(0, 1fr); } }
 
-/* -------------------------------------------------------- page header --- */
-
 .pagehead { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; }
 .pagehead-text { min-width: 0; flex: 1; }
 .pagehead h1 { font-size: 19px; line-height: 1.25; outline: none; }
 .pagehead h1:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 3px; border-radius: 6px; }
 .pagehead-desc { color: var(--muted); font-size: 12.5px; margin-top: 4px; max-width: 72ch; }
 .pagehead-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-
-/* -------------------------------------------------------------- cards --- */
 
 .card { background: var(--paper); border: 1px solid rgba(var(--ink-rgb),.1); border-radius: var(--card);
   box-shadow: var(--sh-card); display: flex; flex-direction: column; min-width: 0; }
@@ -65,8 +39,6 @@
 .card-actions { margin-left: auto; display: flex; gap: 6px; }
 .card-body { padding: 13px 16px 16px; min-width: 0; flex: 1; }
 .card-body.flush { padding: 0; }
-
-/* -------------------------------------------------------------- tiles --- */
 
 .tile { background: var(--paper); border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px;
   padding: 12px 14px; box-shadow: var(--sh-card); min-width: 0; }
@@ -78,8 +50,6 @@
 .delta { font-size: 11px; font-weight: 600; margin-top: 3px; }
 .delta.up { color: var(--ok); }
 .delta.down { color: var(--bad); }
-
-/* --------------------------------------------------------------- pill --- */
 
 .pill { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 3px 9px;
   font-size: 11px; font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
@@ -94,22 +64,15 @@
   border-radius: 999px; padding: 3px 9px; font-size: 11px; white-space: nowrap; }
 .chips { display: flex; gap: 5px; flex-wrap: wrap; }
 
-/* ------------------------------------------------------------ buttons --- */
-
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 32px; padding: 6px 13px; border-radius: 10px; font: inherit; font-size: 12px; font-weight: 600;
   border: 1px solid rgba(var(--ink-rgb),.18); background: var(--paper); color: var(--ink); cursor: pointer; }
 .btn:hover { background: rgba(var(--wash-rgb),.26); }
-/* The gradient runs ACROSS the button, so a long label sits further into the
-   light stop. The dark end goes where the text starts and the light end at
-   the trailing edge, so white text keeps its contrast for the whole label. */
 .btn.primary { background: linear-gradient(120deg, var(--on-white-from), var(--on-white-to)); color: #fff; border-color: transparent; }
 .btn.primary:hover { filter: brightness(1.08); }
 .btn.ghost { background: transparent; border-color: rgba(var(--ink-rgb),.16); }
 .btn.danger { background: var(--danger-fill); color: var(--on-danger); border-color: transparent; }
 .btn.danger:hover { filter: brightness(1.1); }
-/* A disabled control states why, rather than just going pale: opacity alone
-   fails contrast and tells assistive technology nothing. */
 .btn.is-disabled, .btn[disabled] { background: var(--sunk); color: var(--sunk-ink); border-color: rgba(var(--ink-rgb),.12);
   cursor: not-allowed; filter: none; }
 .iconbtn { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px;
@@ -126,11 +89,7 @@
 .crumb-link { color: var(--muted); text-decoration: none; padding: 5px 6px; margin: -5px -6px; border-radius: 6px; }
 .crumb-link:hover { color: var(--brand); text-decoration: underline; }
 
-/* ------------------------------------------------------------- tables --- */
-
 .tablewrap { overflow-x: auto; border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px; background: var(--paper); }
-/* A windowed table needs somewhere to scroll, and a header that stays put --
-   otherwise the columns scroll away from the rows they label. */
 .tablewrap.is-virtual { overflow-y: auto; max-height: min(70vh, 640px); }
 .tablewrap.is-virtual thead th { position: sticky; top: 0; z-index: 2; }
 .tablewrap.is-virtual tr.vspacer td { border: none; }
@@ -154,13 +113,9 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .tablewrap tr.is-clickable { cursor: pointer; }
 .tablewrap tr.is-clickable:hover td { background: rgba(var(--wash-rgb),.16); }
 .tablewrap tr.is-clickable:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: -3px; }
-/* The row a deep link named. Marked with a rule as well as a wash, so it does
-   not depend on colour. */
 .tablewrap tr.is-linked td { background: rgba(var(--wash-rgb),.22); }
 .tablewrap tr.is-linked td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
 .tablewrap tr.is-linked:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: -3px; }
-
-/* ------------------------------------------------------- empty, error --- */
 
 .empty { text-align: center; padding: 30px 18px; }
 .empty-title { font-family: var(--display); font-size: 15px; font-weight: 600; }
@@ -170,8 +125,6 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .skel { display: flex; flex-direction: column; gap: 8px; }
 .skel-row { height: 15px; border-radius: 7px; background: linear-gradient(90deg, var(--sunk), var(--cream), var(--sunk)); }
 
-/* ---------------------------------------------------- definition list --- */
-
 .deflist { display: grid; gap: 0; }
 .deflist-row { display: grid; grid-template-columns: minmax(120px, 34%) minmax(0, 1fr); gap: 12px;
   padding: 7px 0; border-bottom: 1px solid rgba(var(--ink-rgb),.06); font-size: 12.5px; }
@@ -180,29 +133,18 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .deflist dd { min-width: 0; word-break: break-word; }
 .kvgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 
-/* --------------------------------------------------------------- tabs --- */
-
 .tabs { min-width: 0; }
 .tablist { display: flex; gap: 4px; border-bottom: 1px solid rgba(var(--ink-rgb),.12); overflow-x: auto; }
 .tab { min-height: 30px; padding: 8px 14px; border: none; background: none; font: inherit; font-size: 12.5px;
   font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--ink); }
-/* --brand, not --cane: --cane is a near-black green in dark and would leave
-   the selected tab's label illegible. --brand is the same colour as the
-   underline already beneath it, and passes in both themes. */
 .tab.is-active { color: var(--brand); border-bottom-color: var(--brand); }
 .tabpanels { padding-top: 16px; outline: none; }
 .tabpanels:focus-visible { outline: 3px solid rgba(var(--focus-rgb),.95); outline-offset: 3px; border-radius: 8px; }
 
-/* ------------------------------------------------------------- charts --- */
-
 .spark { display: block; overflow: visible; }
 .bar, .meter { background: var(--sunk); border-radius: 999px; height: 8px; overflow: hidden; min-width: 60px; }
 .bar-fill, .meter-fill { height: 100%; background: var(--c1); border-radius: 999px; }
-/* A toned fill carries a texture as well as a hue. warn and bad separate by a
-   deuteranopic delta-E of 2.9 in this palette, so hue alone does not tell a
-   colour-blind operator that a bar has crossed its threshold. The stripe
-   survives greyscale, projection and forced-colours too. */
 .bar-fill.warn, .meter-fill.warn { background-color: var(--c2);
   background-image: repeating-linear-gradient(45deg, rgba(var(--white-rgb),.38) 0 3px, transparent 3px 7px); }
 .bar-fill.bad, .meter-fill.bad { background-color: var(--c4);
@@ -225,8 +167,6 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .gnode rect { fill: var(--paper); stroke: rgba(var(--ink-rgb),.18); }
 .gnode-label { font: 600 11.5px var(--sans); fill: var(--ink); }
 .gnode-kind { font: 500 11px var(--sans); fill: var(--muted); }
-/* Node kinds. Freshness carries a stroke treatment as well as a fill, because
-   colour on its own is not a signal a colour-blind operator can read. */
 .gnode-database rect, .gnode-primary-site-a rect, .gnode-async-secondary-site-b rect { fill: var(--g-db); }
 .gnode-bucket rect { fill: var(--g-bucket); }
 .gnode-cache rect { fill: var(--g-cache); }
@@ -257,8 +197,6 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 .tl-seg.bad { background: var(--c4); }
 .tl-seg.idle { background: var(--idle-line); }
 
-/* ---------------------------------------------------- property filter --- */
-
 .pf { margin-bottom: 12px; }
 .pf-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .pf-field, .pf-input, .field { min-height: 30px; border: 1px solid rgba(var(--ink-rgb),.16); border-radius: var(--field);
@@ -275,14 +213,6 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
   cursor: pointer; font-size: 14px; line-height: 1; color: var(--muted); }
 .pf-token-x:hover { background: rgba(var(--ink-rgb),.1); color: var(--ink); }
 
-/* ---------------------------------------------------------- callouts --- */
-
-/* Literal glyphs, not CSS escapes; the rest of the codebase uses the
-   characters directly.
-
-   The glyph is the same vocabulary the pills use, so that colour is never
-   the only signal, and it is decorative to assistive technology because
-   the sentence beside it already says what happened. */
 .callout { border-radius: 12px; padding: 11px 14px; font-size: 12.5px; border: 1px solid; margin-bottom: 14px;
   position: relative; padding-left: 34px; }
 .callout::before { position: absolute; left: 13px; top: 11px; font-size: 11px; font-weight: 700; line-height: 1.5; }
@@ -295,8 +225,6 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
 .callout.bad { background: var(--bad-bg-soft); border-color: var(--bad-line); }
 .callout.info { background: var(--info-bg-soft); border-color: var(--info-line); }
 .callout p { margin-top: 5px; }
-
-/* --------------------------------------------------------- flash bar --- */
 
 .flashes { padding: 0 22px; display: flex; flex-direction: column; gap: 8px; }
 .flashes:not(:empty) { padding-top: 12px; }
@@ -312,24 +240,15 @@ textarea.field { min-height: 76px; resize: vertical; font-family: ui-monospace, 
   line-height: 1; color: var(--muted); border-radius: 7px; flex: none; }
 .x:hover { background: rgba(var(--ink-rgb),.1); color: var(--ink); }
 
-/* --------------------------------------------------------- elevation --- */
-
 .elevation { display: flex; align-items: center; gap: 10px; margin: 12px 22px 0; padding: 9px 13px;
   border-radius: 12px; background: var(--warn-bg-soft); border: 1px solid var(--warn-line); font-size: 12.5px; flex-wrap: wrap; }
 .elev-glyph { color: var(--warn); font-weight: 700; }
 .elev-time { margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 
-/* ---------------------------------------------------- dialog, palette --- */
-
 .scrim { position: fixed; inset: 0; background: rgba(var(--scrim-rgb),.55); z-index: 100; }
 .scrim.is-dialog { display: flex; align-items: flex-start; justify-content: center; padding: 7vh 16px 16px;
   overflow-y: auto; }
 body.has-dialog { overflow: hidden; }
-/* A border, because the other two things that separate a dialog from the page
-   both collapse in dark: --shadow-rgb becomes 0,0,0 so --sh-pop disappears on
-   a near-black ground, and the scrim had almost nothing left to darken -- the
-   measured edge between a dialog and the page behind it was 1.08:1. Cards and
-   menus survive on their 1px borders; the dialog had none. */
 .dialog { background: var(--paper); border: 1px solid rgba(var(--ink-rgb),.22);
   border-radius: 18px; box-shadow: var(--sh-pop); width: 100%; max-width: 520px;
   display: flex; flex-direction: column; max-height: 86vh; }
@@ -355,10 +274,6 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .pal-item { display: flex; align-items: baseline; gap: 9px; padding: 8px 10px; border-radius: 9px;
   cursor: pointer; min-height: 30px; }
 .pal-item.is-active { background: rgba(var(--wash-rgb),.34); }
-/* --muted is chosen against the resting surface, so on the highlighted row --
-   the one Enter is about to run -- the category and the destination hint fell
-   to 3.97:1 in dark. The secondary text strengthens with the highlight instead
-   of the highlight being weakened to accommodate it. */
 .pal-item.is-active .pal-kind, .pal-item.is-active .pal-hint { color: var(--ink-soft); }
 .tablewrap tr.is-clickable:hover .muted,
 .tablewrap tr.is-linked .muted { color: var(--ink-soft); }
@@ -370,11 +285,6 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .pal-foot { display: flex; gap: 12px; align-items: center; width: 100%; flex-wrap: wrap; }
 .kbdhint { font-size: 11px; color: var(--muted); display: inline-flex; gap: 3px; align-items: center; }
 
-/* ------------------------------------------------------------ drawer --- */
-
-/* The drawer's height and the reservation on body.has-drawer .main below
-   must use the same max(46vh, 260px) expression, or the drawer covers
-   focused content at small viewport heights (WCAG 2.4.11). */
 .drawer { position: fixed; left: 0; right: 0; bottom: 0; height: max(46vh, 260px); z-index: 90;
   background: var(--pine); color: var(--term-ink); border-top: 3px solid var(--brand); display: flex; flex-direction: column;
   box-shadow: 0 -8px 32px rgba(var(--pine-rgb),.28); }
@@ -383,7 +293,6 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .drawer-head .x { color: var(--term-dim); }
 .drawer-head .x:hover { background: rgba(var(--white-rgb),.14); color: #fff; }
 .drawer-body { flex: 1; overflow: auto; }
-/* The drawer must not cover whatever has focus (WCAG 2.4.11). */
 body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 
 .term { display: flex; flex-direction: column; height: 100%; }
@@ -397,8 +306,6 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 .term-foot { display: flex; align-items: center; gap: 12px; padding: 9px 16px; font-size: 11.5px;
   border-top: 1px solid rgba(var(--white-rgb),.12); flex-wrap: wrap; }
 .term-foot .muted { color: var(--term-muted); }
-
-/* --------------------------------------------------- screen specifics --- */
 
 .sitemap { display: grid; gap: 10px; }
 .site { border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 12px; padding: 10px 12px; }
@@ -479,9 +386,6 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 .secretrow { display: flex; align-items: center; gap: 10px; }
 
 .sessionplayer { border: 1px solid rgba(var(--ink-rgb),.12); border-radius: 14px; padding: 14px 16px; background: var(--paper); }
-/* The playhead is the only keyboard-seekable control on a recording. A bare
-   input[type=range] renders about 16px tall, under the 24px WCAG 2.5.8 floor,
-   so it is sized here; the touch block takes it to 44. */
 .scrubber { width: 100%; margin: 10px 0; }
 .scrubber input[type="range"] { display: block; width: 100%; min-height: 24px; margin: 0; }
 .scrubber-track { position: relative; height: 9px; background: var(--sunk); border-radius: 999px; margin: 10px 0; }
@@ -497,10 +401,6 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 .calendar-cell { border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 9px; padding: 6px 7px; min-height: 48px;
   font-size: 11px; background: var(--paper); }
 
-/* ---------------------------------------------------- touch and print --- */
-
-
-
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (prefers-contrast: more) {
   .card, .tile, .deploycard, .nodecard, .connectcard, .grantcard { border-color: rgba(var(--ink-rgb),.3); }
@@ -511,8 +411,6 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
   .main { padding: 0; }
   .card, .tile { box-shadow: none; break-inside: avoid; }
 }
-
-/* ------------------------------------------------- top-bar identity --- */
 
 .whopill { display: flex; align-items: center; gap: 8px; background: var(--paper);
   border: 1px solid rgba(var(--ink-rgb),.14); border-radius: 999px; padding: 5px 13px 5px 5px; cursor: pointer;
@@ -529,10 +427,6 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 @media (max-width: 900px) { .who-text { display: none; } .whopill { padding: 5px; } }
 @media (max-width: 620px) { .kbar span { display: none; } .kbar { min-width: 0; } }
 
-/* --------------------------------------------------------- density --- */
-
-/* Vertical space is the real constraint on a 1366x768 laptop, so density is
-   keyed to viewport height, not width. A 1440x900 screen is untouched. */
 @media (max-height: 860px) {
   .main { padding: 13px 20px 40px; }
   .pagehead { margin-bottom: 12px; }
@@ -562,26 +456,16 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
   .card-body { padding: 10px 13px 12px; }
 }
 
-/* Compact density is a user preference, applied on top of whatever the
-   viewport already decided. */
 body.is-compact .tablewrap td { padding: 5px 10px; }
 body.is-compact .th-sort { min-height: 28px; padding: 5px 10px; }
 body.is-compact .tile { padding: 9px 11px; }
-/* These are class selectors and beat the height-keyed blocks above, so they
-   must stay smaller than what those blocks produce: compact only ever
-   subtracts. */
 body.is-compact .tile-value { font-size: 17px; }
 body.is-compact .card-body { padding: 9px 12px 11px; }
 body.is-compact .tiles { gap: 7px; margin-bottom: 9px; }
 body.is-compact .pagehead { margin-bottom: 10px; }
 body.is-compact .grid { gap: 9px; }
 
-/* The touch floor, last on purpose. Anything that has to win is stated here,
- * after everything it must beat.
- */
-/* WCAG 2.5.8 asks for 24px; a thumb wants 44. On touch widths, give it 44. */
 @media (max-width: 768px) {
-  /* class selectors need answering in kind */
   body.is-compact .th-sort, body.is-compact .btn { min-height: 44px; }
   body.is-compact .tablewrap td { padding: 9px 11px; }
   .btn, .iconbtn, .tab, .th-sort { min-height: 44px; }
@@ -592,9 +476,6 @@ body.is-compact .grid { gap: 9px; }
   .scrubber input[type="range"] { min-height: 44px; }
 }
 
-/* ── Console preferences ─────────────────────────────────────────────────
-   Radio groups, not switches: "System" is a third state a switch cannot
-   express, and each option has a name worth reading.                      */
 .prefgroup { border: 1px solid rgba(var(--ink-rgb), .12); border-radius: 14px; padding: 12px 14px 11px; margin-bottom: 12px; }
 .prefgroup:last-child { margin-bottom: 0; }
 .prefgroup legend { font-weight: 600; font-size: 12.5px; padding: 0 6px; color: var(--ink); }
@@ -606,9 +487,6 @@ body.is-compact .grid { gap: 9px; }
 .prefopt:has(input:checked) { border-color: var(--brand); background: rgba(var(--leaf-rgb), .26); font-weight: 600; }
 .prefopt:focus-within { outline: 3px solid rgba(var(--brand-rgb), .5); outline-offset: 2px; }
 
-/* ── Overflow menu ───────────────────────────────────────────────────────
-   The "..." that carries a row's secondary actions. Anchored to its trigger
-   so it travels with the row, and flipped when it would open off-screen.  */
 .menuwrap { position: relative; display: inline-flex; }
 .menubtn { width: 28px; height: 28px; min-height: 28px; border-radius: 7px; padding: 0; }
 .menudots { font-size: 15px; line-height: 1; letter-spacing: .5px; }

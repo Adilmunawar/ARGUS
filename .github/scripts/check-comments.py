@@ -61,7 +61,7 @@ def markers_for(suffix):
     return MARKERS.get(suffix, [])
 
 
-def comment_index(line, markers, suffix):
+def marker_index(line, markers, suffix, shell_rules=True):
     in_single = in_double = in_backtick = False
     i = 0
     while i < len(line):
@@ -78,7 +78,7 @@ def comment_index(line, markers, suffix):
         elif not in_single and not in_double and not in_backtick:
             for marker in markers:
                 if line.startswith(marker, i):
-                    if marker == HASH and suffix in SHELL_LIKE:
+                    if shell_rules and marker == HASH and suffix in SHELL_LIKE:
                         previous = line[i - 1] if i else ""
                         if previous and previous not in " \t;&|(":
                             break
@@ -114,8 +114,9 @@ def strip_text(source, suffix):
                 if rest.strip():
                     out.append(rest.rstrip())
             continue
-        if block and block[0] in line:
-            index = line.find(block[0])
+        block_at = marker_index(line, [block[0]], suffix, False) if block else -1
+        if block_at >= 0:
+            index = block_at
             head = line[:index]
             tail = line[index:]
             if block[1] in tail[len(block[0]):]:
@@ -131,7 +132,7 @@ def strip_text(source, suffix):
         if KEEP_LINE.match(line):
             out.append(line.rstrip())
             continue
-        index = comment_index(line, markers, suffix) if markers else -1
+        index = marker_index(line, markers, suffix) if markers else -1
         if index < 0:
             out.append(line.rstrip())
             continue
@@ -140,7 +141,7 @@ def strip_text(source, suffix):
             out.append(head)
 
     text = "\n".join(out)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).lstrip("\n")
     if source.endswith("\n") and not text.endswith("\n"):
         text += "\n"
     return text
@@ -162,12 +163,44 @@ def verify(path, suffix, before, after):
     return None
 
 
+SELF_TEST = [
+    (".hcl", 'path "transit/keys/*" {\n  capabilities = ["deny"]\n}\n'),
+    (".hcl", 'path "a" {\n  capabilities = ["read"]\n}\n'),
+    (".yml", 'services:\n  a:\n    command: >\n      run --flag=#notacomment\n      --more\n'),
+    (".yml", 'services:\n  a:\n    command: ["sh", "-c", "echo \'#1\'"]\n'),
+    (".sh", 'name="${path##*/}"\necho "$name"\n'),
+    (".sh", 'count=$#\nurl="https://example.invalid/x"\n'),
+    (".sql", "SELECT 'a--b' AS text_with_dashes;\n"),
+    (".conf", 'listen = "0.0.0.0:80"\n'),
+    (".tf", 'variable "a" {\n  default = "x/*y"\n}\n'),
+]
+
+
+def self_test():
+    failures = []
+    for suffix, source in SELF_TEST:
+        result = strip_text(source, suffix)
+        if result != source:
+            failures.append((suffix, source, result))
+    for suffix, source, result in failures:
+        print(f"self-test changed a comment-free {suffix} file:")
+        print(f"  before: {source!r}")
+        print(f"  after:  {result!r}")
+    print(f"self-test: {len(SELF_TEST) - len(failures)}/{len(SELF_TEST)} comment-free samples left untouched")
+    return 1 if failures else 0
+
+
 def tracked():
     output = subprocess.run(["git", "ls-files", "-z"], capture_output=True, text=True, check=True).stdout
     return [n for n in output.split("\0") if n and "node_modules/" not in n]
 
 
 def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+    if self_test():
+        print("::error::the comment stripper failed its own self-test")
+        return 2
     fix = "--fix" in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith("-")] or tracked()
     changed = failed = offenders = scanned = 0

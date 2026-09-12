@@ -1,30 +1,9 @@
-/* Argus Console: the shell.
- *
- * Routing, the command palette, the flash bar, dialogs and focus management,
- * the session drawer, elevation state, and the preferences that persist.
- *
- * Design notes worth keeping in the code rather than a wiki:
- *
- *  - Every screen is a hash route, so every resource has a link somebody can
- *    paste into an alert or a runbook.
- *  - Navigation is two levels at most: a list, then a detail with tabs. No
- *    stacking panels.
- *  - One live region, announced deliberately. A streaming log on aria-live
- *    makes a screen reader unusable, so the log view is aria-live="off" with
- *    an explicit control instead.
- *  - The session drawer is never unmounted, because a terminal that dies when
- *    you navigate is worse than no terminal.
- */
 (function () {
   'use strict';
 
   var A = (window.ARGUS = window.ARGUS || {});
   var ui = A.ui, el = ui.el, clear = ui.clear;
 
-  /* ------------------------------------------------------- preferences --- */
-
-  // localStorage can throw outright in a locked-down browser, so every access
-  // is guarded and the console renders correctly with nothing stored.
   var prefs = { density: 'comfortable', rail: false, timezone: 'utc', theme: 'light' };
   var PREF_VALUES = {
     density: ['comfortable', 'compact'],
@@ -37,28 +16,18 @@
       if (!raw) return;
       var p = JSON.parse(raw);
       if (!p || typeof p !== 'object') return;
-      // Only known keys with known values are taken: localStorage is writable
-      // by anything else served from this origin, and a junk value for density
-      // would put the shell into a class that no stylesheet defines.
       Object.keys(prefs).forEach(function (k) {
         if (!(k in p)) return;
         if (PREF_VALUES[k]) { if (PREF_VALUES[k].indexOf(p[k]) !== -1) prefs[k] = p[k]; }
         else if (typeof p[k] === typeof prefs[k]) prefs[k] = p[k];
       });
-    } catch (e) { /* private window, cleared storage, or blocked: use defaults */ }
+    } catch (e) {  }
   }
   function savePrefs() {
-    try { window.localStorage.setItem('argus.prefs', JSON.stringify(prefs)); } catch (e) { /* not fatal */ }
+    try { window.localStorage.setItem('argus.prefs', JSON.stringify(prefs)); } catch (e) {  }
   }
   A.prefs = function () { return prefs; };
 
-  /* ------------------------------------------------------------- theme --- */
-
-  // 'system' is resolved here rather than in a second copy of every token
-  // under prefers-color-scheme: the console is a JavaScript application, so
-  // the cheaper and less duplicative place to decide is one attribute on
-  // <html>. The media query is still watched, so a machine that flips to dark
-  // at sunset takes the console with it without a reload.
   var darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
   function resolveTheme() {
@@ -83,44 +52,26 @@
     A.announce('Theme: ' + (t === 'system' ? 'follows the system, currently ' + resolved : t));
   };
 
-  /* ---------------------------------------------------------- timezone --- */
-
-  // Times are formatted through ui.fmt, so one hook here reaches every screen.
   A.timezone = function () { return prefs.timezone; };
   A.setTimezone = function (tz) {
     if (PREF_VALUES.timezone.indexOf(tz) === -1) return;
     prefs.timezone = tz; savePrefs();
     A.announce('Timestamps now shown in ' + (tz === 'utc' ? 'UTC' : 'local time'));
-    // Timestamps are formatted at build time by ui.fmt, so the screen does have
-    // to be rebuilt -- but the dialog this was chosen in stays open.
     render({ keepOverlays: true });
   };
-
-  /* ------------------------------------------------------- live region --- */
 
   var liveNode = null;
   A.announce = function (msg) {
     if (!liveNode) return;
-    // Re-setting identical text does not re-announce, so clear first.
     liveNode.textContent = '';
     window.setTimeout(function () { liveNode.textContent = msg; }, 30);
   };
 
-  /* ---------------------------------------------------------- flashbar --- */
-
   var flashHost = null;
 
-  /*
-   * Notifications expire, and the bar has a ceiling.
-   *
-   * A default expiry rather than clearing on navigation, because an action
-   * that navigates should still be able to tell you it worked. Bad news gets
-   * longer than good news; anything that must persist passes sticky.
-   */
   var FLASH_MAX = 5;
   var FLASH_TIMEOUT = { ok: 9000, info: 12000, warn: 20000, bad: 30000 };
 
-  /** kind: ok | warn | bad | info. Returns a handle with .remove(). */
   A.flash = function (kind, title, detail, opts) {
     opts = opts || {};
     var node = el('div.flash.' + kind, { role: kind === 'bad' ? 'alert' : 'status' }, [
@@ -136,8 +87,6 @@
       }, '×')
     ]);
 
-    // A pending expiry timer holds a reference to its node, so it is cancelled
-    // on removal to release the node immediately.
     function drop(n) {
       if (n.__flashTimer) { window.clearTimeout(n.__flashTimer); n.__flashTimer = null; }
       n.remove();
@@ -145,8 +94,6 @@
 
     flashHost.appendChild(node);
 
-    // Oldest first, so the bar never grows past the ceiling however many
-    // actions an operator fires during an incident.
     while (flashHost.children.length > FLASH_MAX) drop(flashHost.firstChild);
 
     A.announce(title + (detail ? '. ' + detail : ''));
@@ -156,15 +103,10 @@
     return node;
   };
 
-  /* ----------------------------------------------------- focus + modal --- */
-
   var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
   function trapFocus(container, onEscape) {
     function onKey(e) {
-      // stopPropagation matters as much as preventDefault here: without it the
-      // same keydown reaches the document handler, which reads Escape as
-      // "close the recorded session".
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onEscape(); return; }
       if (e.key !== 'Tab') return;
       var items = Array.prototype.filter.call(container.querySelectorAll(FOCUSABLE), function (n) {
@@ -179,22 +121,9 @@
     return function () { container.removeEventListener('keydown', onKey); };
   }
 
-  /**
-   * A modal dialog. Returns nothing; call close() from inside.
-   * opts: {title, body(close), actions(close) -> [nodes], describedBy, wide}
-   * Focus is trapped, Escape closes, and focus returns to whatever opened it.
-   */
   var openerStack = [];
   var openDialogs = [];
   A.dialog = function (opts) {
-    /*
-     * The opener is whatever actually held focus, always. Ctrl+K and ? are not
-     * suppressed while a dialog is up, so a dialog can open over another that
-     * stays open; capturing the real activeElement means focus returns into
-     * whatever is still on screen. When the opener is gone from the document
-     * by close time, close() falls back down the stack to the nearest opener
-     * that survived.
-     */
     var opener = document.activeElement;
     if (!opener || opener === document.body) opener = null;
     openerStack.push(opener);
@@ -202,9 +131,6 @@
 
     var closed = false;
     function close() {
-      // Idempotent: navigation dismisses overlays, and the dialog that caused
-      // the navigation may already have closed itself on the way out. Popping
-      // the opener stack twice for one dialog corrupts the opener of the next.
       if (closed) return;
       closed = true;
       untrap();
@@ -214,10 +140,6 @@
       if (ix !== -1) openDialogs.splice(ix, 1);
       if (!openerStack.length) document.body.classList.remove('has-dialog');
 
-      // Restore to this dialog's own opener when it is still in the document.
-      // When it is not -- because the dialog that held it has itself closed --
-      // walk down the remaining stack to the nearest opener that survived,
-      // rather than dropping focus on <body>.
       var target = (opener && opener.focus && document.contains(opener)) ? opener : null;
       for (var i = openerStack.length - 1; !target && i >= 0; i--) {
         var candidate = openerStack[i];
@@ -250,11 +172,6 @@
     return handle;
   };
 
-  /**
-   * Close every open overlay. A dialog and an overflow menu both outlive the
-   * screen that opened them: the scrim and the menu are mounted on <body>,
-   * not inside main, so navigation has to dismiss them explicitly.
-   */
   A.dismissOverlays = function () {
     var guard = 0;
     while (openDialogs.length && guard++ < 20) {
@@ -264,11 +181,6 @@
     if (ui.closeMenus) ui.closeMenus();
   };
 
-  /**
-   * The delete ladder, step three: an irreversible action that requires the
-   * operator to type the resource name. Used for anything that cannot be undone
-   * by a revert commit.
-   */
   A.confirmDestructive = function (opts) {
     var go = ui.btn(opts.confirmLabel || 'Confirm', {
       variant: 'danger',
@@ -296,9 +208,6 @@
           ]),
           el('label.fieldlabel', { for: 'confirm-name', text: 'Type ' + opts.match + ' to confirm' }),
           input,
-          /* The ladder is for anything that repoints live traffic, not only
-             for the irreversible -- so a caller that CAN undo its action says
-             so rather than being made to contradict its own detail text. */
           el('p.hint', {
             id: 'confirm-help',
             text: opts.reversible || 'This cannot be undone from the console.'
@@ -312,11 +221,6 @@
     });
   };
 
-  /**
-   * Step-up authentication. NIST SP 800-63B expects re-authentication before a
-   * sensitive operation; the prototype renders the flow, a real deployment
-   * would hand off to AD FS. Nothing here ever touches a real credential.
-   */
   A.stepUp = function (reason, onOk) {
     A.dialog({
       title: 'Confirm it is you',
@@ -338,18 +242,12 @@
     });
   };
 
-  /* ----------------------------------------------------------- routing --- */
-
   A.state = { env: 'production', route: 'overview', params: {} };
 
   var screens = {};
-  /** Screens register themselves: ARGUS.screen('id', {title, crumb, render}). */
   A.screen = function (id, def) { screens[id] = def; };
   A.screens = screens;
 
-  // Anything a screen starts that outlives a single paint (a timer, an
-  // interval, a listener on document) is registered here and torn down on the
-  // next navigation.
   var leaveHooks = [];
   A.onLeave = function (fn) { if (typeof fn === 'function') leaveHooks.push(fn); };
   function drain(hooks) {
@@ -363,12 +261,6 @@
     drain(hooks);
   }
 
-  /**
-   * Run fn, capturing anything it registers with onLeave, and hand back a
-   * teardown for just that work. Switching a tab does not navigate, so a
-   * panel's timers and listeners are torn down here rather than waiting for
-   * the next route change.
-   */
   A.scopeLeaveHooks = function (fn) {
     var outer = leaveHooks;
     leaveHooks = [];
@@ -380,12 +272,6 @@
     return function () { drain(captured); captured = []; };
   };
 
-  /**
-   * decodeURIComponent throws URIError on a malformed escape such as "%" or
-   * "%zz", and parseHash runs on every hashchange, before the try/catch that
-   * guards a screen's render. Decode defensively and keep the raw text when
-   * it cannot be decoded.
-   */
   function safeDecode(s) {
     try { return decodeURIComponent(s); } catch (e) { return s; }
   }
@@ -397,8 +283,6 @@
     if (qi !== -1) {
       h.slice(qi + 1).split('&').forEach(function (kv) {
         if (!kv) return;
-        // Split on the first '=' only: a value such as a base64 filter
-        // ("q=YWRtaW4=") may legitimately contain one.
         var eq = kv.indexOf('=');
         var k = eq === -1 ? kv : kv.slice(0, eq);
         var v = eq === -1 ? '' : kv.slice(eq + 1);
@@ -406,50 +290,31 @@
       });
       h = h.slice(0, qi);
     }
-    // Path segments are encoded by A.href, so they are decoded here.
     var segs = h.split('/').filter(Boolean).map(safeDecode);
     return { route: segs[0] || 'overview', rest: segs.slice(1), params: params };
   }
 
-  /** Build a hash link. go('apps', ['mills'], {tab:'logs'}) */
   A.href = function (route, rest, params) {
-    // Segments are encoded so that parseHash can decode them symmetrically.
     var h = '#/' + encodeURIComponent(route)
       + (rest && rest.length ? '/' + rest.map(function (s) { return encodeURIComponent(String(s)); }).join('/') : '');
     var q = Object.keys(params || {}).filter(function (k) { return params[k] !== null && params[k] !== undefined && params[k] !== ''; });
     if (q.length) h += '?' + q.map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); }).join('&');
     return h;
   };
-  /**
-   * Navigate, and re-render even when the destination is where we already are.
-   *
-   * location.hash only fires hashchange when the value changes, so same-route
-   * navigation (Refresh, Try again) re-renders explicitly. Assign first: that
-   * writes the history entry the back button needs.
-   */
   A.go = function (route, rest, params) {
     var target = A.href(route, rest, params);
     var same = window.location.hash === target;
     window.location.hash = target;
     if (same) render();
   };
-  /** An anchor that routes. Real hrefs, so middle-click and copy-link work. */
   A.link = function (label, route, rest, params, cls) {
     return el('a' + (cls ? '.' + cls : '.rlink'), { href: A.href(route, rest, params) }, label);
   };
 
   var mount, crumbHost, titleHost;
 
-  /**
-   * Build the screen the hash names.
-   *
-   * opts.keepOverlays re-renders in place without dismissing what is open:
-   * a preference change is not a navigation, and the dialog it was made in
-   * stays open.
-   */
   function render(opts) {
     opts = opts || {};
-    // An in-page anchor such as the skip link sets a hash that is not a route.
     if (window.location.hash && !/^#\//.test(window.location.hash)) return;
     if (!opts.keepOverlays) A.dismissOverlays();
     runLeaveHooks();
@@ -464,7 +329,6 @@
 
     clear(mount);
     if (!def) {
-      /* The not-found state gets the same treatment as any other screen. */
       clear(crumbHost);
       crumbHost.appendChild(el('b', { text: 'Not found' }));
       mount.appendChild(ui.emptyState(
@@ -480,7 +344,6 @@
       return;
     }
 
-    // Breadcrumb: at most two levels, by design.
     clear(crumbHost);
     crumbHost.appendChild(el('a.crumb-link', { href: A.href(r.route) , text: def.crumb || def.title }));
     if (r.rest.length) {
@@ -508,9 +371,6 @@
     closeDrawerNav();
   }
 
-  /* ---------------------------------------------------- command palette --- */
-
-  /** Everything the palette can reach. Rebuilt per open so it reflects state. */
   function paletteItems() {
     var d = A.data, items = [];
     Object.keys(screens).forEach(function (id) {
@@ -548,8 +408,6 @@
     return items;
   }
 
-  /** Subsequence match, the behaviour people expect from a palette. */
-  /* `hay` arrives already lowercased. */
   function fuzzy(n, h) {
     if (!n) return 0;
     var direct = h.indexOf(n);
@@ -566,8 +424,6 @@
 
   A.palette = function () {
     var items = paletteItems();
-    // One lowercased haystack per item, built once per open instead of twice
-    // per item per keystroke.
     items.forEach(function (it) {
       it.hay = (it.label + ' ' + (it.hint || '')).toLowerCase();
     });
@@ -583,13 +439,6 @@
 
     function paint() {
       var q = input.value.trim();
-      /*
-       * Score, keep the best forty, and never sort the whole inventory.
-       *
-       * The haystack is precomputed once per open (see paletteItems), and the
-       * top forty are kept by insertion into a small ordered list, so the cost
-       * is one pass and a bounded insert rather than an n log n sort.
-       */
       var LIMIT = 40;
       var best = [];
       var lowest = -Infinity;
@@ -607,7 +456,6 @@
 
       active = 0;
       clear(list);
-      // Built detached and attached once, rather than forty live insertions.
       var palFrag = document.createDocumentFragment();
       results.forEach(function (it, i) {
         palFrag.appendChild(el('li.pal-item', {
@@ -627,10 +475,6 @@
 
     function setActive(i) {
       if (!results.length) {
-        // With nothing to point at, a leftover aria-activedescendant still
-        // names an option id that has just been removed from the list, and a
-        // screen reader goes on announcing the last match as selected while
-        // the visible list reads "Nothing matches".
         input.removeAttribute('aria-activedescendant');
         return;
       }
@@ -670,13 +514,6 @@
     input.focus();
   };
 
-  /* ------------------------------------------------------- environment --- */
-
-  /**
-   * Set the environment. `quiet` paints the pill without announcing a change
-   * or re-rendering; boot passes it so the first load neither announces an
-   * environment the operator did not choose nor renders twice.
-   */
   A.setEnv = function (env, quiet) {
     A.state.env = env;
     var pill = document.getElementById('envbtn');
@@ -698,16 +535,12 @@
     A.announce('Density: ' + d);
   };
 
-  /* ----------------------------------------------- elevation + sessions --- */
-
   var elevationTimer = null;
 
   A.requestElevation = function (group, reason, hours, onGranted) {
     A.stepUp('Elevating to ' + group + ' needs a second factor.', function () {
       A.data.me.elevation = {
         group: group, reason: reason,
-        // Wall clock, not the fixed demo clock: tick() counts against the real
-        // time.
         expires: new Date(Date.now() + hours * 3600000)
       };
       paintElevation();
@@ -739,33 +572,17 @@
 
     host.appendChild(el('span.elev-glyph', { 'aria-hidden': 'true', text: '▲' }));
     host.appendChild(el('span', [el('strong', { text: e.group }), ' · ', e.reason]));
-    /* The banner is role="status", so anything that rewrites its text is
-       re-announced. The countdown changes once a minute for hours and then
-       once a second for the final minute, which reads the whole banner over
-       whatever the operator is doing. aria-hidden on the ticking part leaves
-       the grant and the group announced once, as intended, and the remaining
-       time reachable visually and from the Release button's own label. */
     host.appendChild(el('span.elev-time', { text: '', 'aria-hidden': 'true' }));
     host.appendChild(ui.btn('Release now', { variant: 'ghost', onClick: A.dropElevation }));
 
     if (elevationTimer) { clearInterval(elevationTimer); elevationTimer = null; }
     tick();
-    // tick() may have dropped the elevation already, in which case there is
-    // nothing left to count down and installing an interval would leave a
-    // stale closure firing forever.
     if (A.data.me.elevation) elevationTimer = window.setInterval(tick, 1000);
   }
   A.paintElevation = paintElevation;
 
-  /**
-   * Open a recorded session in the drawer. The drawer is deliberately never
-   * unmounted on navigation: an operator mid-restore should be able to check a
-   * dashboard without dropping the shell they are working in.
-   */
   A.connect = function (vm, protocol) {
     var proto = protocol.toUpperCase();
-    // Captured before any dialog runs, because by the time the drawer opens
-    // the elevation dialog has already returned focus to its own opener.
     var invokedFrom = document.activeElement;
     var open = function () {
       var drawer = document.getElementById('drawer');
@@ -836,8 +653,6 @@
     open();
   };
 
-  /* --------------------------------------------------------- shortcuts --- */
-
   var SHORTCUTS = [
     ['Ctrl/Cmd + K', 'Open the command palette'],
     ['/', 'Focus the filter on the current screen'],
@@ -864,14 +679,6 @@
     });
   };
 
-  /* -------------------------------------------------------- preferences --- */
-
-  /**
-   * Console preferences. Radio groups rather than switches, because each of
-   * these has a third state ("follow the system") or a name worth reading, and
-   * a switch cannot express either. Every group is a real fieldset with a
-   * legend, so a screen reader announces what the choice is for.
-   */
   A.settings = function () {
     var groups = [
       {
@@ -901,9 +708,6 @@
       title: 'Console preferences',
       body: function () {
         return groups.map(function (g) {
-          // Ids are suffixed per dialog instance: two dialogs open at once
-          // would otherwise share an id and the label would point at the
-          // wrong control.
           var uid = g.key + '-' + Math.random().toString(36).slice(2, 7);
           return el('fieldset.prefgroup', [
             el('legend', { text: g.legend }),
@@ -933,8 +737,6 @@
     return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
   }
 
-  /* -------------------------------------------------------- drawer nav --- */
-
   function closeDrawerNav(restoreFocus) {
     var wasOpen = document.body.classList.contains('navopen');
     document.body.classList.remove('navopen');
@@ -942,11 +744,6 @@
     if (s) s.hidden = true;
     var b = document.getElementById('burger');
     if (b) b.setAttribute('aria-expanded', 'false');
-    /* Off-canvas is a transform, not display:none, so the nav items stay in
-       the tab order. Hand focus back to the control that opened the drawer --
-       but only when the drawer is being dismissed, not when a navigation
-       closed it, because render() has already moved focus to the new page
-       heading by then. */
     if (wasOpen && restoreFocus && b && document.contains(b)) b.focus();
   }
   function openDrawerNav() {
@@ -957,11 +754,6 @@
     if (first) first.focus();
   }
 
-  /* ---------------------------------------------------- session drawer --- */
-
-  // Whatever opened the session drawer, so focus can go back there when it
-  // closes. Closing a drawer and dropping focus onto <body> strands a keyboard
-  // user at the top of the document.
   var sessionOpener = null;
 
   A.isSessionOpen = function () {
@@ -969,10 +761,6 @@
     return !!d && !d.hidden;
   };
 
-  /**
-   * Close the session drawer. One helper serves the close button, the
-   * Disconnect action and the Escape key alike.
-   */
   A.closeSession = function () {
     var drawer = document.getElementById('drawer');
     if (!drawer || drawer.hidden) return false;
@@ -984,13 +772,9 @@
     return true;
   };
 
-  /* ------------------------------------------------------------- boot --- */
-
   function boot() {
     loadPrefs();
     applyTheme();
-    // A machine that flips to dark at sunset takes the console with it, but
-    // only while the operator has not made an explicit choice.
     if (darkQuery) {
       var onSchemeChange = function () { if (prefs.theme === 'system') applyTheme(); };
       if (darkQuery.addEventListener) darkQuery.addEventListener('change', onSchemeChange);
@@ -1004,7 +788,6 @@
     if (prefs.density === 'compact') document.body.classList.add('is-compact');
     if (prefs.rail) document.body.classList.add('railed');
 
-    /* Delegated from the rail so it survives the rail being rebuilt. */
     document.querySelector('.side').addEventListener('click', function (e) {
       var btn = e.target.closest && e.target.closest('.nav[data-go]');
       if (!btn) return;
@@ -1019,12 +802,7 @@
     document.getElementById('burger').addEventListener('click', function () {
       document.body.classList.contains('navopen') ? closeDrawerNav(true) : openDrawerNav();
     });
-    // Not `addEventListener('click', closeDrawerNav)`: the listener would hand
-    // the MouseEvent in as restoreFocus, which is truthy, and the argument
-    // would work only by accident.
     document.getElementById('scrim').addEventListener('click', function () { closeDrawerNav(true); });
-    /* The label has to be right on boot too, not only after a click, because
-       the rail preference persists. */
     var railBtn = document.getElementById('railbtn');
     railBtn.setAttribute('aria-label', prefs.rail ? 'Expand navigation' : 'Collapse navigation');
     railBtn.addEventListener('click', function () {
@@ -1048,7 +826,6 @@
         if (f) { e.preventDefault(); f.focus(); }
         return;
       }
-      // Innermost surface first: a recorded session, then the mobile nav.
       if (e.key === 'Escape') { if (!A.closeSession()) closeDrawerNav(true); return; }
       if (goArmed && e.key === ',') { e.preventDefault(); goArmed = false; A.settings(); return; }
       if (goArmed && GO_KEYS[e.key]) { e.preventDefault(); goArmed = false; A.go(GO_KEYS[e.key]); return; }
@@ -1059,8 +836,6 @@
       }
     });
 
-    // Wrapped: passing render directly hands it the HashChangeEvent as its
-    // options object, and any future option would read as truthy off an event.
     window.addEventListener('hashchange', function () { render(); });
     A.setEnv('production', true);
     paintElevation();

@@ -18,6 +18,18 @@
   var SAMPLE_LINES = 180;
   var SAMPLE_APPS = 6;
 
+  var STREAM_LABELS = ['service_name', 'service', 'job', 'container', 'app'];
+  var MAX_STREAM_NAMES = 200;
+
+  function quoteLabelValue(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function selectorFor(label, value) {
+    if (!value || value === 'all') return '{' + label + '=~".+"}';
+    return '{' + label + '="' + quoteLabelValue(value) + '"}';
+  }
+
   function sampleTexts(app) {
     return [
       'GET /api/' + app.name + '/summary 200 in ' + app.p95 + ' ms',
@@ -117,14 +129,26 @@
 
       var gen = 0;
       var live = true;
-      A.onLeave(function () { live = false; });
+      var teardown = null;
+
+      function drop() {
+        if (!teardown) return;
+        var fn = teardown;
+        teardown = null;
+        fn();
+      }
+
+      A.onLeave(function () { live = false; drop(); });
 
       function paint() {
         gen += 1;
         var mine = gen;
+        drop();
         ui.clear(host);
         A.probe().then(function () {
-          if (live && mine === gen) build(host, refresh, rest, params, function () { return live && mine === gen; });
+          if (!(live && mine === gen)) return;
+          var stillMine = function () { return live && mine === gen; };
+          teardown = A.scopeLeaveHooks(function () { build(host, refresh, rest, params, stillMine); });
         });
       }
 
@@ -254,7 +278,7 @@
       state.received += 1;
       buffer.push(line);
       if (buffer.length > KEEP) buffer.splice(0, buffer.length - KEEP);
-      if (state.streams.indexOf(line.stream) === -1) {
+      if (state.streams.indexOf(line.stream) === -1 && state.streams.length < MAX_STREAM_NAMES) {
         state.streams.push(line.stream);
         paintStreamOptions();
       }
@@ -475,7 +499,39 @@
       return;
     }
 
-    A.onLeave(function () { view.stop(); });
+    var closeStream = null;
+    A.onLeave(function () {
+      view.stop();
+      if (closeStream) { closeStream(); closeStream = null; }
+    });
+
+    function refuse(message) {
+      state.connectionNote = message;
+      view.say(message);
+      paintStatus();
+      ui.clear(sourceSlot);
+      sourceSlot.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'This screen could not open a live stream.' }),
+        el('p', { text: message }),
+        el('p', { text: 'Nothing below is a reading. No line is being invented to fill the gap.' })
+      ]));
+    }
+
+    function capabilityRefusal() {
+      var caps = A.capabilities();
+      if (!caps) {
+        return 'The console API has not said what it can stream, so this screen has not asked it for a tail.';
+      }
+      if (caps.auth && caps.auth.authenticated === false) {
+        return 'You are not signed in, so the console API will refuse a log stream. Sign in and reload.';
+      }
+      if (!caps.streams || !caps.streams.logs) {
+        return 'Loki is not configured on the console API, so there is no log pipeline to tail. ' +
+          'Set ARGUS_LOKI_URL and restart the API. Until then this screen opens nothing rather than ' +
+          'reconnecting at you forever.';
+      }
+      return null;
+    }
 
     sourceSlot.appendChild(el('div.callout.info', [
       el('strong', { text: 'Live tail.' }),
@@ -490,80 +546,132 @@
     paintStatus();
     paintHealth();
 
+    function open(label) {
+      var selector = selectorFor(label, state.stream);
+      var topics = state.stream === 'all' ? [] : [state.stream];
+
+      closeStream = A.subscribe(
+        '/api/logs/stream?query=' + encodeURIComponent(selector) + '&limit=' + DEFAULT_BUFFER,
+        topics,
+        {
+          on: {
+            line: function (payload) {
+              if (!stillMine()) return;
+              take(decodeLine(payload));
+            },
+            dropped: function (payload) {
+              if (!stillMine()) return;
+              state.dropped += (payload && Number(payload.lines)) || 1;
+              paintStatus();
+              announceThrottled('The server dropped lines because this browser could not keep up.');
+            },
+            gap: function (payload) {
+              if (!stillMine()) return;
+              state.gaps += 1;
+              state.connectionNote = payload && payload.message
+                ? String(payload.message)
+                : 'Some lines from the gap could not be replayed.';
+              paintStatus();
+            },
+            unavailable: function (payload) {
+              if (!stillMine()) return;
+              state.connectionNote = payload && payload.message
+                ? String(payload.message)
+                : 'The log pipeline is not answering the console API.';
+              paintStatus();
+            },
+            note: function (payload) {
+              if (!stillMine()) return;
+              state.connectionNote = payload && payload.message ? String(payload.message) : '';
+              paintStatus();
+            }
+          },
+          onState: function (next, info) {
+            if (!stillMine()) return;
+            var S = A.STREAM;
+            state.connection = next;
+            if (next === S.OPEN) {
+              state.connectionNote = info && info.resumedFrom
+                ? 'Resumed from event ' + info.resumedFrom + '.'
+                : '';
+              recordBeat(ui.BEAT.UP);
+              announceThrottled('The log stream is connected.');
+            } else if (next === S.RETRYING) {
+              state.connectionNote = (info && info.message ? info.message + ' ' : '') +
+                'Reconnecting in ' + Math.round((info && info.inMs ? info.inMs : 0) / 1000) + ' s, attempt ' +
+                fmt.num(info && info.attempt ? info.attempt : 1) + '.';
+              recordBeat(ui.BEAT.DOWN, info && info.message);
+              announceThrottled('The log stream was interrupted and is reconnecting.');
+            } else if (next === S.OPENING) {
+              state.connectionNote = 'Opening the stream.';
+              recordBeat(ui.BEAT.PENDING);
+            }
+            paintStatus();
+            paintHealth();
+          },
+          onUnavailable: function (why) {
+            if (!stillMine()) return;
+            closeStream = null;
+            state.connection = (A.STREAM || {}).CLOSED;
+            refuse(why.message);
+            paintHealth();
+          }
+        });
+    }
+
+    function loadStreamNames(label) {
+      A.read('/api/logs/label-values?name=' + encodeURIComponent(label), { ttlMs: 30000 }).then(function (env) {
+        if (!stillMine()) return;
+        var payload = (env.ok && env.data) || {};
+        var values = Array.isArray(payload.values) ? payload.values : [];
+        values.forEach(function (name) {
+          if (typeof name !== 'string') return;
+          if (state.streams.indexOf(name) !== -1) return;
+          if (state.streams.length >= MAX_STREAM_NAMES) return;
+          state.streams.push(name);
+        });
+        paintStreamOptions();
+      });
+    }
+
+    var refusal = capabilityRefusal();
+    if (refusal) {
+      refuse(refusal);
+      return;
+    }
+
     A.read('/api/logs/labels', { ttlMs: 30000 }).then(function (env) {
       if (!stillMine()) return;
-      if (!env.ok || !env.data) return;
-      var names = env.data.streams || env.data.values || env.data.labels;
-      if (!Array.isArray(names)) return;
-      names.forEach(function (n) {
-        if (typeof n === 'string' && state.streams.indexOf(n) === -1) state.streams.push(n);
-      });
-      paintStreamOptions();
-    });
 
-    var topics = state.stream === 'all' ? [] : [state.stream];
-
-    A.subscribe('/api/logs/stream?limit=' + DEFAULT_BUFFER, topics, {
-      on: {
-        line: function (payload) {
-          if (!stillMine()) return;
-          take(decodeLine(payload));
-        },
-        dropped: function (payload) {
-          if (!stillMine()) return;
-          state.dropped += (payload && Number(payload.lines)) || 1;
-          paintStatus();
-          announceThrottled('The server dropped lines because this browser could not keep up.');
-        },
-        gap: function (payload) {
-          if (!stillMine()) return;
-          state.gaps += 1;
-          state.connectionNote = payload && payload.message
-            ? String(payload.message)
-            : 'Some lines from the gap could not be replayed.';
-          paintStatus();
-        },
-        note: function (payload) {
-          if (!stillMine()) return;
-          state.connectionNote = payload && payload.message ? String(payload.message) : '';
-          paintStatus();
-        }
-      },
-      onState: function (next, info) {
-        if (!stillMine()) return;
-        var S = A.STREAM;
-        state.connection = next;
-        if (next === S.OPEN) {
-          state.connectionNote = info && info.resumedFrom
-            ? 'Resumed from event ' + info.resumedFrom + '.'
-            : '';
-          recordBeat(ui.BEAT.UP);
-          announceThrottled('The log stream is connected.');
-        } else if (next === S.RETRYING) {
-          state.connectionNote = (info && info.message ? info.message + ' ' : '') +
-            'Reconnecting in ' + Math.round((info && info.inMs ? info.inMs : 0) / 1000) + ' s, attempt ' +
-            fmt.num(info && info.attempt ? info.attempt : 1) + '.';
-          recordBeat(ui.BEAT.DOWN, info && info.message);
-          announceThrottled('The log stream was interrupted and is reconnecting.');
-        } else if (next === S.OPENING) {
-          state.connectionNote = 'Opening the stream.';
-          recordBeat(ui.BEAT.PENDING);
-        }
-        paintStatus();
-        paintHealth();
-      },
-      onUnavailable: function (why) {
-        if (!stillMine()) return;
-        state.connectionNote = why.message;
-        view.say(why.message);
-        paintStatus();
-        ui.clear(sourceSlot);
-        sourceSlot.appendChild(el('div.callout.warn', [
-          el('strong', { text: 'This screen could not open a live stream.' }),
-          el('p', { text: why.message }),
-          el('p', { text: 'Nothing below is a reading. No line is being invented to fill the gap.' })
-        ]));
+      if (!env.ok) {
+        refuse('The console API could not list Loki\'s labels: ' +
+          ((env.error && env.error.message) || 'it gave no reason.') +
+          ' Without a label this screen has no selector to tail, so it has opened nothing.');
+        return;
       }
+
+      var payload = env.data || {};
+      if (payload.ok === false) {
+        refuse(payload.message || 'Loki did not answer the label list, so this screen has no selector to tail.');
+        return;
+      }
+
+      var names = Array.isArray(payload.labels) ? payload.labels : [];
+      var label = null;
+      for (var i = 0; i < STREAM_LABELS.length; i++) {
+        if (names.indexOf(STREAM_LABELS[i]) !== -1) { label = STREAM_LABELS[i]; break; }
+      }
+
+      if (!label) {
+        refuse('Loki holds ' + fmt.num(names.length) + ' labels and none of them is one this screen ' +
+          'recognises as naming a stream (' + STREAM_LABELS.join(', ') + '). It will not guess a ' +
+          'selector, so it has opened nothing.');
+        return;
+      }
+
+      loadStreamNames(label);
+      open(label);
     });
+
   }
 })();

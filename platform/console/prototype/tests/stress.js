@@ -1,39 +1,3 @@
-/**
- * Argus Console: the stress and performance harness.
- *
- *   node tests/stress.js [path-to-index.html]
- *
- * run-tests.js asserts properties. sandbox.js presses every control. This
- * file inflates the dataset in the page, drives the console the way a person
- * drives it, and reads counters out of the DevTools protocol -- live DOM
- * nodes, registered event listeners, JS heap after a forced collection,
- * layout and style-recalc counts, script time.
- *
- *   SCALE   render cost per route at 1x, 10x and 50x the dataset, and the
- *           scaling exponent for each. An exponent near 1 is linear and fine;
- *           above ~1.3 something is quadratic and will not survive real data.
- *   LEAK    a long navigation tour, sampling nodes, listeners and heap. The
- *           slope per navigation is the leak rate. A console left open all
- *           night makes several thousand navigations.
- *   INTER   interaction latency at the largest scale: sorting a column,
- *           applying a filter token, switching a tab, opening the palette and
- *           typing, flipping theme and density. These are the actions that
- *           feel slow long before a page load does.
- *   PAINT   layout and style-recalc counts per route, and long tasks. A screen
- *           that recalculates style a thousand times is thrashing.
- *   PARA    the SCALE suite again in parallel contexts, to show the numbers
- *           hold when the machine is busy and are not an artefact of an idle
- *           laptop.
- *
- * Thresholds live in BUDGET below and are deliberately generous: this is a
- * regression gate, not a benchmark contest. Exit code is the failure count.
- *
- * Environment:
- *   STRESS_CYCLES   navigations in the LEAK tour        (default 240)
- *   STRESS_SCALES   dataset multipliers for SCALE       (default 1,10,50)
- *   STRESS_WORKERS  parallel contexts for PARA          (default 4)
- *   STRESS_JSON     where to write the report           (default tests/stress-last-run.json)
- */
 'use strict';
 
 const { chromium } = require('playwright');
@@ -51,13 +15,6 @@ const JSON_OUT = process.env.STRESS_JSON || path.join(__dirname, 'stress-last-ru
 
 const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
 
-/**
- * The views that actually cost something.
- *
- * `security`'s default tab is Posture, which reads a fixed 7x7 object and no
- * row collection at all. The tables that would carry thousands of rows in
- * production all live one segment deeper, so they are named here explicitly.
- */
 const VIEWS = [
   'overview', 'apps', 'deploys', 'audit',
   'security/alerts', 'security/vulns', 'security/sessions', 'security/posture',
@@ -68,17 +25,15 @@ const VIEWS = [
   'ml/pipelines', 'ml/models', 'ml/endpoints', 'ml/imagery'
 ];
 
-/* Budgets. Each is the point past which a human notices, with headroom for a
-   loaded CI box. They are asserted, not printed and ignored. */
 const BUDGET = {
-  renderMs1x: 120,        // a screen at fixture scale, on a cold route
-  renderMs50x: 1200,      // the same screen at 50x data
-  scalingExponent: 1.35,  // >1 is superlinear; 1.35 allows for measurement noise
-  nodesPerNav: 6,         // live DOM nodes retained per navigation
-  listenersPerNav: 1.0,   // registered listeners retained per navigation
-  heapKbPerNav: 40,       // JS heap retained per navigation, after collection
-  interactionMs: 220,     // any single interaction at the largest scale
-  recalcPerRoute: 400     // style recalculations to paint one screen
+  renderMs1x: 120,
+  renderMs50x: 1200,
+  scalingExponent: 1.35,
+  nodesPerNav: 6,
+  listenersPerNav: 1.0,
+  heapKbPerNav: 40,
+  interactionMs: 220,
+  recalcPerRoute: 400
 };
 
 const results = [];
@@ -88,7 +43,6 @@ const skip = (suite, id, detail) => results.push({ suite, id, pass: true, skippe
 const round = (n, dp) => Math.round(n * Math.pow(10, dp || 1)) / Math.pow(10, dp || 1);
 const median = xs => { const s = xs.slice().sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 
-/** Least-squares slope of y against x. The leak rate, in units per navigation. */
 function slope(xs, ys) {
   const n = xs.length;
   if (n < 2) return 0;
@@ -99,16 +53,6 @@ function slope(xs, ys) {
   return den === 0 ? 0 : num / den;
 }
 
-/* ------------------------------------------------------------------ page --- */
-
-/**
- * Dataset inflation, run inside the page.
- *
- * Cloning rows is not enough on its own: several collections are looked up by
- * name, and duplicate names would make the lookups pick the first match every
- * time and quietly hide the very cost we are measuring. Every cloned row that
- * carries an identity gets a distinct one.
- */
 const INFLATE = function (factor) {
   var d = window.ARGUS.data;
   if (!window.__argusOriginal) {
@@ -117,7 +61,6 @@ const INFLATE = function (factor) {
   }
   var orig = window.__argusOriginal;
 
-  // The row-heavy collections, with the field that carries each row's identity.
   var KEYED = {
     apps: 'name', vms: 'name', hosts: 'name', sfNodes: 'name',
     deployments: 'id', alerts: 'id', sessions: 'id', grants: 'id',
@@ -152,18 +95,6 @@ const INFLATE = function (factor) {
   return counts;
 };
 
-/**
- * Navigate, and return the time the console spent building the screen.
- *
- * Assigning location.hash fires hashchange on a later task, so timing it
- * against a frame callback measures the frame clock and not the work.
- * history.replaceState changes the hash WITHOUT firing the event, so the
- * synthetic dispatch below runs the shell's own `render` synchronously on
- * this stack and the two clock reads bracket exactly the script work.
- *
- * Layout and style are not on this stack -- they are charged separately, from
- * the protocol's own LayoutDuration and RecalcStyleDuration counters.
- */
 const NAVIGATE = function (route) {
   history.replaceState(null, '', '#/' + route);
   var ev;
@@ -173,8 +104,6 @@ const NAVIGATE = function (route) {
   return performance.now() - t0;
 };
 
-/* ------------------------------------------------------------- protocol --- */
-
 async function metrics(cdp) {
   const { metrics: m } = await cdp.send('Performance.getMetrics');
   const out = {};
@@ -183,7 +112,7 @@ async function metrics(cdp) {
 }
 
 async function collectGarbage(cdp) {
-  try { await cdp.send('HeapProfiler.collectGarbage'); } catch (e) { /* not fatal */ }
+  try { await cdp.send('HeapProfiler.collectGarbage'); } catch (e) {  }
 }
 
 async function newPage(browser, viewport) {
@@ -199,15 +128,6 @@ async function newPage(browser, viewport) {
   return { ctx, page, cdp, errors };
 }
 
-/* ---------------------------------------------------------------- SCALE --- */
-
-/**
- * Render cost per route at each multiplier, plus the scaling exponent.
- *
- * The exponent is fitted in log space across the multipliers actually used, so
- * it does not assume a particular set. Linear work gives ~1.0; a filter inside
- * a map over the same collection gives ~2.0.
- */
 async function suiteScale(browser, label) {
   const table = {};
 
@@ -216,13 +136,10 @@ async function suiteScale(browser, label) {
     const counts = await page.evaluate(INFLATE, scale);
 
     for (const route of VIEWS) {
-      // A view that does not resolve is a harness bug, not a fast screen.
       await page.evaluate(NAVIGATE, route);
       const ok = await page.evaluate(() => !!document.querySelector('#main h1'));
       if (!ok) { rec('SCALE', `${label}${route} resolves to a screen`, false, 'no heading rendered'); continue; }
 
-      // Warm the route once; the first visit pays for lazy one-off work that
-      // is not what we are measuring.
       await page.evaluate(NAVIGATE, route);
       await page.evaluate(NAVIGATE, 'overview');
 
@@ -233,12 +150,9 @@ async function suiteScale(browser, label) {
         samples.push(await page.evaluate(NAVIGATE, route));
         await page.evaluate(NAVIGATE, 'overview');
       }
-      // Force the layout and style work the script queued to be flushed and
-      // charged before the counters are read, or it lands on the next route.
       await page.evaluate(() => document.body.getBoundingClientRect().height);
       const after = await metrics(cdp);
 
-      // Each iteration is two navigations, so the protocol deltas cover 2N.
       const per = 2 * N;
       table[route] = table[route] || {};
       table[route][scale] = {
@@ -256,11 +170,8 @@ async function suiteScale(browser, label) {
     await ctx.close();
   }
 
-  // Assertions, per view.
   for (const route of VIEWS) {
     const row = table[route];
-    // A view that failed to resolve was already recorded as a failure above;
-    // it has no timings.
     if (!row) continue;
     const small = SCALES[0], large = SCALES[SCALES.length - 1];
 
@@ -273,7 +184,6 @@ async function suiteScale(browser, label) {
         row[large].ms <= BUDGET.renderMs50x, `${row[large].ms} ms at ${large}x`);
     }
 
-    // Fit ms = k * scale^e over the multipliers measured.
     const pts = SCALES.filter(s => row[s] && row[s].ms > 0);
     if (pts.length >= 2) {
       const xs = pts.map(s => Math.log(s));
@@ -293,13 +203,6 @@ async function suiteScale(browser, label) {
   return table;
 }
 
-/* ----------------------------------------------------------------- LEAK --- */
-
-/**
- * The long tour. Nodes, listeners and heap are sampled every 20 navigations
- * after a forced collection, and the slope of each against navigation count is
- * the retention rate.
- */
 async function suiteLeak(browser) {
   const { ctx, page, cdp, errors } = await newPage(browser);
   await page.evaluate(INFLATE, 4);
@@ -307,7 +210,6 @@ async function suiteLeak(browser) {
   const xs = [], nodes = [], listeners = [], heap = [];
   const SAMPLE_EVERY = 20;
 
-  // Settle first: the first pass over each route allocates one-off structures.
   for (const r of ROUTES) await page.evaluate(NAVIGATE, r);
   await collectGarbage(cdp);
 
@@ -315,7 +217,6 @@ async function suiteLeak(browser) {
     const route = ROUTES[i % ROUTES.length];
     await page.evaluate(NAVIGATE, route);
 
-    // Exercise the things that register listeners and timers, not just routes.
     if (i % 7 === 3) {
       await page.keyboard.press('Control+K');
       await page.waitForTimeout(30);
@@ -349,8 +250,6 @@ async function suiteLeak(browser) {
     heapSlope <= BUDGET.heapKbPerNav,
     `${round(heapSlope, 2)} KB/nav (${Math.round(heap[0])} -> ${Math.round(heap[heap.length - 1])} KB)`);
 
-  // Timers are the other thing that survives a navigation. The console's own
-  // teardown hook is meant to clear every one.
   const stray = await page.evaluate(() => {
     return new Promise(resolve => {
       let fired = 0;
@@ -358,7 +257,6 @@ async function suiteLeak(browser) {
       const probe = window.setInterval(() => {
         if (Date.now() - t0 > 900) { window.clearInterval(probe); resolve(fired); }
       }, 100);
-      // Count DOM mutations outside the mount while nothing should be happening.
       const obs = new MutationObserver(muts => {
         muts.forEach(m => {
           const t = m.target;
@@ -381,13 +279,6 @@ async function suiteLeak(browser) {
   return series;
 }
 
-/* ---------------------------------------------------------------- INTER --- */
-
-/**
- * Interaction latency at the largest multiplier. A navigation happens once;
- * sorting a column happens twenty times in a row while somebody hunts for a
- * number, so this is the budget people actually feel.
- */
 async function suiteInteraction(browser) {
   const scale = SCALES[SCALES.length - 1];
   const { ctx, page, cdp, errors } = await newPage(browser);
@@ -402,7 +293,6 @@ async function suiteInteraction(browser) {
       ms <= BUDGET.interactionMs, `${round(ms, 1)} ms`);
   };
 
-  // Sorting the audit table: the largest collection in the console.
   await timed('sorting a column of the audit table', 'audit', () => page.evaluate(() => {
     const btn = document.querySelector('.th-sort');
     if (!btn) return null;
@@ -411,7 +301,6 @@ async function suiteInteraction(browser) {
     return performance.now() - t0;
   }));
 
-  // Applying a property-filter token.
   await timed('applying a property filter token', 'audit', () => page.evaluate(() => {
     const input = document.querySelector('.pf-input');
     if (!input) return null;
@@ -422,7 +311,6 @@ async function suiteInteraction(browser) {
     return performance.now() - t0;
   }));
 
-  // Switching a tab on a detail screen.
   await timed('switching a tab', 'security', () => page.evaluate(() => {
     const tabs = document.querySelectorAll('.tab');
     if (tabs.length < 2) return null;
@@ -431,7 +319,6 @@ async function suiteInteraction(browser) {
     return performance.now() - t0;
   }));
 
-  // The command palette, which rebuilds its index from the whole dataset.
   await timed('opening the command palette and typing', 'overview', async () => {
     const t0 = Date.now();
     await page.keyboard.press('Control+K');
@@ -443,7 +330,6 @@ async function suiteInteraction(browser) {
     return ms;
   });
 
-  // Preference flips, which re-render every screen.
   await timed('switching theme', 'apps', () => page.evaluate(() => {
     if (!window.ARGUS.setTheme) return null;
     const t0 = performance.now();
@@ -451,12 +337,6 @@ async function suiteInteraction(browser) {
     return performance.now() - t0;
   }));
 
-  /*
-   * Timestamps are formatted at build time, so changing the clock genuinely has
-   * to rebuild the screen. Holding that to the same flat budget as a click is
-   * measuring the wrong thing -- the honest invariant is that it costs about
-   * what navigating to the same screen costs, and no more.
-   */
   {
     await page.evaluate(NAVIGATE, 'audit');
     const navSamples = [];
@@ -481,19 +361,6 @@ async function suiteInteraction(browser) {
   await ctx.close();
 }
 
-/* -------------------------------------------------------------- SUSTAIN --- */
-
-/**
- * The same screen, used hard, without navigating away.
- *
- * Navigation is the path the teardown hook covers. But an operator triaging
- * an incident does not navigate -- they sit on one table and sort it, filter
- * it, and sort it again, for twenty minutes. If a repaint rebuilds more than
- * it replaces, or leaves the old rows attached, that is where it shows.
- *
- * The finding is the DRIFT: the last few interactions against the first few.
- * A flat line is correct behaviour.
- */
 async function suiteSustain(browser) {
   const scale = SCALES[SCALES.length - 1];
   const TARGETS = ['audit', 'security/alerts', 'identity/people', 'data/buckets'];
@@ -547,18 +414,11 @@ async function suiteSustain(browser) {
       listenerGrowth <= 2, `${listenerGrowth >= 0 ? '+' : ''}${listenerGrowth} listeners over ${REPS} sorts`);
   }
 
-  // Tab ping-pong. Switching a tab does not go through the router, so the
-  // shell's teardown hooks are never drained between switches: anything a tab
-  // panel starts on render accumulates until the next real navigation.
   for (const view of ['identity/grants', 'security/posture']) {
     await page.evaluate(NAVIGATE, view);
     const tabs = await page.evaluate(() => document.querySelectorAll('.tab').length);
     if (tabs < 2) { skip('SUSTAIN', `${view} has tabs to switch between`, 'single panel'); continue; }
 
-    /*
-     * End on the tab we started on, so the "after" reading is taken with the
-     * same panel on screen as the "before" and only retention is measured.
-     */
     await page.evaluate(() => {
       const t = document.querySelectorAll('.tab');
       t[1].click();
@@ -571,7 +431,7 @@ async function suiteSustain(browser) {
     await page.evaluate(() => {
       const t = document.querySelectorAll('.tab');
       for (let i = 0; i < 60; i++) t[i % 2].click();
-      t[0].click();                      // finish where we began
+      t[0].click();
     });
     await collectGarbage(cdp);
     await page.waitForTimeout(60);
@@ -593,15 +453,6 @@ async function suiteSustain(browser) {
   return out;
 }
 
-/* ---------------------------------------------------------------- FLASH --- */
-
-/**
- * The flash bar, across a working session.
- *
- * `render()` clears the mount and the breadcrumb on every navigation but never
- * touches the flash host, and almost every caller of A.flash omits the optional
- * timeout. This suite fires one flash per navigation and watches the host.
- */
 async function suiteFlash(browser) {
   const REPS = 60;
   const { ctx, page, cdp, errors } = await newPage(browser);
@@ -617,15 +468,11 @@ async function suiteFlash(browser) {
     const samples = [];
     const host = document.getElementById('flashes');
     for (let i = 0; i < reps; i++) {
-      // Exactly what a screen does after a destructive action succeeds.
       window.ARGUS.flash('ok', 'Restart requested', 'MillsApi on sf-0' + (i % 5 + 1) + '.');
       history.replaceState(null, '', '#/' + ['overview', 'apps', 'audit', 'deploys'][i % 4]);
       window.dispatchEvent(new Event('hashchange'));
       if (i % 10 === 9) samples.push({ i: i + 1, inBar: host ? host.childElementCount : -1, docNodes: document.getElementsByTagName('*').length });
     }
-    // Finish on the screen we started on, or the node count difference is
-    // partly just a different screen. Only the notifications should be left
-    // to account for.
     history.replaceState(null, '', '#/overview');
     window.dispatchEvent(new Event('hashchange'));
     return samples;
@@ -642,10 +489,6 @@ async function suiteFlash(browser) {
     barSlope <= 0.1,
     `${round(barSlope, 2)} kept per navigation; ${last.inBar} still on screen after ${REPS}`);
 
-  /* The right question is whether the document GROWS, not what it weighs: the
-     ceiling deliberately keeps the last few notifications on screen, so a raw
-     before/after difference counts the feature as if it were the defect. The
-     slope across the run is the thing that must be flat. */
   const docSlope = slope(growth.map(g => g.i), growth.map(g => g.docNodes));
   rec('FLASH', 'the document does not grow across a working session',
     Math.abs(docSlope) <= 0.5,
@@ -657,17 +500,6 @@ async function suiteFlash(browser) {
   return { growth, retainedNodes: end.Nodes - start.Nodes, keptPerNav: round(barSlope, 2) };
 }
 
-/* ----------------------------------------------------------------- SOAK --- */
-
-/**
- * Sitting still.
- *
- * Some screens start a timer: an elevation countdown, a session player, a log
- * tail. A console is left open on one of those all day. Nothing else in the
- * suite waits long enough to see what a timer does over minutes, so this dwells
- * on each of them and watches the same three counters. Anything that appends
- * on a tick without a cap shows up here as a slope and nowhere else.
- */
 async function suiteSoak(browser) {
   const DWELL_MS = Number(process.env.STRESS_SOAK_MS || 12000);
   const TARGETS = ['identity/grants', 'security/sessions', 'ops/runbooks', 'overview'];
@@ -687,8 +519,6 @@ async function suiteSoak(browser) {
     const step = Math.max(1000, Math.round(DWELL_MS / 6));
     for (let t = step; t <= DWELL_MS; t += step) {
       await page.waitForTimeout(step);
-      // Collect before each sample. Without this the slope measures allocation
-      // churn between collections rather than retention.
       await collectGarbage(cdp);
       const m = await metrics(cdp);
       samples.push({ t, nodes: m.Nodes, listeners: m.JSEventListeners, heapKb: m.JSHeapUsedSize / 1024 });
@@ -722,16 +552,6 @@ async function suiteSoak(browser) {
   return out;
 }
 
-/* --------------------------------------------------------------- SEARCH --- */
-
-/**
- * The command palette, at inventory scale.
- *
- * The palette indexes every screen, application, virtual machine, host, bucket,
- * database and runbook, and it rescores on every keystroke. Typing latency is
- * the most unforgiving budget in the console, because it is judged against the
- * keyboard rather than against a page load.
- */
 async function suiteSearch(browser) {
   const { ctx, page, errors } = await newPage(browser);
   await page.evaluate(INFLATE, 200);
@@ -759,9 +579,6 @@ async function suiteSearch(browser) {
     rec('SEARCH', 'a keystroke in the palette stays under 60 ms at 200x inventory',
       worst <= 60, `worst ${round(worst, 2)} ms, median ${round(median(perKey), 2)} ms over ${perKey.length} keys`);
 
-    // Later keystrokes narrow the result set, so they must not cost more than
-    // early ones. A rising curve means the work is proportional to the whole
-    // inventory rather than to the matches.
     const early = median(perKey.slice(0, 3)), late = median(perKey.slice(-3));
     rec('SEARCH', 'typing does not get more expensive as the query grows',
       late <= early * 1.8 + 4, `first keys ${round(early, 2)} ms, last keys ${round(late, 2)} ms`);
@@ -772,25 +589,12 @@ async function suiteSearch(browser) {
   return perKey;
 }
 
-/* --------------------------------------------------------------- PLAYER --- */
-
-/**
- * The recorded-session player.
- *
- * The fixture keystroke tracks are six entries long. A real 28-minute
- * Guacamole recording is hundreds to thousands, and the player repaints its
- * whole log on every tick of playback and on every pointer move while
- * scrubbing -- so this is the screen where the fixture size hides the cost
- * most completely. It also checks the geometry of the scrubber markers.
- */
 async function suitePlayer(browser) {
   const { ctx, page, errors } = await newPage(browser);
 
   await page.evaluate(NAVIGATE, 'security/sessions');
   await page.waitForTimeout(150);
 
-  // The player mounts when a session is selected, which is a row click on the
-  // sessions table rather than a button with a predictable label.
   const opened = await page.evaluate(async () => {
     const btn = [...document.querySelectorAll('#main button')]
       .find(b => /replay|watch|open recording/i.test(b.textContent));
@@ -836,7 +640,6 @@ async function suitePlayer(browser) {
       geometry.rangeHeight >= 24, `${geometry.rangeHeight}px tall`);
   }
 
-  // Scrub the way a pointer does, and time the repaints.
   const scrub = await page.evaluate(async () => {
     const range = document.querySelector('.scrubber input[type="range"]');
     const max = Number(range.max) || 100;
@@ -859,16 +662,6 @@ async function suitePlayer(browser) {
   return { geometry, worst: round(worst, 2) };
 }
 
-/* --------------------------------------------------------------- SCROLL --- */
-
-/**
- * Scrolling a long table.
- *
- * A viewport-anchored gradient the browser cannot fast-path, or a blur on the
- * sticky top bar that has to be re-sampled whenever anything moves behind it,
- * would make every scroll frame more expensive independent of row count.
- * Both are asserted directly as well as measured.
- */
 async function suiteScroll(browser) {
   const { ctx, page, errors } = await newPage(browser);
   await page.evaluate(INFLATE, 50);
@@ -890,7 +683,7 @@ async function suiteScroll(browser) {
       await new Promise(r => requestAnimationFrame(r));
     }
     running = false;
-    return marks.slice(2);          // drop the first two, which include setup
+    return marks.slice(2);
   });
 
   let p95 = null;
@@ -923,12 +716,6 @@ async function suiteScroll(browser) {
   return { p95 };
 }
 
-/* ----------------------------------------------------------------- PARA --- */
-
-/**
- * The same measurement in parallel contexts. A number that only holds on an
- * idle machine is not a number you can gate a pull request on.
- */
 async function suiteParallel(browser) {
   const scale = SCALES[Math.min(1, SCALES.length - 1)];
   const jobs = [];
@@ -958,9 +745,6 @@ async function suiteParallel(browser) {
   rec('PARA', `${WORKERS} consoles driven at once all stayed error-free`, clean === WORKERS,
     `${clean}/${WORKERS} clean`);
 
-  // Under contention, no route should collapse: compare the worst worker to
-  // the best and flag a route whose spread is wild, which usually means it is
-  // contending for the main thread rather than doing bounded work.
   for (const route of ROUTES) {
     const xs = all.map(r => r.times[route]).filter(n => typeof n === 'number' && n > 0);
     if (xs.length < 2) continue;
@@ -971,8 +755,6 @@ async function suiteParallel(browser) {
 
   return all;
 }
-
-/* ----------------------------------------------------------------- main --- */
 
 function report(scaleTable, leakSeries, sustain, soak, flash, search, player, scroll) {
   ['INTER', 'SUSTAIN', 'PLAYER'].forEach(suite => {
@@ -997,7 +779,6 @@ function report(scaleTable, leakSeries, sustain, soak, flash, search, player, sc
   console.log('  cycles=' + CYCLES + '  scales=' + SCALES.join(',') + '  workers=' + WORKERS);
   console.log('');
 
-  // The scale table, because the shape of the numbers is the finding.
   if (scaleTable) {
     const big = SCALES[SCALES.length - 1];
     console.log('  script ms to build a screen, by dataset multiplier' +

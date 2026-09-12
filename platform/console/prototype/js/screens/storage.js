@@ -1,37 +1,3 @@
-/* Argus Console: Object storage.
- *
- * The screen for the S3 replacement. What buckets exist, what is inside them,
- * how much room is left before writes start failing, and whether the
- * immutability this estate depends on is actually enforced.
- *
- * Everything here reads platform/console/server/src/storage.js, which never
- * reports a number it did not measure. A screen can throw that away at the
- * last step -- an empty cell where the server said `unknown`, a "0 B" where it
- * said null -- and next to a bucket called argus-backups, "this is empty" and
- * "we cannot tell" lead to opposite actions.
- *
- * Four rules:
- *
- *   UNKNOWN IS A VALUE, NOT A BLANK. A bucket whose size the volume topology
- *   cannot account for renders the word `unknown`, carrying the server's own
- *   reason, and never a zero.
- *
- *   A LOCK IS GREEN ONLY WHEN A DELETE WAS REFUSED. The verdict comes from
- *   storage-init attempting a real delete of a real locked object version --
- *   once, against one probe bucket. A perfectly configured bucket whose
- *   enforcement was never tested is grey, not green.
- *
- *   NOTHING IS OFFERED THAT WILL FAIL. Delete renders disabled with the reason
- *   the API computed.
- *
- *   A WALK HAPPENS ONLY WHEN A HUMAN ASKS. There is no cheap object count in
- *   S3. The per-prefix total sits behind Calculate, and says "at least" when
- *   the walk ran out of its budget rather than presenting an undercount as a
- *   total.
- *
- * ES5 only: this console is opened straight from file:// by three test
- * harnesses and runs with no build step (ADR-0027).
- */
 (function () {
   'use strict';
 
@@ -44,17 +10,6 @@
     document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
   }
 
-  /* ------------------------------------------------------------ formatting --- */
-
-  /**
-   * Bytes, or null.
-   *
-   * It returns null rather than a dash for a missing value on purpose: every
-   * call site on this screen has to decide what the absence MEANS -- "the
-   * server has nothing to say about this bucket" and "S3 has no such thing as
-   * a folder size" are different sentences -- and a formatter that quietly
-   * substitutes "-" (or worse, "0 B") makes that decision for it.
-   */
   function bytes(n) {
     if (n === null || n === undefined || isNaN(n)) return null;
     var abs = Math.abs(n);
@@ -65,20 +20,11 @@
     return fmt.num(n / 1099511627776, 2) + ' TB';
   }
 
-  /* For the places that concatenate into a sentence or feed ui.statTile, which
-     takes a string. Kept separate from bytes() so that a null can never reach
-     a table cell as the word "unknown" without the reason that goes with it. */
   function bytesOr(n) {
     var v = bytes(n);
     return v === null ? 'unknown' : v;
   }
 
-  /* Absolute UTC, never fmt.ago or fmt.time.
-   *
-   * Those two are anchored to ARGUS.data.now, which is a FIXTURE CONSTANT
-   * (data.js pins it to 2026-09-08T09:14Z). Against live timestamps from the
-   * object store that produces a confident relative age computed from the
-   * wrong clock -- "3 h ago" for something written a minute ago. */
   function stamp(iso) {
     if (!iso) return null;
     var t = Date.parse(iso);
@@ -91,12 +37,6 @@
     return s === null ? el('span.muted', { text: 'not reported' }) : el('span.mono', { text: s });
   }
 
-  /**
-   * An unknown value renders as the WORD unknown, in the neutral tone, with
-   * the server's reason on hover and repeated for a screen reader -- never as
-   * an empty cell, a dash or a zero. Grey, not green and not red: not knowing
-   * is neither good news nor an incident.
-   */
   function unknownCell(reason, label) {
     var text = reason || 'The server gave no reason.';
     return el('span', [
@@ -105,20 +45,10 @@
     ]);
   }
 
-  /* Why every size and count from /api/storage/buckets carries a qualifier.
-     Both are summed from volume metadata -- one request per volume server,
-     never one per object -- so they include the volume superblock and space
-     still held by deleted or superseded versions. */
   var APPROX_SIZE_TITLE =
     'Summed from volume metadata rather than by listing objects, so it includes volume overhead and space ' +
     'still held by deleted or superseded versions. Browse the bucket and press Calculate for a counted total.';
 
-  /* The object count needs a stronger treatment than the size does.
-     On this cluster (SeaweedFS 3.97) every volume reports FileCount 0 in
-     /status, including the volumes of buckets that hold objects, so a zero
-     here is the volume servers having nothing to say, not a bucket with
-     nothing in it. Zero is rendered as unknown; any positive count is shown,
-     still labelled approximate. */
   var ZERO_COUNT_TITLE =
     'The volume servers report no file count for this bucket. That is not the same as the bucket being empty: ' +
     'on this cluster every volume reports a file count of zero even where a listing finds objects. Browse the ' +
@@ -127,17 +57,11 @@
     'Approximate: summed from volume metadata, so it lags compaction and counts every retained version. ' +
     'Press Calculate on a prefix for a counted number.';
 
-  /* Said next to every lock badge, because a per-bucket column implies a
-     per-bucket test and there was only ever one probe. */
   var SHIELD_TITLE =
     'This verdict comes from one attempted delete of one locked object version, in one probe bucket, at boot ' +
     '-- not from reading this bucket\'s configuration. It is the whole store\'s answer, shown per row.';
 
   function shieldTone(verdict) {
-    /* Green for `enforced` and nothing else. `unknown` is grey because a
-       failed probe proves nothing either way; `not-enforced` is red because a
-       lock that does not hold is worse than no lock at all -- somebody is
-       relying on it. */
     if (verdict === 'enforced') return 'ok';
     if (verdict === 'not-enforced') return 'bad';
     return 'idle';
@@ -149,15 +73,6 @@
     return verdict ? String(verdict) : 'not proven';
   }
 
-  /**
-   * Turn an HTTP status back into a next action.
-   *
-   * store.js rejects any non-2xx before it reads the body, so the server's own
-   * message ("Access Denied.", "Another size calculation is already running")
-   * never reaches the screen -- only "The console API answered 403". The
-   * status is what survives, and these are the meanings the routes in
-   * server/src/index.js actually attach to each one.
-   */
   function reasonHint(reason) {
     if (reason === 'http-400') return 'The console API rejected the bucket, prefix or key as malformed before it asked the store.';
     if (reason === 'http-403') {
@@ -175,12 +90,6 @@
     return null;
   }
 
-  /* ------------------------------------------------------------- lifecycle --- */
-
-  /* Two guards, because there are two ways a response can arrive too late.
-     `alive` goes false when the router leaves the screen; `generation` moves
-     when Refresh rebuilds the screen in place. Either one makes a resolved
-     promise write into a node nobody is looking at. */
   var alive = true;
   var generation = 0;
 
@@ -188,8 +97,6 @@
     var mine = generation;
     return function () { return alive && mine === generation; };
   }
-
-  /* --------------------------------------------------------------- reading --- */
 
   function sampleState() {
     return ui.emptyState(
@@ -200,8 +107,6 @@
 
   function staleBanner(env) {
     var why = env.error && env.error.message ? env.error.message : '';
-    /* Upstream messages arrive with and without a full stop -- classify() ends
-       its sentences, a raw driver error does not. */
     if (why && !/[.!?]$/.test(why)) why += '.';
     return el('div.callout.warn', [
       el('strong', { text: 'Showing the last value that could be read.' }),
@@ -218,16 +123,9 @@
     return ui.errorState(
       'This could not be read',
       (e.message || 'The request failed.') + (hint ? ' ' + hint : ''),
-      /* Try Again drops the cached envelope first. Without that, the retry
-         replays the same failure out of the cache and looks like a dead
-         button. */
       function () { A.forget(path); retry(); });
   }
 
-  /**
-   * Fill a node from one API path, with all five states it really has:
-   * loading, sample-mode, failed, stale-but-usable and ok.
-   */
   function loadInto(host, path, opts, render) {
     opts = opts || {};
     var current = guard();
@@ -240,10 +138,6 @@
       if (!current()) return;
       ui.clear(host);
 
-      /* onSettled fires on EVERY terminal state, not just the good one. A
-         caller that re-enables its button in the render callback alone leaves
-         that button dead forever the first time the read fails, which is
-         exactly when somebody wants to press it again. */
       if (env.mode === A.MODE.SAMPLE) { host.appendChild(sampleState()); if (opts.onSettled) opts.onSettled(false); return; }
       if (!env.ok) { host.appendChild(failureState(env, path, rerun)); if (opts.onSettled) opts.onSettled(false); return; }
       if (env.stale) host.appendChild(staleBanner(env));
@@ -259,8 +153,6 @@
     loadInto(body, path, opts, render);
     return card;
   }
-
-  /* ---------------------------------------------------------------- health --- */
 
   function renderHealth(body, d) {
     var caps = A.capabilities() || {};
@@ -279,8 +171,6 @@
               (caps.writesAllowed ? '' : ' This console is read-only and will not write to any of them.')
             : 'The master has no writable volume. Writes will fail until a volume is allocated or a slot is freed.'
         }),
-      /* freeVolumes is null when the topology could not be read. Zero free
-         slots and "we could not ask" are days apart in what they mean. */
       ui.statTile('Free volume slots',
         d.freeVolumes === null || d.freeVolumes === undefined ? 'unknown' : fmt.num(d.freeVolumes),
         {
@@ -320,10 +210,6 @@
       { key: 'version', label: 'Version', render: function (c) { return c.version ? el('span.mono', { text: c.version }) : el('span.muted', { text: 'not reported' }); } },
       {
         key: 'latencyMs', label: 'Latency', align: 'right',
-        /* Volume components carry latencyMs: null because they were probed as
-           part of the topology walk and not timed. fmt.ms renders that as a
-           dash; rendering it as "0 ms" would invent the fastest number on the
-           screen out of a missing one. */
         render: function (c) { return fmt.ms(c.latencyMs); }
       },
       {
@@ -338,8 +224,6 @@
 
     body.appendChild(el('p.hint', { text: 'Probed at ' + stamp(d.at) + '.' }));
   }
-
-  /* -------------------------------------------------------------- capacity --- */
 
   function renderCapacity(body, d) {
     var totals = d.totals;
@@ -370,10 +254,6 @@
         })
     ]));
 
-    /* The whole reason this panel is not just "free bytes".
-       Volumes are pre-sized slots: once they are all allocated, writes fail
-       with "no writable volumes" while df still shows the disk nearly empty.
-       An operator watching only free bytes gets no warning at all. */
     if (d.binding === 'volume-slots' && slotBytes !== null && totals) {
       body.appendChild(el('div.callout.warn', [
         el('strong', { text: 'The volume-slot ceiling binds, not the disk.' }),
@@ -449,12 +329,8 @@
       empty: 'The master reported no volume server.'
     }));
 
-    /* Named, because somebody will otherwise compare this with the Windows
-       disk in Explorer and conclude the console is lying. */
     body.appendChild(el('p.hint', { text: 'Measured on ' + (d.scope || 'an unnamed scope') + '. Read at ' + stamp(d.at) + '.' }));
   }
-
-  /* ------------------------------------------------------------ lock status --- */
 
   function renderLocks(body, d) {
     if (!d.determined) {
@@ -473,8 +349,6 @@
 
     body.appendChild(el('p', { text: d.detail || 'The probe recorded no detail.' }));
 
-    /* A verdict from a laptop must never be read as a verdict about
-       production. The scope is the sentence that stops that. */
     body.appendChild(el('p.hint', {
       text: 'Scope: ' + (d.scope || 'unknown') + '. ' + SHIELD_TITLE
     }));
@@ -537,17 +411,9 @@
     }));
   }
 
-  /* --------------------------------------------------------------- buckets --- */
-
   function sizeCell(b) {
-    /* THE rule. A bucket with no volumes tells the topology nothing, and the
-       server says so with unknownSize plus a reason. Rendering that as 0 B
-       would say "argus-backups is empty" to somebody deciding whether the
-       backup job is broken. */
     if (b.unknownSize) return unknownCell(b.unknownSizeReason || 'The volume topology reported no size for this bucket.');
     var v = bytes(b.diskBytes);
-    /* unknownSize false and no number is a shape the server should never send.
-       If it ever does, it is still not a zero. */
     if (v === null) return unknownCell('The volume servers did not report a footprint for this bucket.');
     return el('span', { title: APPROX_SIZE_TITLE }, [el('span', { text: 'approx. ' + v })]);
   }
@@ -581,9 +447,6 @@
     }
 
     if (d.inventorySource && d.inventorySource.indexOf('storage-init') !== 0) {
-      /* Which list this is has to be said out loud. One is what exists, the
-         other is what somebody intended to exist, and an operator must never
-         have to guess which one they are looking at. */
       body.appendChild(el('div.callout.warn', [
         el('strong', { text: 'This is the declared bucket list, not a verified one.' }),
         el('p', {
@@ -632,9 +495,6 @@
       { key: 'lock', label: 'Object lock', status: true, render: lockCell },
       {
         key: 'replication', label: 'Replication',
-        /* The server sends the words, and they are never a lag figure. A lag
-           of 0 s is what a healthy replica looks like, and there is no
-           replica; there is not even a Site B. */
         render: function (b) { return el('span.muted', { text: b.replication || 'not configured' }); }
       },
       { key: 'owner', label: 'Owner', render: function (b) { return b.owner ? el('code.mono', { text: b.owner }) : el('span.muted', { text: 'not declared' }); } },
@@ -664,12 +524,7 @@
     }));
   }
 
-  /* --------------------------------------------------------------- browsing --- */
-
   function objectsPath(bucket, prefix, cursor) {
-    /* Every value is encoded. Real keys here contain spaces and accents
-       ("survey 001.txt", "releve-002.txt" with an acute e), and an unencoded
-       one either changes meaning or fails to match anything at all. */
     var p = '/api/storage/objects?bucket=' + encodeURIComponent(bucket);
     if (prefix) p += '&prefix=' + encodeURIComponent(prefix);
     if (cursor) p += '&cursor=' + encodeURIComponent(cursor);
@@ -685,16 +540,11 @@
     if (atRoot) nav.appendChild(el('b', { text: bucket }));
     else nav.appendChild(A.link(bucket, ROUTE, null, { bucket: bucket }, 'crumb-link'));
 
-    /* Split on '/' and keep empty segments: a key may legitimately contain
-       "a//b", and dropping the empty piece would build a breadcrumb link to a
-       prefix that does not exist. This is also why the path travels as a query
-       parameter and not as route segments -- the router filters empty
-       segments out of a path, and that would silently corrupt such a key. */
     if (prefix) {
       var parts = prefix.split('/');
       var walked = '';
       for (var i = 0; i < parts.length; i++) {
-        if (i === parts.length - 1 && parts[i] === '') break;   // the trailing slash
+        if (i === parts.length - 1 && parts[i] === '') break;
         walked += parts[i] + '/';
         nav.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
         var label = parts[i] === '' ? '(empty)' : parts[i];
@@ -705,7 +555,6 @@
     return nav;
   }
 
-  /** One row of the listing: folders and objects share a table, folders first. */
   function listRows(bucket, prefix, data) {
     var rows = [];
     (data.folders || []).forEach(function (f) {
@@ -724,11 +573,6 @@
     return ui.table([
       {
         key: 'name', label: 'Name',
-        /* Folders sort above objects whichever way the column is sorted,
-           because a directory listing that interleaves them is unreadable.
-           The group prefix is a LETTER, not a digit: ui.table sorts through a
-           collator built with numeric:true, so "0" + "2026/" would collate as
-           the number 2026. */
         sort: function (r) { return (r.kind === 'folder' ? 'A ' : 'B ') + r.name; },
         render: function (r) {
           if (r.kind === 'folder') {
@@ -747,9 +591,6 @@
         key: 'sizeBytes', label: 'Size', align: 'right',
         render: function (r) {
           if (r.kind === 'folder') {
-            /* S3 has no directory size. That is not a missing number, it is a
-               number that does not exist until something walks the prefix --
-               which is what Calculate is for. */
             return unknownCell('S3 has no directory size. Press Calculate below after opening this folder to walk it.', 'not counted');
           }
           return bytes(r.diskBytes);
@@ -772,13 +613,6 @@
     });
   }
 
-  /**
-   * The prefix walk, behind a button, with an honest partial result.
-   *
-   * This is the only call on the screen that reads every key under a prefix.
-   * It is budgeted server-side by keys AND wall clock, and it refuses to run
-   * two at once, so it never runs on a page load.
-   */
   function calculatePanel(bucket, prefix) {
     var out = el('div');
     var path = '/api/storage/prefix-size?bucket=' + encodeURIComponent(bucket) +
@@ -789,10 +623,6 @@
       onClick: function () {
         button.setDisabled(true);
         loadInto(out, path, {
-          /* ttl 0 so pressing it again re-walks rather than replaying a cached
-             answer, and a timeout longer than the server's own 20 s budget so
-             the request is not aborted from this end just before the answer
-             arrives. */
           ttlMs: 0,
           timeoutMs: 30000,
           skeletonRows: 1,
@@ -801,8 +631,6 @@
           var size = bytesOr(d.sizeBytes);
           var text = d.complete
             ? size + ' in ' + fmt.num(d.objectCount) + ' object' + (d.objectCount === 1 ? '' : 's')
-            /* "at least", because the walk stopped early. An undercount
-               presented as a total is worse than an honest partial. */
             : 'at least ' + size + ' in at least ' + fmt.num(d.objectCount) + ' objects';
           host.appendChild(el('div.row', [
             el('strong', { text: text }),
@@ -826,10 +654,6 @@
 
   function renderListing(host, bucket, prefix, selectedKey, data) {
     if (data.keyRepair && data.keyRepair.applied) {
-      /* Visible, not a footnote. The names on screen have been corrected and
-         differ from what the server itself returns, so an operator comparing
-         this against `aws s3 ls` or mc will see different strings and must
-         know why before concluding one of them is broken. */
       host.appendChild(el('div.callout.info', [
         el('strong', { text: 'The names below were repaired before they were shown.' }),
         el('p', { text: data.keyRepair.reason || 'This server returns corrupted keys when listing a versioned bucket.' }),
@@ -855,8 +679,6 @@
         ' at this level, read at ' + stamp(data.at) + '.'
     }));
 
-    /* Two different kinds of "there is more". A cursor can be followed; a
-       budget stop cannot. */
     if (data.cursor) {
       var cursor = data.cursor;
       var more = ui.btn('Load the next page', {
@@ -895,8 +717,6 @@
     }
   }
 
-  /* --------------------------------------------------------- object detail --- */
-
   function previewPath(bucket, key) {
     return '/api/storage/preview?bucket=' + encodeURIComponent(bucket) + '&key=' + encodeURIComponent(key);
   }
@@ -913,24 +733,11 @@
   }
 
   function previewError(host, status, message) {
-    /* The preview path fetches raw bytes itself, so unlike everything that
-       goes through A.read it still HAS the server's own message on a 4xx. Only
-       fall back to the status meaning when the body carried nothing, rather
-       than printing both and saying the same thing twice. */
     host.appendChild(ui.errorState(
       'This object could not be previewed',
       message || reasonHint('http-' + status) || ('The console API answered ' + status + '.')));
   }
 
-  /**
-   * Show the object's bytes, using the server's own content type.
-   *
-   * A.read cannot be used here: it parses every response as JSON and this
-   * route returns raw bytes. The allowlist that decides what may be shown is
-   * server-side and is deliberately NOT duplicated here -- duplicating it
-   * would let the two drift, and the copy in the browser is the one that would
-   * be wrong. The extension is used only to pick which request to make first.
-   */
   function loadPreview(host, bucket, key) {
     var current = guard();
     var url = previewPath(bucket, key);
@@ -948,9 +755,6 @@
       });
       img.addEventListener('error', function () {
         if (!current()) return;
-        /* The <img> tag cannot report why. The same URL is fetched once more
-           to read the JSON error the API actually sent, so the operator gets
-           "capped at 5 MB" instead of a broken image icon. */
         window.fetch(url, { cache: 'no-store', credentials: 'same-origin' }).then(function (res) {
           return res.json().then(function (body) { return { status: res.status, body: body }; },
             function () { return { status: res.status, body: null }; });
@@ -990,10 +794,6 @@
       }
 
       if (r.kind === 'pdf') {
-        /* No embed, no iframe, no object. This console's CSP is
-           default-src 'none' with object-src 'none' and no frame-src, so every
-           in-page embedding of a PDF renders an empty box with no error. A
-           link to the same bytes is the honest version. */
         host.appendChild(el('p', { text: 'This is a PDF. The console cannot embed one: its content policy blocks frames and objects.' }));
         host.appendChild(el('a.rlink', {
           href: url, target: '_blank', rel: 'noopener noreferrer',
@@ -1022,9 +822,6 @@
 
     var retentionValue;
     if (!d.lockReadable) {
-      /* The server distinguishes "no retention" from "the retention call
-         failed". Collapsing those into "none" is how an object under a lock
-         that this console could not read gets treated as free to delete. */
       retentionValue = unknownCell('The retention call did not answer for this object, so the console cannot say whether one is set.', 'could not be read');
     } else if (d.retention) {
       retentionValue = el('span', [
@@ -1050,15 +847,6 @@
       ['Legal hold', holdValue]
     ]));
 
-    /* Delete is rendered, and rendered disabled, on purpose.
-     *
-     * Hiding it would leave an operator wondering whether the console can
-     * delete at all; offering it would produce a 403 or a 405 and a support
-     * question. The server computes `deletable` from all three blockers at
-     * once -- retention, legal hold, and this console being read-only -- and
-     * hands over the sentence to show. When it says the object COULD be
-     * deleted, the button still does not work: every /api/storage route is a
-     * GET, so there is nothing here to call. */
     var reason = d.deletableReason ||
       (d.deletable
         ? 'This object is not locked, but the console exposes no delete route: every object-store endpoint it ' +
@@ -1080,8 +868,6 @@
 
     body.appendChild(el('p.hint', { text: 'Read at ' + stamp(d.at) + '.' }));
   }
-
-  /* ---------------------------------------------------------------- screen --- */
 
   function bucketSummary(bucket) {
     var body = el('div');
@@ -1127,9 +913,6 @@
     ]));
 
     loadInto(listBody, objectsPath(bucket, prefix, null), {
-      /* A bucket whose keys need repairing is listed flat and assembled here,
-         which reads up to 2000 keys -- comfortably longer than the store's
-         default 10 s client timeout on a slow disk. */
       timeoutMs: 30000,
       skeletonRows: 5
     }, function (host, d) {
@@ -1180,14 +963,6 @@
     else buildOverview(mount);
   }
 
-  /**
-   * Draw the screen, once the probe has answered.
-   *
-   * Both the first paint and Refresh come through here. Whether there is an
-   * API to read is itself something to find out, and building before the probe
-   * answers renders the "no API" state at a moment when the answer is still
-   * 'unknown'.
-   */
   function rebuild(body, params) {
     generation += 1;
     ui.clear(body);
@@ -1214,23 +989,12 @@
 
       mount.appendChild(ui.pageHeader(
         'Object storage',
-        /* The header is built before the probe answers, so it must not claim
-           anything about freshness -- "read live" printed above a panel saying
-           the API is not running is the console contradicting itself on its
-           own first screenful. It states the SOURCE, which is true in both
-           modes, and the panels below state what they actually managed to
-           read. */
         bucket
           ? 'Browsing ' + bucket + '. Names, sizes and lock state come from the object store, never from a fixture.'
           : 'The S3 replacement: what exists, how much room is left before writes fail, and whether immutability is ' +
             'actually enforced. Nothing on this screen is a fixture.',
         [ui.btn('Refresh', {
           onClick: function () {
-            /* Rebuilt in place rather than through the router. A.go to the
-               hash you are already on fires no hashchange, so the router never
-               re-renders and the button does nothing -- and re-rendering in
-               place also keeps the operator's scroll position, which matters
-               when the thing being refreshed is halfway down a listing. */
             A.forget();
             rebuild(body, params);
             if (A.storeMode() !== A.MODE.LIVE) {

@@ -14,6 +14,8 @@ const SESSION_PATH = '/api/auth/session';
 
 const WRITE_PATHS = new Set([LOGIN_PATH, LOGOUT_PATH]);
 
+const SUBJECT_MAX = 128;
+
 const INVALID_CREDENTIALS = {
   ok: false,
   error: 'invalid-credentials',
@@ -61,7 +63,8 @@ async function login(req, res, context, send) {
     return send(res, status, { ok: false, error: err.name, message: err.message });
   }
 
-  const subject = body && typeof body.subject === 'string' ? body.subject.trim() : '';
+  const raw = body && typeof body.subject === 'string' ? body.subject.trim() : '';
+  const subject = raw.length > SUBJECT_MAX ? '' : raw;
   const password = body && typeof body.password === 'string' ? body.password : '';
 
   const base = {

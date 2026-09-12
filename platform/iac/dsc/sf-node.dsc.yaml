@@ -1,4 +1,3 @@
-# DSC v3 configuration: Service Fabric node (Server Core, Shielded VM)
 $schema: https://aka.ms/dsc/schemas/v3/bundled/config/document.json
 resources:
   - name: features
@@ -6,7 +5,7 @@ resources:
     properties: { names: [NET-Framework-45-Core], ensure: present }
   - name: wdac
     type: Argus/WdacPolicy
-    properties: { policyId: argus-base, mode: audit }            # → enforced in Phase 6
+    properties: { policyId: argus-base, mode: audit }
   - name: gpo-membership
     type: Argus/OuPlacement
     properties: { ou: "OU=SF,OU=Tier1,OU=Servers,DC=argus,DC=local" }

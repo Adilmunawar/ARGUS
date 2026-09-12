@@ -16,6 +16,9 @@ const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
 const TAIL_MAX = 2000;
 
+const LINE_MAX_CHARS = 64 * 1024;
+const FRAME_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
+
 function configured() {
   return typeof config.dockerProxyUrl === 'string' && config.dockerProxyUrl.length > 0;
 }
@@ -164,13 +167,14 @@ function demultiplex(onFrame) {
   return function feed(chunk) {
     buffered = buffered.length ? Buffer.concat([buffered, chunk]) : chunk;
     for (;;) {
-      if (buffered.length < 8) return;
+      if (buffered.length < 8) break;
       const streamType = buffered[0];
       const size = buffered.readUInt32BE(4);
-      if (buffered.length < 8 + size) return;
+      if (buffered.length < 8 + size) break;
       onFrame(streamType, buffered.subarray(8, 8 + size));
       buffered = buffered.subarray(8 + size);
     }
+    if (buffered.length > FRAME_BUFFER_MAX_BYTES) buffered = Buffer.alloc(0);
   };
 }
 
@@ -186,7 +190,11 @@ function splitLines(state, text, emit, streamName) {
   state.partial = parts.pop();
   for (const line of parts) {
     if (line.length === 0) continue;
-    emit(streamName, line.replace(/\r$/, ''));
+    emit(streamName, line.slice(0, LINE_MAX_CHARS).replace(/\r$/, ''));
+  }
+  if (state.partial.length > LINE_MAX_CHARS) {
+    emit(streamName, state.partial.slice(0, LINE_MAX_CHARS));
+    state.partial = '';
   }
 }
 
@@ -262,6 +270,7 @@ async function openEvents(handlers) {
     partial += chunk;
     const parts = partial.split('\n');
     partial = parts.pop();
+    if (partial.length > LINE_MAX_CHARS) partial = '';
     for (const line of parts) {
       if (!line.trim()) continue;
       let event;

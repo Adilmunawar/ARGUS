@@ -1,45 +1,3 @@
-/*
- * PostgreSQL, as the console sees it.
- *
- * This is the RDS replacement's read side. One cluster, read through a login
- * role that holds pg_monitor and not one table privilege, over a connection
- * this file opens DIRECTLY to 5432 rather than through a pooler -- because
- * pg_stat_activity behind PgBouncer describes the pooler's sessions and not the
- * application's.
- *
- * Four things this file refuses to do, each because the obvious version is
- * actively misleading on a database dashboard.
- *
- * IT NEVER RENDERS REPLICATION AS A LAG OF ZERO. There is one node here. A
- * standby lag of 0 bytes is exactly what a healthy replica looks like. When
- * there is no standby, no slot and no WAL receiver, this reports
- * `configured: false` and every lag field is null. The settings that would
- * ALLOW replication (wal_level, max_wal_senders) are reported separately as
- * `capable`, because "could replicate" and "is replicating" are different
- * facts.
- *
- * IT NEVER RETURNS AN EMPTY SLOW-QUERY LIST IT DID NOT EARN. pg_stat_statements
- * has three distinct unavailable states -- library not preloaded, library
- * preloaded but the extension not created in this database, and view present
- * but never populated since its last reset -- and an empty array reads as "this
- * database has no slow queries" in all three. Unavailable returns
- * `statements: null` with the actual next command to run; only a real, empty
- * result set returns [].
- *
- * IT NEVER SHOWS A COUNT OR A SIZE IT DID NOT MEASURE. pg_class.reltuples is -1
- * for a relation that has never been analysed, which means "unknown", and
- * turning that into 0 rows on a table listing is the difference between an
- * empty table and an un-analysed one. Unknown stays null, and every estimate is
- * labelled as an estimate.
- *
- * IT NEVER PRESENTS A REFUSAL AS AN OUTAGE. The console role is
- * default_transaction_read_only and deliberately cannot read a single
- * application row (see platform/compose/sql/20-grants.sql: guacamole_db holds
- * the credentials Guacamole injects into sessions, and the grafana database
- * holds datasource secrets, so a monitoring role with table-level read across
- * this cluster would BE a credential store with a web front end). A denial from
- * that design is a normal state with an explanation, not a red banner.
- */
 'use strict';
 
 const fs = require('node:fs');
@@ -47,56 +5,17 @@ const fs = require('node:fs');
 const cache = require('./cache');
 const { positiveInt } = require('./env');
 
-/* ------------------------------------------------------------------ config --- */
-
-/* Everything from the environment, nothing from a file, no parameter anywhere
-   in this module that accepts a credential. docker-compose.yml passes
-   ARGUS_PG_PASSWORD; on the real hosts the same variable is filled by OpenBao.
-   The value is read once into a module-local, is never returned in a payload,
-   never logged, and never interpolated into SQL. */
 const HOST = process.env.ARGUS_PG_HOST || '';
 const PORT = positiveInt('ARGUS_PG_PORT', 5432);
 const USER = process.env.ARGUS_PG_USER || '';
 const PASSWORD = process.env.ARGUS_PG_PASSWORD;
 
-/* THE DATABASE NAME IS NOT OPTIONAL AND MUST NOT BE THE USER NAME.
- *
- * docker-compose.yml gives the console a host, a user and a password and no
- * database at all -- and both libpq and node-postgres default an unset database
- * to the USER name. Left alone, this process would open "argus_console", which
- * does not exist and is not going to, and every screen would fail with
- * `3D000 database "argus_console" does not exist` -- a message that sends an
- * operator looking for a missing database instead of a missing default.
- *
- * `postgres` is the right entry point regardless: pg_database, pg_stat_activity,
- * pg_stat_database, pg_roles, pg_replication_slots and pg_stat_statements are
- * all cluster-wide and readable from any one database. Only the table listing
- * genuinely has to be inside a specific database, and it opens its own
- * connection for that. */
 const ADMIN_DB = process.env.ARGUS_PG_DATABASE || 'postgres';
 
-/* Shared with every other upstream in this console so one knob moves them all. */
 const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
 
-/* The name this process shows up as in pg_stat_activity, and therefore on its
-   own activity screen. Fixed, not derived from a request, so an operator
-   looking at a busy cluster can tell the dashboard's own reads apart from the
-   applications' at a glance. */
 const APP_NAME = 'argus-console';
 
-/* ------------------------------------------------------------------- tls ----- */
-
-/* libpq's sslmode vocabulary, because that is what anyone configuring Postgres
-   already knows. Only `disable` is exercised by the Compose stack: the console
-   and the database share a private bridge network there and nothing else is on
-   it. The modes exist for Site A, where 5432 crosses a real network.
- *
- * `require` is implemented as encryption WITHOUT verification because that is
- * what libpq's `require` actually means, and it is labelled that way in the
- * payload rather than left to look like security. What this refuses to do is
- * accept `verify-ca` or `verify-full` with no CA file and quietly fall back to
- * an unverified connection -- a TLS setting that silently means nothing is
- * worse than no TLS setting, because it stops anyone from looking. */
 const SSL_MODE = (process.env.ARGUS_PG_SSLMODE || 'disable').toLowerCase();
 const CA_FILE = process.env.ARGUS_PG_CA_FILE || '';
 
@@ -116,8 +35,6 @@ const SSL = (() => {
     }
     try {
       const ca = fs.readFileSync(CA_FILE);
-      /* verify-ca proves the certificate chains to the CA but says nothing
-         about the hostname; verify-full is node's default behaviour. */
       return SSL_MODE === 'verify-ca'
         ? { ca, rejectUnauthorized: true, checkServerIdentity: () => undefined }
         : { ca, rejectUnauthorized: true };
@@ -130,12 +47,6 @@ const SSL = (() => {
   return false;
 })();
 
-/* ---------------------------------------------------------------- driver ----- */
-
-/* Lazy, and it reports its own absence instead of taking the process down at
-   require() time. `npm install` not having been run is a normal state on a
-   fresh clone, and the console still has host telemetry and an object store to
-   render while this one panel says what to do about it. */
 let driverModule = null;
 let driverError = null;
 function driver() {
@@ -148,35 +59,15 @@ function driver() {
   return driverModule;
 }
 
-/* ----------------------------------------------------------------- pools ----- */
-
-/* One pool per database, because the table listing has to run INSIDE the
-   database it is describing and switching databases means a new connection --
-   there is no USE in PostgreSQL.
- *
- * Kept deliberately small. max_connections on this cluster is 120 and every
- * application on it shares that number; a dashboard is not entitled to a
- * meaningful slice of it, and the one thing worse than a slow console screen is
- * a console that took the last connection slot during an incident. Three per
- * pool, an LRU cap on the number of pools, and idle connections released after
- * thirty seconds so a tab left open overnight holds nothing. */
 const POOL_MAX = 3;
 const MAX_POOLS = 5;
 const pools = new Map();
 
-/* An idle client can fail on its own -- Postgres restarts, the network drops,
-   the backend is terminated by an administrator -- and node-postgres emits that
-   on the POOL. An unhandled 'error' event on an EventEmitter is an uncaught
-   exception, so no listener here means a Postgres restart takes down the whole
-   console, storage screens and all. The listener also keeps the last such
-   failure, because a pool error that nothing records is a class of outage that
-   is invisible right up until somebody reloads the page. */
 let lastPoolError = null;
 
 function poolFor(database) {
   const existing = pools.get(database);
   if (existing) {
-    /* Re-insert so the Map's insertion order stays LRU order. */
     pools.delete(database);
     pools.set(database, existing);
     return existing;
@@ -189,11 +80,6 @@ function poolFor(database) {
     host: HOST,
     port: PORT,
     user: USER,
-    /* Unset means unset -- NOT the empty string. An empty password is a real
-       credential that SCRAM will reject with 28P01 ("password authentication
-       failed"), which reads like a wrong password; undefined lets a trust or
-       peer authenticated deployment work, and produces a driver-side error this
-       file can classify as "not configured" instead. */
     password: PASSWORD === undefined || PASSWORD === '' ? undefined : PASSWORD,
     database,
     ssl: SSL,
@@ -201,20 +87,9 @@ function poolFor(database) {
     max: POOL_MAX,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: TIMEOUT_MS,
-    /* Server-side first, client-side second, and in that order on purpose. The
-       role's own statement_timeout is 30 s, far longer than this console is
-       willing to wait, so without this a query the dashboard has already given
-       up on keeps running -- holding a snapshot open, which stops vacuum from
-       removing dead rows ACROSS THE WHOLE CLUSTER. query_timeout is set
-       slightly higher so the server's own cancellation wins the race and the
-       error that surfaces is 57014 with a statement attached, rather than an
-       anonymous client abort. */
     statement_timeout: TIMEOUT_MS,
     query_timeout: TIMEOUT_MS + 1000,
     idle_in_transaction_session_timeout: 10000,
-    /* Nothing here ever opens a transaction, but a smoke test that imports this
-       module must still be able to exit. Without this the pool's idle clients
-       hold the event loop open and `npm test` hangs after it has passed. */
     allowExitOnIdle: true
   });
 
@@ -224,46 +99,28 @@ function poolFor(database) {
 
   pools.set(database, pool);
 
-  /* Evict the least recently used pool once there are more than a handful. The
-     database name reaches this module from a query string, so an unbounded map
-     is an unbounded number of connection pools driven by a caller. */
   while (pools.size > MAX_POOLS) {
     const oldest = pools.keys().next().value;
     const victim = pools.get(oldest);
     pools.delete(oldest);
-    if (victim) victim.end().catch(() => { /* closing a pool nobody is using cannot fail usefully */ });
+    if (victim) victim.end().catch(() => {  });
   }
 
   return pool;
 }
 
-/** Run one statement. Values are always bound, never interpolated. */
 async function q(database, text, values) {
   const pool = poolFor(database);
   const res = await pool.query({ text, values: values || [] });
   return res.rows;
 }
 
-/** Close every pool. Exported so a test process can exit deterministically. */
 async function end() {
   const all = [...pools.values()];
   pools.clear();
   await Promise.all(all.map((p) => p.end().catch(() => {})));
 }
 
-/* -------------------------------------------------------------- classify ---- */
-
-/**
- * Turn a driver error into a reason and a next action.
- *
- * "Failed to fetch" tells an operator nothing. The four failures that actually
- * happen here -- the stack is not up, the password is wrong, the role was not
- * granted CONNECT, and the query hit its timeout -- have four different fixes,
- * and two of them are in files in this repository that the message can name.
- *
- * `err.code` is the SQLSTATE for anything the server rejected, and a Node
- * syscall code (ECONNREFUSED, ENOTFOUND) for anything that never reached it.
- */
 function classify(err) {
   const code = (err && err.code) || '';
   const msg = (err && err.message) || String(err);
@@ -272,9 +129,6 @@ function classify(err) {
 
   if (code === 'ARGUS_NO_DRIVER') return { reason: 'no-driver', message: msg };
 
-  /* node-postgres raises this from the SASL exchange when the server asks for a
-     password and the client has none. It is a configuration state, not a
-     failure of the database. */
   if (/client password must be a string|SASL.*password/i.test(msg)) {
     return {
       reason: 'not-configured',
@@ -304,14 +158,11 @@ function classify(err) {
       'created here; for anything else it means the server is older than this reader expects.');
   }
   if (code === '55000') {
-    /* pg_stat_statements' own error when the library was never preloaded. */
     return out('not-available',
       'pg_stat_statements is installed but not loaded. It has to be listed in shared_preload_libraries and the ' +
       'server restarted -- it cannot be loaded into a running Postgres.');
   }
   if (code === '25006') {
-    /* This one can only be reached by a bug in this file, so it says so rather
-       than sending an operator to look at their configuration. */
     return out('read-only',
       'A read-only transaction refused a write. The console role is default_transaction_read_only and this ' +
       'module only ever reads, so this is a defect in the console, not in the database.');
@@ -365,15 +216,6 @@ function classify(err) {
   return out('error', msg);
 }
 
-/* --------------------------------------------------------------- guarded ---- */
-
-/**
- * Is this reader able to run at all, and if not, why?
- *
- * Checked before the cache, because "not configured" is not a value worth
- * caching and because an unconfigured console must answer instantly rather than
- * after a connection timeout.
- */
 function configurationProblem() {
   if (!HOST) {
     return {
@@ -389,7 +231,6 @@ function configurationProblem() {
   return null;
 }
 
-/** A reader that reports why it could not answer instead of throwing. */
 function guarded(key, ttlMs, producer, keyFor) {
   return async function (...args) {
     const problem = configurationProblem();
@@ -404,12 +245,6 @@ function guarded(key, ttlMs, producer, keyFor) {
   };
 }
 
-/* --------------------------------------------------------------- shaping ---- */
-
-/* node-postgres returns int8 and numeric as STRINGS, because a 64-bit integer
-   does not survive a double. Number(null) is 0, and a zero that means "no value
-   came back" is misleading -- so nothing is coerced without first being
-   checked for absence. */
 function num(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -425,19 +260,12 @@ function round(v, places) {
 
 function iso(v) {
   if (v instanceof Date) {
-    /* 'infinity' comes back from node-postgres as the NUMBER Infinity, and
-       '-infinity' as -Infinity; `new Date(Infinity).toISOString()` throws
-       RangeError. A rolvaliduntil of infinity is a normal thing for a role to
-       have, so it must not be able to take a panel down. */
     return Number.isFinite(v.getTime()) ? v.toISOString() : null;
   }
   if (typeof v === 'number') return v > 0 ? 'infinity' : '-infinity';
   return null;
 }
 
-/* Query text is transported, not analysed, and a single statement can be
-   megabytes long. Truncation is flagged so nobody reads a cut-off statement as
-   the whole one. */
 const MAX_QUERY_CHARS = 4000;
 function clip(text) {
   if (typeof text !== 'string') return { text: null, truncated: false };
@@ -445,17 +273,12 @@ function clip(text) {
   return { text: text.slice(0, MAX_QUERY_CHARS), truncated: true };
 }
 
-/* A ratio only where both halves are real. blks_hit + blks_read of zero means
-   the database has not been touched since the statistics were reset, and a
-   100% cache hit rate on no reads at all is a number nobody measured. */
 function ratio(hit, total) {
   const h = num(hit);
   const t = num(total);
   if (h === null || t === null || t <= 0) return null;
   return Math.round((h / t) * 10000) / 10000;
 }
-
-/* ------------------------------------------------------------ server ------- */
 
 const SERVER_SQL = `
   SELECT
@@ -495,15 +318,6 @@ const SERVER_SQL = `
     pg_has_role(current_user, 'pg_read_all_settings', 'USAGE')  AS can_read_all_settings
 `;
 
-/**
- * Who this cluster is, and what this console is allowed to see of it.
- *
- * Without pg_read_all_stats,
- * pg_stat_activity shows a role only its OWN sessions and blanks every other
- * session's query text -- so a connection count read by an unprivileged role is
- * "1" on a cluster with a hundred backends. Every reader that counts sessions
- * carries this flag so the UI can say which it is looking at.
- */
 const server = guarded('pg:server', 20000, async () => {
   const [row] = await q(ADMIN_DB, SERVER_SQL);
 
@@ -511,8 +325,6 @@ const server = guarded('pg:server', 20000, async () => {
     version: row.server_version,
     versionNum: num(row.server_version_num),
     fullVersion: row.full_version,
-    /* Which host:port this console actually reached, from the server's own
-       point of view -- so a screen showing the wrong cluster can be spotted. */
     address: { host: HOST, port: PORT, serverAddr: row.server_addr, serverPort: num(row.server_port) },
     connectedTo: row.database,
     clusterName: row.cluster_name,
@@ -531,17 +343,10 @@ const server = guarded('pg:server', 20000, async () => {
       hasPgMonitor: row.has_pg_monitor === true,
       canReadAllStats: row.can_read_all_stats === true,
       canReadAllSettings: row.can_read_all_settings === true,
-      /* Reported because it is the console's own guarantee, and because the
-         honest limit is worth carrying to the screen: it is a DEFAULT, not a
-         privilege. Any session may issue BEGIN READ WRITE. What actually stops
-         this console writing is that pg_monitor grants no INSERT, UPDATE or
-         DELETE anywhere, plus index.js refusing every non-GET verb. */
       sessionReadOnly: row.session_read_only === 'on',
       readOnlyNote: 'default_transaction_read_only is a default, not a privilege. The real guarantee is that ' +
         'pg_monitor carries no write privilege on any object.'
     },
-    /* Everything below is a setting, so it is what the server is configured to
-       do -- not a measurement of what it did. */
     settings: {
       maxConnections: num(row.max_connections),
       superuserReservedConnections: num(row.superuser_reserved_connections),
@@ -570,13 +375,6 @@ const server = guarded('pg:server', 20000, async () => {
   };
 });
 
-/* ----------------------------------------------------------- databases ----- */
-
-/* pg_database_size is separated from the metadata so that one unreadable
-   database cannot blank the whole list. If the sized form fails, the same
-   query runs without it and every size becomes null WITH A REASON, which is
-   the difference between "these databases are empty" and "we could not
-   measure them". */
 const DATABASES_SQL = (withSize) => `
   SELECT d.datname                                      AS name,
          pg_get_userbyid(d.datdba)                      AS owner,
@@ -605,10 +403,6 @@ const DATABASES_SQL = (withSize) => `
   ORDER BY d.datname
 `;
 
-/* Session counts come from pg_stat_activity rather than from
-   pg_stat_database.numbackends because only pg_stat_activity can break them
-   down by state, and "40 connections, 38 of them idle in transaction" is a
-   different cluster from "40 connections, all active". */
 const DB_SESSIONS_SQL = `
   SELECT datname, state, count(*)::int AS n
   FROM pg_stat_activity
@@ -663,18 +457,10 @@ const databases = guarded('pg:databases', 10000, async () => {
         ? (sizeError || 'PostgreSQL returned no size for this database.')
         : null,
 
-      /* Two different counts of the same thing, kept apart deliberately.
-         `connections` is what pg_stat_activity can see right now; `backends`
-         is what the statistics collector reports. They disagree when the
-         reading role cannot see other sessions, and that disagreement is
-         information, not noise. */
       connections: conns,
       backends: num(r.numbackends),
 
       transactions: { committed: num(r.xact_commit), rolledBack: num(r.xact_rollback) },
-      /* Cumulative since stats_reset -- or since the statistics system was last
-         initialised, if that is null. Named, because a cache hit ratio with no
-         window is a number that means nothing. */
       cache: {
         blocksHit: hit,
         blocksRead: read,
@@ -689,9 +475,6 @@ const databases = guarded('pg:databases', 10000, async () => {
       conflicts: num(r.conflicts),
       tempFiles: num(r.temp_files),
       tempBytes: num(r.temp_bytes),
-      /* Null rather than zero when track_io_timing is off, because the server
-         reports 0.0 for "not measured" and a dashboard cannot tell that apart
-         from "no time spent" unless this file does it here. */
       blockReadMs: ioTimed ? round(r.blk_read_time) : null,
       blockWriteMs: ioTimed ? round(r.blk_write_time) : null,
       ioTimingMeasured: ioTimed,
@@ -699,13 +482,6 @@ const databases = guarded('pg:databases', 10000, async () => {
 
       transactionIdAge: num(r.xid_age),
 
-      /* Whether the CONSOLE may actually open this database -- which decides
-         whether the table listing can work, and is a grant in 20-grants.sql,
-         not a fault.
-         Both halves are required and the trap is template0: it grants CONNECT
-         to PUBLIC like any other database, so has_database_privilege says yes,
-         while datallowconn says no and the connection is refused anyway. A
-         privilege that cannot be exercised is not permission. */
       consoleCanConnect: r.allows_connections === true && r.console_can_connect === true,
       connectPrivilegeGranted: r.console_can_connect === true
     };
@@ -722,10 +498,6 @@ const databases = guarded('pg:databases', 10000, async () => {
     ioTimingNote: ioTimed ? null
       : 'track_io_timing is off, so this server does not measure time spent reading and writing blocks. Those ' +
         'fields are null rather than zero.',
-    /* A total is only a total when every part of it was measured. Summing the
-       databases that could be sized and calling the result "total size" turns
-       an under-count into a headline figure -- so a partial sum is returned
-       under a name that says what it is, and totalSizeBytes stays null. */
     totalSizeBytes: sizesComplete ? measuredBytes : null,
     measuredSizeBytes: measuredBytes,
     measuredCount: measuredList.length,
@@ -734,8 +506,6 @@ const databases = guarded('pg:databases', 10000, async () => {
     at: new Date().toISOString()
   };
 });
-
-/* --------------------------------------------------------------- roles ----- */
 
 const ROLES_SQL = `
   SELECT r.oid, r.rolname AS name, r.rolsuper AS superuser, r.rolinherit AS inherits,
@@ -751,12 +521,6 @@ const ROLES_SQL = `
   ORDER BY r.rolname
 `;
 
-/* to_jsonb(am) rather than a column list, because pg_auth_members grew
-   inherit_option and set_option in PostgreSQL 16 and naming them outright makes
-   this reader fail outright on 15. Whatever the server has arrives; what it
-   does not have arrives as undefined and is reported as unknown rather than as
-   false -- "this membership does not inherit" and "this server cannot tell you"
-   are not the same statement. */
 const MEMBERS_SQL = `
   SELECT g.rolname AS role, m.rolname AS member, to_jsonb(am) AS raw,
          (SELECT rolname FROM pg_roles WHERE oid = am.grantor) AS grantor
@@ -773,14 +537,6 @@ const ROLE_SESSIONS_SQL = `
   GROUP BY 1
 `;
 
-/**
- * Every role, and who is a member of what.
- *
- * WHAT THIS DELIBERATELY DOES NOT REPORT: whether a role has a password. That
- * lives in pg_authid, which pg_monitor cannot read, and there is no way to
- * infer it -- so rather than showing a column that is wrong for passwordless
- * roles, this reader does not have the column and says why.
- */
 const roles = guarded('pg:roles', 30000, async () => {
   const [rows, members, sessions] = await Promise.all([
     q(ADMIN_DB, ROLES_SQL),
@@ -798,9 +554,6 @@ const roles = guarded('pg:roles', 30000, async () => {
       member: m.member,
       grantor: m.grantor,
       adminOption: tri(raw.admin_option),
-      /* Null on PostgreSQL 15 and older, where the concept does not exist as a
-         per-membership option -- inheritance there is a property of the member
-         role alone (rolinherit). */
       inheritOption: tri(raw.inherit_option),
       setOption: tri(raw.set_option)
     };
@@ -814,10 +567,6 @@ const roles = guarded('pg:roles', 30000, async () => {
 
   const list = rows.map((r) => ({
     name: r.name,
-    /* PostgreSQL's own predefined roles (pg_monitor, pg_read_all_stats and the
-       rest) are in pg_roles alongside the ones this platform created. They are
-       flagged rather than filtered: pg_monitor's membership list is the single
-       most security-relevant thing on this screen. */
     predefined: /^pg_/.test(r.name),
     superuser: r.superuser === true,
     canLogin: r.can_login === true,
@@ -828,13 +577,8 @@ const roles = guarded('pg:roles', 30000, async () => {
     bypassRls: r.bypass_rls === true,
     connectionLimit: num(r.connection_limit),
     validUntil: iso(r.valid_until),
-    /* ALTER ROLE ... SET values. This is where default_transaction_read_only
-       and statement_timeout actually live, so it is the only place a reader can
-       confirm that the console's own restraints were applied. */
     settings: Array.isArray(r.settings) ? r.settings : [],
     memberOf: (memberOf.get(r.name) || []).sort(),
-    /* Sessions open right now under this role -- visible only to a role holding
-       pg_read_all_stats; see `sessionCountsComplete`. */
     sessions: sessionsByRole.get(r.name) || 0
   }));
 
@@ -852,13 +596,6 @@ const roles = guarded('pg:roles', 30000, async () => {
   };
 });
 
-/* ------------------------------------------------------------ activity ----- */
-
-/* clock_timestamp(), NOT now(). now() is the start of the CURRENT transaction,
-   so a session whose query began microseconds after this one's transaction did
-   comes out with a NEGATIVE duration. clock_timestamp() is the wall clock at
-   the moment the row is evaluated, which is what "how long has this been
-   running" actually means. */
 const ACTIVITY_SQL = `
   SELECT a.pid,
          a.datname, a.usename, nullif(a.application_name, '') AS application_name,
@@ -910,13 +647,6 @@ const ACTIVITY_SUMMARY_SQL = `
 
 const ACTIVITY_LIMIT_DEFAULT = 100;
 
-/**
- * What the cluster is doing right now.
- *
- * Cached for two seconds and no longer: enough to collapse a burst of panel
- * loads into one query, and short enough that the word "live" stays true.
- * `cachedAt` is returned regardless.
- */
 const activity = guarded('pg:activity', 2000, async (options) => {
   const opts = options || {};
   const limit = Math.min(Math.max(Number(opts.limit) || ACTIVITY_LIMIT_DEFAULT, 1), 500);
@@ -929,14 +659,7 @@ const activity = guarded('pg:activity', 2000, async (options) => {
   const querySize = num(summary.track_activity_query_size);
 
   const sessions = rows.map((r) => {
-    /* pg_stat_activity writes this literal string into the query column for a
-       session the reading role may not see. It is not a query and must not be
-       displayed as one. */
     const redacted = r.query === '<insufficient privilege>';
-    /* Background workers -- checkpointer, walwriter, the autovacuum launcher --
-       report an EMPTY STRING here, not null, because they have no statement at
-       all. Passed through, that renders as a session running a query with no
-       text, which is a thing that does not exist. */
     const hasQuery = typeof r.query === 'string' && r.query !== '' && !redacted;
     const clipped = clip(hasQuery ? r.query : null);
     return {
@@ -947,9 +670,6 @@ const activity = guarded('pg:activity', 2000, async (options) => {
       clientAddr: r.client_addr,
       clientPort: num(r.client_port),
       backendType: r.backend_type,
-      /* Null for background workers, which have no session state at all. They
-         are NOT idle, and counting them as idle overstates a cluster's spare
-         capacity by however many workers it runs. */
       state: r.state,
       waitEventType: r.wait_event_type,
       waitEvent: r.wait_event,
@@ -962,31 +682,15 @@ const activity = guarded('pg:activity', 2000, async (options) => {
       stateSeconds: round(r.state_seconds),
       backendXid: r.backend_xid,
       backendXmin: r.backend_xmin,
-      /* Set on a parallel worker; the leader is the session a human recognises.
-         Without it, one query looks like five unrelated ones. */
       leaderPid: num(r.leader_pid),
-      /* Empty array = waiting on a lock but nothing is blocking (it cleared
-         between the snapshot and this call). Null = not waiting on a lock, so
-         the question was never asked. */
       blockedBy: r.blocked_by === null || r.blocked_by === undefined
         ? null
         : r.blocked_by.map((p) => num(p)),
       query: clipped.text,
       queryTruncatedForTransport: clipped.truncated,
-      /* The server truncates at track_activity_query_size (1024 by default), so
-         a statement of exactly that length has almost certainly been cut. Said
-         out loud, because otherwise it looks like the application really did
-         send a statement that ends mid-word. */
       queryTruncatedByServer: hasQuery && querySize !== null && r.query.length >= querySize,
-      /* False means the server withheld the text from this role. A background
-         worker has no query at all, which is neither hidden nor visible. */
       queryVisible: redacted ? false : hasQuery ? true : null,
-      /* The exact backend that ran this read. */
       isThisSession: r.is_this_session === true,
-      /* This console's connection pool, identified by the application_name it
-         sets on every connection. Honest limit: any client may set that name,
-         so this is a label, not proof of identity -- it exists so an operator
-         can filter the dashboard's own reads out of the dashboard. */
       isConsole: r.application_name === APP_NAME
     };
   });
@@ -996,9 +700,6 @@ const activity = guarded('pg:activity', 2000, async (options) => {
 
   return {
     sessions,
-    /* The list is capped; the counts are not. Returning a capped list next to a
-       total computed from the same cap would understate a saturated cluster
-       exactly when it matters. */
     listLimit: limit,
     listTruncated: num(summary.backends_total) > sessions.length,
     summary: {
@@ -1008,13 +709,7 @@ const activity = guarded('pg:activity', 2000, async (options) => {
       idle: num(summary.idle),
       idleInTransaction: num(summary.idle_in_transaction),
       waitingOnLock: num(summary.waiting_on_lock),
-      /* Both exclude this console's own reading session; see the query. Null
-         means there was no other candidate at all, which is a real answer and
-         not a zero. */
       longestActiveSeconds: round(summary.longest_active_seconds),
-      /* The number that matters for vacuum: the oldest OPEN transaction, idle
-         or not. An idle-in-transaction session holds its snapshot and stops
-         dead rows being removed cluster-wide. */
       longestTransactionSeconds: round(summary.longest_transaction_seconds),
       excludesConsoleOwnSession: true,
       maxConnections,
@@ -1023,9 +718,6 @@ const activity = guarded('pg:activity', 2000, async (options) => {
         ? Math.round((clientBackends / maxConnections) * 10000) / 10000
         : null
     },
-    /* Without pg_read_all_stats every count above is a count of this role's own
-       sessions. The flag exists so the UI can label the panel rather than let
-       somebody read "3 connections" off a cluster running two hundred. */
     countsCoverWholeCluster: summary.can_read_all_stats === true,
     redactedSessions: num(summary.redacted),
     trackActivityQuerySize: querySize,
@@ -1033,14 +725,6 @@ const activity = guarded('pg:activity', 2000, async (options) => {
   };
 });
 
-/* ---------------------------------------------------------- statements ----- */
-
-/* Which of pg_stat_statements' three unavailable states this is, asked without
-   touching the view -- so the answer is a fact rather than an exception.
- *
- * `pg_stat_statements.track` only exists as a GUC when the library is actually
- * loaded, so a NULL there is a precise, positive test for "not preloaded" that
- * does not depend on parsing shared_preload_libraries by hand. */
 const STATEMENTS_AVAILABILITY_SQL = `
   SELECT (SELECT setting FROM pg_settings WHERE name = 'shared_preload_libraries')        AS preload,
          (SELECT setting FROM pg_settings WHERE name = 'pg_stat_statements.track')        AS track,
@@ -1053,21 +737,12 @@ const STATEMENTS_AVAILABILITY_SQL = `
          current_database()                                                                AS database
 `;
 
-/* The view's columns have moved between releases -- toplevel arrived in 14,
-   blk_read_time/blk_write_time became shared_blk_read_time/shared_blk_write_time
-   in 17, stats_since arrived in 17 -- so the column list is built from what the
-   server actually has. Naming a column that does not exist fails the whole
-   panel with `42703 column does not exist`, which reads like a broken console
-   rather than an older database. */
 const STATEMENT_COLUMNS_SQL = `
   SELECT a.attname
   FROM pg_attribute a
   WHERE a.attrelid = $1::regclass AND a.attnum > 0 AND NOT a.attisdropped
 `;
 
-/* An allowlist, and the ONLY thing that ever reaches the ORDER BY. The caller
-   passes a key; an unrecognised key silently becomes the default rather than
-   being concatenated into SQL. */
 const STATEMENT_ORDERS = {
   'total-time': 'total_exec_time',
   'mean-time': 'mean_exec_time',
@@ -1083,10 +758,6 @@ const statementColumnCache = new Map();
 async function statementColumns(database, schema) {
   const key = database + '.' + schema;
   if (statementColumnCache.has(key)) return statementColumnCache.get(key);
-  /* Quoted here rather than passed as an identifier parameter, because SQL has
-     no bind parameter for an identifier. The name came from pg_namespace, so it
-     is already a real schema name; doubling any embedded quote makes it exact
-     rather than merely likely. */
   const qualified = '"' + String(schema).replace(/"/g, '""') + '".pg_stat_statements';
   const rows = await q(database, STATEMENT_COLUMNS_SQL, [qualified]);
   const set = new Set(rows.map((r) => r.attname));
@@ -1094,15 +765,6 @@ async function statementColumns(database, schema) {
   return set;
 }
 
-/**
- * The queries that cost this cluster the most.
- *
- * NOT "the slow ones" by wall clock alone: a 2 ms statement run four million
- * times is the thing to fix, and sorting by mean time buries it under a nightly
- * report. Total time is the default; mean, max and call count are all available
- * and all returned, so the screen can offer the other views without another
- * round trip.
- */
 const statements = guarded('pg:statements', 15000, async (options) => {
   const opts = options || {};
   const limit = Math.min(Math.max(Number(opts.limit) || 25, 1), 200);
@@ -1114,9 +776,6 @@ const statements = guarded('pg:statements', 15000, async (options) => {
   const preloaded = a.track !== null;
   const installed = a.installed_version !== null;
 
-  /* State one: the library was never loaded. This is the one that cannot be
-     fixed without a restart, so the message says so -- CREATE EXTENSION here
-     succeeds and still produces nothing. */
   if (!preloaded) {
     return {
       available: false,
@@ -1131,10 +790,6 @@ const statements = guarded('pg:statements', 15000, async (options) => {
     };
   }
 
-  /* State two: loaded cluster-wide, but this database has no view onto it. The
-     statistics for EVERY database are in shared memory either way; what is
-     missing is the SQL interface, which exists only where the extension was
-     created. */
   if (!installed) {
     return {
       available: false,
@@ -1154,8 +809,6 @@ const statements = guarded('pg:statements', 15000, async (options) => {
   const cols = await statementColumns(ADMIN_DB, schema);
   const has = (c) => cols.has(c);
   const pick = (col, alias) => (has(col) ? 's.' + col : 'NULL') + ' AS ' + alias;
-  /* Renamed in PostgreSQL 17. Whichever the server has is reported under one
-     stable name so the browser code does not have to know the version. */
   const blkRead = has('shared_blk_read_time') ? 's.shared_blk_read_time'
     : has('blk_read_time') ? 's.blk_read_time' : 'NULL';
   const blkWrite = has('shared_blk_write_time') ? 's.shared_blk_write_time'
@@ -1187,33 +840,22 @@ const statements = guarded('pg:statements', 15000, async (options) => {
 
   const rows = await q(ADMIN_DB, sql, [limit]);
 
-  /* PostgreSQL 14 and later record when the counters were last cleared, and
-     when entries were evicted for want of room. Both change what an empty or
-     short list means, so both are carried to the screen. */
   let info = null;
   try {
     const [i] = await q(ADMIN_DB, `SELECT dealloc, stats_reset FROM ${'"' + schema.replace(/"/g, '""') + '"'}.pg_stat_statements_info`);
     info = i || null;
   } catch (err) {
-    info = null;   // absent before 14; not an error, just less to say
+    info = null;
   }
 
-  /* Same trap as pg_stat_database: with track_io_timing off, the columns are
-     0.0 rather than null, so zero would read as "this query never waited on
-     disk" when the truth is that nothing was timed. */
   const ioTimed = a.track_io_timing === 'on';
 
   const list = rows.map((r) => {
     const clipped = clip(r.query);
     return {
-      /* A STRING, deliberately and permanently. queryid is a signed 64-bit
-         hash and routinely exceeds 2^53, so Number() would round it -- and a
-         rounded identifier is an identifier that matches nothing, silently. */
       queryid: r.queryid,
       database: r.database,
       role: r.role,
-      /* False means the statement was executed inside a function or a DO block.
-         Null means the server predates the column, not that it was top level. */
       topLevel: r.toplevel === null || r.toplevel === undefined ? null : r.toplevel === true,
       calls: num(r.calls),
       rows: num(r.rows),
@@ -1250,19 +892,12 @@ const statements = guarded('pg:statements', 15000, async (options) => {
     extensionVersion: a.installed_version,
     schema,
     ioTimingMeasured: ioTimed,
-    /* 'top' means nested statements -- anything inside a function or a DO block
-       -- are not counted at all. Without this on the screen, a query that only
-       ever runs inside a function looks like a query that never runs. */
     track: a.track,
     trackNote: a.track === 'top'
       ? 'pg_stat_statements.track is "top": statements executed inside functions and DO blocks are not counted.'
       : null,
     maxEntries: num(a.max_entries),
-    /* Every total above is cumulative since this moment, not since the server
-       started, and a list that looks quiet may simply have been reset. */
     countersResetAt: info ? iso(info.stats_reset) : null,
-    /* Non-zero means the table filled and entries were thrown away, so the
-       list is not the whole truth about this cluster's workload. */
     entriesEvicted: info ? num(info.dealloc) : null,
     emptyMeaning: list.length === 0
       ? 'No statements have been recorded since the counters were last reset. That is a real empty result, not a ' +
@@ -1271,8 +906,6 @@ const statements = guarded('pg:statements', 15000, async (options) => {
     at: new Date().toISOString()
   };
 });
-
-/* --------------------------------------------------------- replication ----- */
 
 const REPLICATION_SQL = `
   SELECT pg_is_in_recovery()                                       AS in_recovery,
@@ -1317,28 +950,10 @@ const RECEIVER_SQL = `
   FROM pg_stat_wal_receiver
 `;
 
-/**
- * Whether anything is replicating this cluster, and the answer is usually no.
- *
- * THE RULE THIS READER EXISTS FOR: with no standby, every lag field is null and
- * `configured` is false. Not zero. A lag of zero bytes is what a healthy
- * replica looks like, so a zero here would be a green number describing a
- * replica that does not exist. platform/gitops/storage/buckets.yaml carries
- * the same distinction for object replication, for the same reason.
- *
- * `capable` is reported separately and is a different claim: wal_level=replica
- * and max_wal_senders>0 mean this server COULD serve a standby, which is worth
- * knowing when someone is about to build one, and is not evidence that one
- * exists.
- */
 const replication = guarded('pg:replication', 10000, async () => {
   const [r] = await q(ADMIN_DB, REPLICATION_SQL);
   const inRecovery = r.in_recovery === true;
 
-  /* pg_current_wal_lsn() raises 'recovery is in progress' on a standby, so the
-     queries that call it are only ever issued after that has been settled by a
-     separate round trip. Relying on CASE to skip the call would be relying on
-     an evaluation order the planner does not promise. */
   const standbys = inRecovery ? [] : await q(ADMIN_DB, STANDBYS_SQL);
   const slots = inRecovery ? [] : await q(ADMIN_DB, SLOTS_SQL);
   const receivers = num(r.wal_receiver_count) > 0 ? await q(ADMIN_DB, RECEIVER_SQL) : [];
@@ -1359,20 +974,14 @@ const replication = guarded('pg:replication', 10000, async () => {
     state: configured
       ? (inRecovery ? 'replica of another server' : `primary with ${standbyCount} connected standby(s)`)
       : 'not configured',
-    /* The sentence the UI should print when configured is false. Written here
-       rather than in the browser so there is exactly one wording of it, and so
-       nobody can reintroduce a zero by rendering a lag field that is null. */
     message: configured ? null
       : 'This cluster has no standby, no replication slot and no WAL receiver: nothing is replicating it. ' +
         'There is therefore no replication lag to report -- and a lag of zero is what a healthy replica looks ' +
         'like, so it is not shown as zero. Site A runs a standby; this stack is a single node.',
-    /* Explicitly null, and named, so that a UI reading these fields cannot
-       accidentally render 0. */
     lagBytes: null,
     lagSeconds: null,
     capable: {
       walLevel: r.wal_level,
-      /* logical > replica > minimal. minimal cannot feed a standby at all. */
       canFeedStandby: r.wal_level === 'replica' || r.wal_level === 'logical',
       maxWalSenders: num(r.max_wal_senders),
       maxReplicationSlots: num(r.max_replication_slots),
@@ -1396,8 +1005,6 @@ const replication = guarded('pg:replication', 10000, async () => {
       replayLsn: s.replay_lsn,
       sentLagBytes: num(s.sent_lag_bytes),
       replayLagBytes: num(s.replay_lag_bytes),
-      /* Null until the standby has replied at least once; the server reports no
-         interval rather than an interval of zero, and so does this. */
       writeLagSeconds: round(s.write_lag_seconds),
       flushLagSeconds: round(s.flush_lag_seconds),
       replayLagSeconds: round(s.replay_lag_seconds),
@@ -1416,9 +1023,6 @@ const replication = guarded('pg:replication', 10000, async () => {
       confirmedFlushLsn: s.confirmed_flush_lsn,
       walStatus: s.wal_status,
       safeWalSizeBytes: num(s.safe_wal_size),
-      /* An INACTIVE slot with a large number here is the classic way a
-         PostgreSQL volume fills: the server keeps every WAL segment the slot
-         has not consumed, forever, for a consumer that is gone. */
       retainedWalBytes: num(s.retained_wal_bytes),
       warning: s.active === false
         ? 'This slot is not connected. PostgreSQL retains WAL for an inactive slot indefinitely, which fills the ' +
@@ -1445,19 +1049,12 @@ const replication = guarded('pg:replication', 10000, async () => {
   };
 });
 
-/* -------------------------------------------------------------- tables ----- */
-
 const DB_TARGET_SQL = `
   SELECT d.datname, d.datallowconn AS allows_connections,
          has_database_privilege(current_user, d.oid, 'CONNECT') AS can_connect
   FROM pg_database d WHERE d.datname = $1
 `;
 
-/* pg_total_relation_size does NOT recurse into partitions, so a partitioned
-   parent measures 0 bytes however much data hangs off it. Reporting that as a
-   size is worse than reporting nothing: it says the table is empty. The parent
-   is summed over pg_partition_tree instead and flagged, and its leaves carry
-   the name of the parent so a UI can avoid counting the same bytes twice. */
 const TABLES_SQL = `
   SELECT n.nspname AS schema,
          c.relname AS name,
@@ -1488,11 +1085,6 @@ const TABLES_SQL = `
   LIMIT $1
 `;
 
-/* Two counts, because they answer two questions. relation_count and total_bytes
-   cover ordinary tables and materialized views ONLY, so a partitioned parent
-   cannot add its partitions' bytes on top of the partitions themselves.
-   listable_count covers exactly what the listing query returns, which is the
-   only number that can say whether the list was cut short. */
 const TABLE_TOTALS_SQL = `
   SELECT count(*) FILTER (WHERE c.relkind IN ('r', 'm'))::int  AS relation_count,
          count(*)::int                                          AS listable_count,
@@ -1518,25 +1110,10 @@ function tableLimit(options) {
   return Math.min(Math.max(Number(opts.limit) || 50, 1), 500);
 }
 
-/**
- * What is taking up space inside one database.
- *
- * This is the only reader that has to leave the `postgres` database, because
- * relation sizes are per-database and PostgreSQL has no USE. The database name
- * arrives from a query string, so it is checked against pg_database before a
- * connection is opened -- and it is never concatenated into SQL. It cannot be:
- * it is a connection parameter, not part of a statement.
- *
- * A database this console may not open is a normal, explainable answer. The
- * grants in 20-grants.sql list six databases by name and no others, so asking
- * for a seventh is a question with an answer, not an error.
- */
 const tables = guarded('pg:tables', 20000, async (options) => {
   const database = tableTarget(options);
   const limit = tableLimit(options);
 
-  /* Bound as a value against the admin connection. Nothing about the requested
-     name reaches a statement anywhere else in this function. */
   const [target] = await q(ADMIN_DB, DB_TARGET_SQL, [database]);
   if (!target) {
     return {
@@ -1585,16 +1162,9 @@ const tables = guarded('pg:tables', 20000, async (options) => {
     tableBytes: num(r.table_bytes),
     indexBytes: num(r.index_bytes),
     toastBytes: num(r.toast_bytes),
-    /* True on a partitioned parent: its bytes are the sum of its partitions,
-       which are also listed in their own right. Sum one or the other, never
-       both. */
     sizeIncludesPartitions: r.relkind === 'p',
     partitionOf: r.partition_of,
 
-    /* EVERY row count here is an estimate maintained by the statistics
-       collector, and none of them is a COUNT(*). planner_rows is null when the
-       relation has never been analysed, which is a different statement from
-       "it has no rows". */
     rowsEstimated: true,
     plannerRows: num(r.planner_rows),
     liveRowsEstimate: num(r.n_live_tup),
@@ -1603,7 +1173,6 @@ const tables = guarded('pg:tables', 20000, async (options) => {
 
     scans: {
       sequential: num(r.seq_scan),
-      /* Null on a relation with no indexes at all -- not zero index scans. */
       index: num(r.idx_scan)
     },
     writes: {
@@ -1636,13 +1205,8 @@ const tables = guarded('pg:tables', 20000, async (options) => {
     totals: {
       relationCount: num(totals.relation_count),
       listableCount: num(totals.listable_count),
-      /* Ordinary tables and materialized views only, so partitioned parents
-         cannot double-count their own partitions. */
       relationBytes: measured,
       databaseBytes: dbBytes,
-      /* The remainder is the system catalogues, the toast that belongs to them
-         and anything not covered above. Named rather than left as an unexplained
-         gap between two numbers on a screen. */
       unaccountedBytes: measured === null || dbBytes === null ? null : Math.max(0, dbBytes - measured)
     },
     note: 'Row counts are statistics-collector estimates, not COUNT(*). A table that has never been analysed ' +
@@ -1650,8 +1214,6 @@ const tables = guarded('pg:tables', 20000, async (options) => {
     at: new Date().toISOString()
   };
 }, (options) => `${tableTarget(options)}:${tableLimit(options)}`);
-
-/* -------------------------------------------------------------- health ----- */
 
 const HEALTH_SQL = `
   SELECT current_setting('server_version')                        AS server_version,
@@ -1674,26 +1236,9 @@ const HEALTH_SQL = `
          pg_has_role(current_user, 'pg_monitor', 'USAGE')          AS has_pg_monitor
 `;
 
-/**
- * Is this database usable, and if not, which part is not?
- *
- * The container health check answers "is the postmaster accepting TCP", which
- * pg_isready already proves and which stays green through every failure on this
- * list. What it cannot see: a role that authenticates and is then refused
- * CONNECT to every database (pg_monitor does not imply CONNECT, and the symptom
- * is a console that renders blank rather than one that errors), connection
- * exhaustion, an idle transaction old enough to be blocking vacuum
- * cluster-wide, and transaction id age.
- *
- * Every component carries its own ok and its own reason, so one bad answer
- * narrows the problem instead of blanking the panel.
- */
 const health = guarded('pg:health', 10000, async () => {
   const components = [];
 
-  /* Latency is measured on a trivial statement rather than on the real one, so
-     the number means "round trip to this server" and not "how long that query
-     took". */
   const t0 = Date.now();
   await q(ADMIN_DB, 'SELECT 1');
   const latencyMs = Date.now() - t0;
@@ -1723,17 +1268,11 @@ const health = guarded('pg:health', 10000, async () => {
     usedRatio: usedRatio === null ? null : Math.round(usedRatio * 10000) / 10000
   });
 
-  /* An open transaction pins the oldest snapshot the cluster must keep, so dead
-     rows in EVERY database stay unremovable while it lives. Five minutes is not
-     a crisis; it is the point at which somebody should know. */
   const longestXact = round(h.longest_transaction_seconds);
   const LONG_XACT_SECONDS = 300;
   components.push({
     name: 'long-running transactions',
     ok: longestXact === null ? true : longestXact < LONG_XACT_SECONDS,
-    /* The warning about vacuum is attached only when the number has earned it.
-       Printing it beside a two-second transaction trains an operator to ignore
-       it. */
     detail: longestXact === null
       ? 'No transaction other than this console\'s own read is open.'
       : longestXact < LONG_XACT_SECONDS
@@ -1750,23 +1289,16 @@ const health = guarded('pg:health', 10000, async () => {
   const xidRatio = xidAge !== null && freezeMax ? xidAge / freezeMax : null;
   components.push({
     name: 'transaction id age',
-    /* Measured against autovacuum_freeze_max_age, the point at which PostgreSQL
-       starts forcing anti-wraparound vacuums -- not against the 2-billion hard
-       stop, which is far too late to be a warning. */
     ok: xidRatio === null ? null : xidRatio < 0.9,
     detail: xidAge === null
       ? 'Transaction id age could not be read.'
       : `The oldest unfrozen transaction id, in ${h.oldest_xid_database}, is ${xidAge} transactions old. ` +
-        /* AGE, not overshoot: this counts UP TOWARD the threshold. */
         `against an autovacuum_freeze_max_age of ${freezeMax}.`,
     maxAge: xidAge,
     autovacuumFreezeMaxAge: freezeMax,
     ratio: xidRatio === null ? null : Math.round(xidRatio * 10000) / 10000
   });
 
-  /* Both of these are full readers rather than another query, so the health
-     summary and the panels can never disagree about the same fact. Each one
-     answers with an envelope, so neither can take this endpoint down. */
   const [stmts, repl] = await Promise.all([statements({ limit: 1 }), replication()]);
 
   components.push({
@@ -1779,9 +1311,6 @@ const health = guarded('pg:health', 10000, async () => {
 
   components.push({
     name: 'replication',
-    /* NOT a failure. A single-node cluster is what this stack is; the console's
-       job is to say so plainly rather than to colour it red or, worse, green
-       with a lag of zero. */
     ok: null,
     detail: repl.ok === false ? repl.message : (repl.configured ? repl.state : repl.message)
   });
@@ -1804,8 +1333,6 @@ const health = guarded('pg:health', 10000, async () => {
     latencyMs,
     components,
     deadlocksSinceStatsReset: num(h.deadlocks_total),
-    /* One boolean the overview can lead with. Null components are unknowns and
-       deliberately do not count as failures -- an unknown is not a fault. */
     degraded: components.some((c) => c.ok === false),
     at: new Date().toISOString()
   };

@@ -1,32 +1,6 @@
-<#
-.SYNOPSIS
-  Stop the Argus stack. Keeps every byte of data unless you say otherwise, twice.
-
-.DESCRIPTION
-      pwsh -File ./down.ps1                 stop everything, keep all data
-      pwsh -File ./down.ps1 -DeleteData     stop everything and DESTROY all data
-
-  This script exists so that `docker compose down -v` never appears in a README,
-  a runbook, or a piece of muscle memory.
-
-  `-v` is one keystroke away from the command an operator runs every day, it
-  deletes named volumes with no confirmation and no undo, and the volumes it
-  deletes here are the object store, the database, the JetStream file store and
-  the OpenBao raft. Nothing in this project backs those up yet. A teardown that
-  is meant to free a port should not be able to become a data loss because a
-  flag was still in the shell history.
-
-  So: the destructive path is a different word, it prints exactly what it is
-  about to destroy, and it requires the phrase to be typed. There is no
-  -Force -Yes combination that skips the prompt, deliberately -- an unattended
-  script that wants this can call `docker compose down -v` itself, and then the
-  intent is visible in that script rather than hidden behind a flag here.
-#>
 [CmdletBinding()]
 param(
-  # Destroy every named volume: object store, database, queues, secrets, metrics.
   [switch]$DeleteData,
-  # Also remove images built locally for this stack (just the console API).
   [switch]$RemoveImages
 )
 
@@ -40,8 +14,6 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
   else { Write-Host "  Docker is not installed." -ForegroundColor Red; exit 1 }
 }
 
-# Every profile, so a `--profile connect up` earlier does not leave orphans that
-# `down` silently ignores and that then hold ports on the next boot.
 $knownProfiles = @('cache','queues','secrets','observability','connect','compute','parity','targets')
 $declaredProfiles = @()
 $composeFile = Join-Path $Here 'docker-compose.yml'
@@ -84,8 +56,6 @@ if (-not $DeleteData) {
   exit $code
 }
 
-# --- the destructive path ---------------------------------------------------
-
 Write-Host ""
 Write-Host "  DESTROY ALL STACK DATA" -ForegroundColor Red
 Write-Host ""
@@ -102,8 +72,6 @@ if (-not $volumes -or $volumes.Count -eq 0) {
   exit $code
 }
 
-# Show size where the driver reports it, so "it is only a dev stack" is a
-# decision made against a number rather than an assumption.
 $sizes = @{}
 try {
   docker system df -v --format '{{json .Volumes}}' 2>$null | ConvertFrom-Json | ForEach-Object {

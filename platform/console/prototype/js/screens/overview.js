@@ -1,15 +1,7 @@
-/* Argus Console: Overview.
- *
- * The morning screen. It answers two questions and nothing else: is anything
- * wrong, and does anything need me. Every sentence on it is computed from the
- * dataset.
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt, d = A.data;
-
-  /* ------------------------------------------------------------ helpers --- */
 
   function countBy(list, test) {
     return list.filter(test).length;
@@ -19,10 +11,7 @@
     return d.alerts.filter(function (a) { return a.state === 'open'; });
   }
 
-  // Ordered worst-first so "the worst thing open" is just the head of the list.
   var SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
-  /* rank() rather than `RANK[x] || 9`: critical is rank 0, and `0 || 9` is 9,
-     so a falsy fallback would rank the worst severity below low. */
   function rank(sev) {
     return Object.prototype.hasOwnProperty.call(SEVERITY_RANK, sev) ? SEVERITY_RANK[sev] : 9;
   }
@@ -54,7 +43,6 @@
     return upn ? upn.charAt(0).toUpperCase() + upn.slice(1) : 'Somebody';
   }
 
-  /** Audit rows are machine keys; an operator reading them wants a sentence. */
   function auditSentence(row) {
     var who = personName(row.actor);
     var pr = row.pr ? ' ' + row.pr : '';
@@ -77,8 +65,6 @@
     return el('div.row', [el('span', { text: text }), link]);
   }
 
-  /* -------------------------------------------------------------- blocks --- */
-
   function heroBand() {
     var critical = openAlerts().filter(function (a) { return a.severity === 'critical'; });
     if (critical.length) {
@@ -86,8 +72,6 @@
       var more = critical.length > 1
         ? ' ' + fmt.num(critical.length - 1) + ' other critical alert' + (critical.length === 2 ? ' is' : 's are') + ' also open.'
         : '';
-      // A critical alert reads in the critical tone. The same fact is already
-      // red in the Security table, so the tone here has to match.
       return el('div.callout.bad', [
         el('strong', { text: 'A critical alert is open on ' + a.host + '.' }),
         el('p', {
@@ -248,7 +232,6 @@
     var rows = top.map(function (app) {
       return el('div.row', [
         A.link(app.display, 'apps', [app.name]),
-        // The number is text first: a sparkline is a shape, not a reading.
         el('span.num', { text: fmt.num(app.rps) + ' req/s' }),
         ui.sparkline(app.trend.rps, { label: app.display + ' request rate, last 24 hours' })
       ]);
@@ -281,8 +264,6 @@
     ]);
   }
 
-  /* -------------------------------------------------------------- screen --- */
-
   var screen = {
     title: 'Overview',
     crumb: 'Overview',
@@ -310,8 +291,6 @@
     }
   };
 
-  // app.js is parsed first and defers its boot, so A.screen exists by now. The
-  // queued path stays as a guard against the load order regressing.
   if (typeof A.screen === 'function') A.screen('overview', screen);
   else document.addEventListener('DOMContentLoaded', function () { A.screen('overview', screen); });
 })();

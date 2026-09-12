@@ -1,27 +1,14 @@
-/* Argus Console: the demonstration dataset.
- *
- * The prototype has no backend. Every number below is invented, but the shape of
- * it is not: entities, identities, ports, buckets and dependencies are taken from
- * docs/02-APPLICATION-INFRASTRUCTURE-MAP.md so that a screen built against this
- * data will still be correct when a real API replaces it.
- *
- * Loaded as a classic script so the console runs from file:// with no build step
- * and no network, which ADR-0027 requires.
- */
 (function () {
   'use strict';
 
   var A = (window.ARGUS = window.ARGUS || {});
 
-  // A fixed clock keeps screenshots and tests deterministic.
   var NOW = new Date('2026-09-08T09:14:00Z');
 
   function minutesAgo(n) { return new Date(NOW.getTime() - n * 60000); }
   function hoursAgo(n) { return minutesAgo(n * 60); }
   function daysAgo(n) { return hoursAgo(n * 24); }
 
-  // A small deterministic generator, so a series looks alive but never changes
-  // between runs. Tests compare rendered output, so randomness would be a bug.
   function series(count, base, spread, seed) {
     var out = [], s = seed || 1;
     for (var i = 0; i < count; i++) {
@@ -50,7 +37,6 @@
       { id: 'staging', label: 'Staging', tone: 'brand' }
     ],
 
-    // The signed-in operator. Role drives what every screen allows.
     me: {
       name: 'Adil Munawar',
       upn: 'adil@argus.local',
@@ -194,8 +180,6 @@
     ],
 
     databases: [
-      /* No lastLog and an RPO of three hours, because SIMPLE recovery means the
-         recovery point is the last differential, not the last log backup. */
       { name: 'umairv3_db', engine: 'SQL Server 2022', host: 'sql-01', sizeGB: 611, ag: 'argus-ag1', agState: 'synchronising', lagS: 3, recovery: 'SIMPLE', lastFull: hoursAgo(9), lastDiff: hoursAgo(3), lastLog: null, lastVerified: daysAgo(6), rpoMin: 180, connections: 34 },
       { name: 'FarmerFacilitatorDb', engine: 'SQL Server 2022', host: 'sql-01', sizeGB: 52, ag: 'argus-ag1', agState: 'synchronising', lagS: 3, recovery: 'FULL', lastFull: hoursAgo(9), lastDiff: hoursAgo(3), lastLog: minutesAgo(11), lastVerified: daysAgo(6), rpoMin: 11, connections: 6 },
       { name: 'ArgusConsole', engine: 'SQL Server 2022', host: 'sql-01', sizeGB: 4, ag: 'argus-ag1', agState: 'synchronising', lagS: 3, recovery: 'FULL', lastFull: hoursAgo(9), lastDiff: hoursAgo(3), lastLog: minutesAgo(11), lastVerified: daysAgo(6), rpoMin: 11, connections: 9 },
@@ -284,9 +268,6 @@
     },
 
     backups: [
-      /* SIMPLE recovery keeps no log chain, so this store cannot have one.
-         ADR-0031 proposes moving to FULL; until it lands, this is what the
-         protection actually is. */
       { store: 'umairv3_db', kind: 'SQL differential', cadence: 'every 3 h', last: hoursAgo(3), lock: '35 d', site: 'A + B', state: 'warn' },
       { store: 'FarmerFacilitatorDb', kind: 'SQL log', cadence: 'every 15 min', last: minutesAgo(11), lock: '35 d', site: 'A + B', state: 'ok' },
       { store: 'pgstac / argus_geo / argus_ml', kind: 'WAL (wal-g)', cadence: 'continuous', last: minutesAgo(4), lock: '35 d', site: 'A + B', state: 'ok' },
@@ -337,7 +318,6 @@
     ],
 
     cost: {
-      // Amortised from docs/07-HARDWARE-AND-LICENSING.md over 36 months, plus power.
       monthlyTotalUsd: 9140,
       breakdown: [
         { app: 'mills', cpu: 1840, storage: 610, gpu: 0, total: 2450 },
@@ -369,13 +349,6 @@
     exitProgress: { phase: 2, phases: 7, percent: 34, awsRemaining: ['1 Windows EC2 instance', '1 S3 bucket (read-only)'] }
   };
 
-  /*
-   * Convenience lookups the screens rely on.
-   *
-   * An index is built on first use and rebuilt whenever the underlying array
-   * is replaced. The array identity is compared rather than cached once,
-   * because the stress harness swaps whole collections in.
-   */
   function indexBy(getArray, key) {
     var indexed = null, map = null;
     return function (value) {

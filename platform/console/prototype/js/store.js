@@ -1,23 +1,3 @@
-/* Argus Console: the data layer.
- *
- * The seam between the screens and their data. Real data can be missing,
- * late, stale or failing, and this is the one place that models it, so
- * wiring a real API in touches one file rather than every screen.
- *
- * Two modes, decided once at boot by asking the API if it is there:
- *
- *   live    a server answered /api/health. Data comes from it, carries an age,
- *           and can fail. Failures are shown, never swallowed.
- *   sample  nothing answered. The console runs on the bundled fixtures and
- *           SAYS SO, prominently. A dashboard that shows invented numbers
- *           without saying they are invented is worse than one that shows
- *           nothing, because somebody will make a decision on them.
- *
- * The console must keep working from file:// with no server -- that is how the
- * three test harnesses open it, and how ADR-0027 requires it to run in an
- * egress-restricted network. So sample mode is a first-class state, not a
- * failure.
- */
 (function () {
   'use strict';
 
@@ -32,21 +12,11 @@
     probeError: null
   };
 
-  /* An in-flight map, so six panels opening at once against a cold cache make
-     one request rather than six. The server does this too; doing it here as
-     well saves the round trips, which is what the operator actually feels. */
   var inflight = {};
   var cached = {};
 
   function now() { return Date.now(); }
 
-  /**
-   * fetch with a timeout and a typed failure.
-   *
-   * A dashboard that hangs is worse than one that says it cannot reach the
-   * server, because the operator cannot tell the difference between "slow" and
-   * "broken" and will wait for both.
-   */
   function request(path, opts) {
     opts = opts || {};
     var timeoutMs = opts.timeoutMs || 10000;
@@ -85,17 +55,8 @@
     });
   }
 
-  /**
-   * Ask once, at boot, whether there is a server.
-   *
-   * Deliberately short: on file:// the fetch fails immediately, and the console
-   * must not sit on a spinner for ten seconds before showing the fixtures it
-   * already has in memory.
-   */
   A.probe = function () {
     if (state.probedAt) return Promise.resolve(state);
-    /* A file:// page has no origin to call. Probing anyway costs every harness
-       a timeout on every boot and can never succeed. */
     if (window.location.protocol === 'file:') {
       state.mode = MODE.SAMPLE;
       state.probedAt = now();
@@ -118,20 +79,7 @@
     return state.probing;
   };
 
-  /**
-   * Read a resource.
-   *
-   * Always resolves -- never rejects -- to an envelope the UI can render
-   * without a try/catch at every call site:
-   *
-   *   { ok, data, error, at, stale, mode }
-   *
-   * `stale` is carried through from the server, which serves a previous value
-   * when a fresh read fails. A number with an age attached is useful during an
-   * incident; the same number pretending to be current is dangerous.
-   */
   A.read = function (path, opts) {
-    // Every read waits for the probe, so no caller has to sequence it by hand.
     return A.probe().then(function () { return readNow(path, opts); });
   };
 
@@ -161,7 +109,6 @@
       return envelope;
     }, function (err) {
       delete inflight[path];
-      // A previous value with an honest age beats an empty panel.
       if (hit) {
         var stale = {};
         for (var k in hit.envelope) if (Object.prototype.hasOwnProperty.call(hit.envelope, k)) stale[k] = hit.envelope[k];
@@ -185,6 +132,7 @@
   };
 
   var MAX_OPEN_STREAMS = 4;
+  var MAX_OPENING_ATTEMPTS = 4;
   var BACKOFF_MIN_MS = 1000;
   var BACKOFF_MAX_MS = 30000;
   var streams = {};
@@ -198,9 +146,9 @@
     return url;
   }
 
-  function openStreamCount() {
+  function heldStreamCount() {
     var n = 0;
-    Object.keys(streams).forEach(function (k) { if (streams[k].es) n += 1; });
+    Object.keys(streams).forEach(function (k) { if (!streams[k].closed) n += 1; });
     return n;
   }
 
@@ -261,8 +209,29 @@
     rec.listeners.push([name, fn]);
   }
 
+  function giveUpStream(rec, message) {
+    var subs = rec.subs.slice();
+    teardownStream(rec);
+    rec.subs = [];
+    subs.forEach(function (sub) {
+      if (!sub.onUnavailable) return;
+      try {
+        sub.onUnavailable({
+          reason: 'stream-refused',
+          message: message + ' The console tried ' + MAX_OPENING_ATTEMPTS + ' times without the stream ' +
+            'ever opening, so it has stopped rather than reconnecting at you forever. Nothing below it is ' +
+            'a reading.'
+        });
+      } catch (e) { if (window.console) window.console.warn('stream handler failed', e); }
+    });
+  }
+
   function scheduleRetry(rec, message) {
     if (rec.closed) return;
+    if (!rec.everOpened && rec.attempts >= MAX_OPENING_ATTEMPTS) {
+      giveUpStream(rec, message || 'The live stream could not be opened.');
+      return;
+    }
     var delay = backoffFor(rec.attempts);
     setStreamState(rec, STREAM.RETRYING, {
       inMs: delay,
@@ -293,6 +262,7 @@
     var onOpen = function () {
       if (rec.es !== es) return;
       rec.attempts = 0;
+      rec.everOpened = true;
       rec.openedAt = now();
       setStreamState(rec, STREAM.OPEN, { resumedFrom: rec.lastEventId || null });
     };
@@ -334,7 +304,7 @@
         message: 'This browser cannot open a live stream, so this panel has no source to follow.'
       };
     }
-    if (!streams[key] && openStreamCount() >= MAX_OPEN_STREAMS) {
+    if (!streams[key] && heldStreamCount() >= MAX_OPEN_STREAMS) {
       return {
         reason: 'too-many-streams',
         message: 'The console already holds ' + MAX_OPEN_STREAMS + ' live streams. A browser allows only a ' +
@@ -382,7 +352,7 @@
           key: key, path: path, topics: topics,
           es: null, listeners: [], names: {}, subs: [],
           state: STREAM.OFF, stateAt: now(), history: [],
-          attempts: 0, received: 0, malformed: 0,
+          attempts: 0, received: 0, malformed: 0, everOpened: false,
           lastEventId: null, openedAt: null, timer: null, closed: false
         };
         rec.subs.push(sub);

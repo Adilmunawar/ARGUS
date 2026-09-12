@@ -7,6 +7,8 @@ const authConfig = require('./config');
 const KEY_BYTES = 32;
 const SALT_BYTES = 16;
 
+const MAXMEM_CEILING = 256 * 1024 * 1024;
+
 function scryptOptionsWithExplicitMaxmem(params) {
   return {
     N: params.cost,
@@ -56,6 +58,8 @@ function parse(record) {
   if (salt.length === 0 || tag.length === 0) return null;
 
   const maxmemNeededByThisRecord = 128 * params.cost * params.blockSize;
+  const ceiling = Math.max(authConfig.scrypt.maxmem, MAXMEM_CEILING);
+  if (maxmemNeededByThisRecord > ceiling) return null;
   if (maxmemNeededByThisRecord > params.maxmem) params.maxmem = maxmemNeededByThisRecord + 1024 * 1024;
 
   return { params, salt, tag };

@@ -1,38 +1,3 @@
-/*
- * Create and verify the Argus object store, from the committed bucket set.
- *
- *   node /app/tools/init-object-storage.js
- *
- * Runs once per `docker compose up`, before the console starts, and is the only
- * thing in the stack allowed to hold the S3 admin identity.
- *
- * Four rules.
- *
- * 1. platform/gitops/storage/buckets.yaml is the SINGLE SOURCE. Bucket names,
- *    versioning, object lock and lifecycle are read from it, never restated
- *    here. A table in this file would be a second source, and two sources of
- *    truth do not stay equal.
- *
- * 2. "It already exists, so skip it" is a bug, not an optimisation. Object Lock
- *    CANNOT be enabled on a bucket after creation -- S3 and SeaweedFS both
- *    require it at CreateBucket time. So a bucket created once without lock
- *    stays unlocked forever, while every subsequent boot reports success.
- *    On an existing bucket this VERIFIES the declared configuration
- *    and exits non-zero when it does not match.
- *
- * 3. Configured is not enforced. GetObjectLockConfiguration returning 200 only
- *    proves the server stored a setting. ADR-0020's entire backup story rests
- *    on immutability actually holding, so this deletes a real object version
- *    under real retention and records what happened. The verdict is
- *    three-valued -- enforced / not-enforced / unknown -- because treating an
- *    unexpected error as proof of enforcement is the same class of mistake as
- *    trusting the 200.
- *
- * 4. Never write the probe into a bucket that holds anything. A canary per boot
- *    under COMPLIANCE retention is an unbounded pile of undeletable junk, and
- *    argus-backups is the last place to put that. The probe gets its own
- *    bucket with the minimum retention, so the evidence ages out by itself.
- */
 'use strict';
 
 const fs = require('node:fs');
@@ -52,8 +17,6 @@ const {
   PutObjectCommand,
   DeleteObjectCommand
 } = require('@aws-sdk/client-s3');
-
-/* ------------------------------------------------------------------ config --- */
 
 function positiveIntMs(name, fallback) {
   const raw = process.env[name];
@@ -83,10 +46,6 @@ const IDENTITIES_FILE_PINNED = !!process.env.ARGUS_S3_IDENTITIES_FILE;
 const RUN_STARTED_AT = Date.now();
 const runDeadlineAt = () => RUN_STARTED_AT + RUN_DEADLINE_MS;
 
-/* Dev overrides exist so a developer is not locked out of their own test
-   uploads for five weeks, with the only escape being to destroy the volume.
-   They are refused outside dev: a 1-day GOVERNANCE lock on a real backup bucket
-   is indistinguishable from no lock at all to anyone reading a dashboard. */
 const DEV_LOCK_DAYS = Number(process.env.ARGUS_OBJECT_LOCK_DAYS || 1);
 const DEV_LOCK_MODE = (process.env.ARGUS_DEV_LOCK_MODE || 'GOVERNANCE').toUpperCase();
 
@@ -96,15 +55,10 @@ const warn = (...a) => console.warn('[storage-init] !', ...a);
 const s3 = new S3Client({
   region: REGION,
   endpoint: ENDPOINT,
-  /* SeaweedFS serves path-style only. The SDK defaults to virtual-host style,
-     which resolves bucket.seaweed-s3 -- a name no DNS in this network answers,
-     failing as ENOTFOUND rather than as anything about S3. */
   forcePathStyle: true,
   maxAttempts: 3,
   requestHandler: { requestTimeout: REQUEST_TIMEOUT_MS, connectionTimeout: CONNECT_TIMEOUT_MS }
 });
-
-/* ------------------------------------------------------------------- utils --- */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -190,17 +144,6 @@ function readIdentityScopes() {
   return { checked: true, path: IDENTITIES_FILE, reason: null, scopes };
 }
 
-/* --------------------------------------------------------------- readiness --- */
-
-/**
- * Wait until the gateway answers a SIGNED request.
- *
- * The container health check cannot express this: there is no unauthenticated
- * S3 path that means "ready", and once identities are loaded every anonymous
- * probe is a 403 -- which is indistinguishable from a gateway that has not read
- * its config yet. A signed ListBuckets is the only thing that proves the
- * gateway is up, has loaded s3.json, and accepts our credential.
- */
 async function waitForS3() {
   const deadline = Math.min(Date.now() + READY_TIMEOUT_MS, runDeadlineAt());
   let attempt = 0;
@@ -213,9 +156,6 @@ async function waitForS3() {
       return out.Buckets || [];
     } catch (err) {
       last = err;
-      /* 403 here is not "not ready" -- it is a wrong or unknown access key, and
-         no amount of waiting fixes it. Fail immediately with the real reason
-         rather than after a two-minute timeout that reads like a slow start. */
       const status = err && err.$metadata && err.$metadata.httpStatusCode;
       if (status === 403 || /SignatureDoesNotMatch|InvalidAccessKeyId/i.test(errName(err))) {
         throw new Error(
@@ -235,15 +175,6 @@ async function waitForS3() {
     `${Math.min(READY_TIMEOUT_MS, RUN_DEADLINE_MS)} ms. Last error: ${errName(last)} ${last && last.message}`);
 }
 
-/* ------------------------------------------------------------- bucket spec --- */
-
-/**
- * Read the declared bucket set and resolve what this profile should apply.
- *
- * Returns the DECLARED values alongside the EFFECTIVE ones, so the log can say
- * "35 days declared, 1 applied (dev)" rather than printing 1 and letting the
- * reader assume that is what production does.
- */
 function readBucketSet() {
   let text;
   try {
@@ -291,18 +222,12 @@ function readBucketSet() {
       }
       lock = { mode: DEV_LOCK_MODE, days: DEV_LOCK_DAYS };
     } else if (declaredLock && (DEV_LOCK_DAYS !== declaredLock.days || DEV_LOCK_MODE !== declaredLock.mode)) {
-      /* Outside dev the overrides are ignored, loudly. Silently honouring them
-         would let a production stack come up with a 1-day GOVERNANCE lock on
-         argus-backups because a stale variable was in the environment. */
       warn(`ARGUS_PROFILE=${PROFILE}: ignoring ARGUS_OBJECT_LOCK_* overrides for ${b.name}; ` +
            `applying the declared ${declaredLock.mode}/${declaredLock.days}d.`);
     }
 
     return {
       name: b.name,
-      /* Object Lock REQUIRES versioning, and SeaweedFS -- like S3 -- turns it on
-         implicitly with the lock. Making that explicit here means the desired
-         state we verify against is the state we asked for. */
       versioning: !!b.versioning || !!declaredLock,
       declaredLock,
       lock,
@@ -311,8 +236,6 @@ function readBucketSet() {
     };
   });
 }
-
-/* --------------------------------------------------------------- apply ------ */
 
 async function bucketExists(name) {
   try {
@@ -367,13 +290,6 @@ async function putLock(name, lock) {
   }));
 }
 
-/**
- * Bring one bucket to its declared state, or report why it cannot be.
- *
- * Returns a row for the summary. Throws only on something that makes the whole
- * run untrustworthy; a per-bucket mismatch is collected so the operator sees
- * every problem at once rather than fixing them one boot at a time.
- */
 async function applyBucket(spec, problems) {
   const problemsBefore = problems.length;
   const existed = await bucketExists(spec.name);
@@ -381,7 +297,6 @@ async function applyBucket(spec, problems) {
   if (!existed) {
     await s3.send(new CreateBucketCommand({
       Bucket: spec.name,
-      /* The one setting that can never be added later. */
       ObjectLockEnabledForBucket: !!spec.lock
     }));
     log(`created ${spec.name}${spec.lock ? ' (object lock enabled at creation)' : ''}`);
@@ -403,10 +318,6 @@ async function applyBucket(spec, problems) {
     }
     lockState = await getLockConfig(spec.name);
 
-    /* This is the check that makes rule 2 real. A bucket created before object
-       lock was declared -- or created by hand, or by an older revision of this
-       file -- cannot be fixed in place, and saying so is the only useful thing
-       to do. */
     if (!lockState.enabled) {
       problems.push(
         `${spec.name}: buckets.yaml declares Object Lock ${spec.declaredLock.mode}/${spec.declaredLock.days}d, ` +
@@ -451,8 +362,6 @@ async function applyBucket(spec, problems) {
   } else {
     lockState = await getLockConfig(spec.name);
     if (lockState.enabled) {
-      /* Locked when nothing asked for it. Not fatal -- it is the safe direction
-         -- but it will surprise whoever tries to clean the bucket up. */
       warn(`${spec.name}: Object Lock is enabled but buckets.yaml does not declare it.`);
     }
   }
@@ -471,9 +380,6 @@ async function applyBucket(spec, problems) {
         }
       }));
     } catch (err) {
-      /* SeaweedFS's lifecycle coverage is the weakest part of its S3 surface.
-         A bucket without expiry grows; it does not lose data. Record it and
-         keep going rather than failing the boot over a cleanup policy. */
       problems.push(`${spec.name}: lifecycle expiry of ${spec.lifecycleDays} days was refused (${errName(err)}). ` +
                     `Objects will accumulate until something else deletes them.`);
     }
@@ -505,23 +411,6 @@ async function applyBucket(spec, problems) {
   };
 }
 
-/* ---------------------------------------------------------------- the probe --- */
-
-/**
- * Prove that retention is ENFORCED, not merely configured.
- *
- * Deleting an object in a versioned bucket WITHOUT a version id creates a
- * delete marker and returns 204 whether or not the object is locked -- that is
- * correct S3 behaviour and proves nothing. The only meaningful test deletes the
- * specific VERSION, which retention must refuse.
- *
- * Three outcomes, all of them reported honestly:
- *
- *   enforced      the versioned delete was refused. What ADR-0020 assumes.
- *   not-enforced  it succeeded. The lock is decoration; the console must show
- *                 a grey badge, never a green shield, and this needs an ADR.
- *   unknown       something else happened. Not evidence either way.
- */
 async function probeWorm() {
   const at = new Date().toISOString();
   const key = `probe-${Date.now()}`;
@@ -533,8 +422,6 @@ async function probeWorm() {
       await s3.send(new PutBucketVersioningCommand({
         Bucket: PROBE_BUCKET, VersioningConfiguration: { Status: 'Enabled' }
       }));
-      /* COMPLIANCE, because that is the mode the backup story depends on, and
-         one day, because that is the minimum and the junk has to age out. */
       await s3.send(new PutObjectLockConfigurationCommand({
         Bucket: PROBE_BUCKET,
         ObjectLockConfiguration: {
@@ -581,18 +468,12 @@ async function probeWorm() {
   }
 }
 
-/* ----------------------------------------------------------------- report --- */
-
 function writeState(name, value) {
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
     fs.writeFileSync(path.join(STATE_DIR, name), JSON.stringify(value, null, 2) + '\n');
     return true;
   } catch (err) {
-    /* The console reads this to render the storage screen. If it cannot be
-       written the screen must say "not determined", which is what a missing
-       file already means -- so warn and continue rather than failing the boot
-       over a report. */
     warn(`could not write ${path.join(STATE_DIR, name)}: ${err.message}`);
     return false;
   }
@@ -652,18 +533,6 @@ async function run() {
   const worm = await probeWorm();
   log(`WORM enforcement: ${worm.verdict.toUpperCase()} -- ${worm.detail}`);
 
-  /* Record what ACTUALLY exists, not just what was declared.
-   *
-   * This is the only place in the stack that can. ListBuckets on SeaweedFS
-   * 3.97 requires a GLOBAL Write action, and giving that to the console would
-   * mean write access to every bucket including any added later -- so the
-   * console has per-bucket grants and cannot enumerate. This process is the
-   * one holding admin, for the few seconds it takes.
-   *
-   * The difference between this list and buckets.yaml is drift: a bucket
-   * somebody made by hand, or one deleted out from under the declaration.
-   * Without it the console can only ever show what the file claims, which
-   * makes the file unfalsifiable. */
   let actual = null;
   let actualError = null;
   try {
@@ -732,9 +601,6 @@ async function run() {
     console.error(`  ${problems.length} problem(s) this script could not resolve:\n`);
     for (const p of problems) console.error(`   - ${p}`);
     console.error('');
-    /* Non-zero, so service_completed_successfully holds the console back. A
-       dashboard that renders a green shield over an unlocked backup bucket is
-       worse than a stack that refuses to start. */
     return failureCount;
   }
 

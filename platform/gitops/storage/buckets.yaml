@@ -14,7 +14,7 @@ buckets:
     owner: svc-ml
     readers: [gmsa-geo$]
     lifecycle: { expireDays: 730 }
-    backup: none            # re-pullable from Copernicus (documented exception)
+    backup: none
   - name: argus-ml
     owner: svc-ml
     backup: { tool: kopia, schedule: weekly, target: argus-backups/kopia/ml }
@@ -24,7 +24,7 @@ buckets:
     objectLock: { mode: COMPLIANCE, days: 365 }
     replication: { siteB: true }
   - name: argus-backups
-    owner: gmsa-backup$      # policy: PutObject only, no Delete, no lock override
+    owner: gmsa-backup$
     readers: [gmsa-restore$]
     objectLock: { mode: COMPLIANCE, days: 35 }
     replication: { siteB: true, siteBObjectLockDays: 90 }
@@ -33,7 +33,7 @@ buckets:
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }
   - name: argus-sessions
-    owner: gmsa-guacamole$      # recorded RDP/SSH sessions (ADR-0032); ~1 GB per RDP hour
+    owner: gmsa-guacamole$
     readers: [gmsa-console$, Argus-Console-Security]
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }

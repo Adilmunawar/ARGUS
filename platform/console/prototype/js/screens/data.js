@@ -1,50 +1,13 @@
-/* Argus Console: Data.
- *
- * Databases, object storage, cache and queues -- read from the services this
- * platform actually runs, not from the bundled fixture.
- *
- * THE RULES THIS FILE HOLDS TO
- *
- *  - Never show a number the code did not measure. Every reader here can say
- *    "unknown" and give the reason; a zero that means "we could not read it"
- *    is a defect, not a rounding choice. `unknown()` exists so that state has
- *    one appearance and always carries its reason.
- *  - Four states per panel, all real: loading, ok, a reader that answered "not
- *    configured / unreachable / denied", and a request that failed. A panel
- *    that fails must not blank the panels that worked, so every panel owns its
- *    own request, its own skeleton and its own failure.
- *  - Replication renders "not configured" and NEVER a lag figure. There is one
- *    node. A lag of zero bytes is what a healthy replica looks like.
- *  - Nothing is built from an HTML string. Bucket names, prefixes, stream names
- *    and query text all come from outside the product, and one innerHTML on
- *    that path is stored XSS in an admin tool.
- *
- * Classic script, ES5 only: the console opens from file:// with no build step
- * and no network (ADR-0027), where it runs on the fixtures and says so.
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
 
-  /* Screens may load before app.js has defined A.screen, depending on script
-     order in index.html; registering late is better than throwing on load. */
   function registerScreen(id, def) {
     if (typeof A.screen === 'function') { A.screen(id, def); return; }
     document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
   }
 
-  /* ------------------------------------------------------------- routes --- */
-
-  /*
-   * Every path this screen reads, in one block.
-   *
-   * The readers exist on the server (platform/console/server/src/pg.js,
-   * garnet.js, storage.js, queues.js); the routes that expose them are wired in
-   * src/index.js, which this file does not own. When a route is named
-   * differently there, it is changed HERE, once -- and until it is wired at
-   * all, every panel below says so in those words instead of looking broken.
-   */
   var API = {
     pgDatabases: '/api/pg/databases',
     pgRoles: '/api/pg/roles',
@@ -68,8 +31,6 @@
     queueConsumers: '/api/queues/consumers'
   };
 
-  /* Which server module holds the reader behind a path, so a not-yet-wired
-     panel can name the file the route has to be attached to. */
   var MODULE_FOR = [
     ['/api/pg/', 'platform/console/server/src/pg.js'],
     ['/api/cache/', 'platform/console/server/src/garnet.js'],
@@ -84,14 +45,6 @@
     return null;
   }
 
-  /* -------------------------------------------------------- value helpers --- */
-
-  /**
-   * The one appearance of "we do not know", always carrying why.
-   *
-   * Used everywhere a reader returned null. The alternatives are all worse: a
-   * dash says nothing, and a zero says something false.
-   */
   function unknown(reason) {
     return el('span.muted', {
       text: 'unknown',
@@ -103,7 +56,6 @@
 
   function isNum(v) { return typeof v === 'number' && isFinite(v); }
 
-  /** Bytes, or null when there is nothing to format. Never "0 B" for absent. */
   function bytesText(n) {
     if (!isNum(n)) return null;
     if (n < 1024) return fmt.num(n) + ' B';
@@ -129,14 +81,8 @@
     return isNum(r) ? el('span.num', { text: fmt.ratioPct(r, dp === undefined ? 1 : dp) }) : unknown(reason);
   }
 
-  /** A tile value has to be a string, so absence is the word, not a dash. */
   function tileText(value) { return value === null || value === undefined ? 'unknown' : String(value); }
 
-  /**
-   * Garnet's readers return {value, field, unavailable} for every figure, so
-   * that a field this build did not emit arrives as null with the name that was
-   * looked for. This renders both halves: the number, or the reason.
-   */
   function metricNode(m, format) {
     if (!m) return unknown('This reader did not report the field at all.');
     if (!isNum(m.value)) return unknown(m.unavailable || 'The server did not report this field.');
@@ -149,7 +95,6 @@
     return format ? format(m.value) : fmt.num(m.value);
   }
 
-  /** A text-valued Garnet field: {value, field, unavailable}. */
   function textMetricNode(m) {
     if (!m) return unknown('This reader did not report the field at all.');
     if (m.value === null || m.value === undefined || m.value === '') {
@@ -158,18 +103,6 @@
     return mono(m.value);
   }
 
-  /* ---------------------------------------------------------------- time --- */
-
-  /*
-   * LIVE TIMESTAMPS ARE MEASURED AGAINST THE BROWSER'S CLOCK, NOT fmt.ago.
-   *
-   * ui.fmt.ago and ui.fmt.time subtract from ARGUS.data.now, which is the
-   * fixture's frozen clock (2026-09-08T09:14:00Z) -- deliberately fixed so that
-   * screenshots and tests are deterministic. Passing a real server timestamp
-   * through them produces an age measured against a date the fixture chose,
-   * which on this screen would be a confidently wrong "2 d ago" beside a value
-   * read four seconds ago. So live times get their own two functions.
-   */
   function parseIso(s) {
     if (!s) return null;
     var t = Date.parse(s);
@@ -201,14 +134,6 @@
     return el('time', { datetime: d.toISOString(), title: stampOf(iso), text: sinceText(iso) });
   }
 
-  /**
-   * A duration in seconds.
-   *
-   * Sub-second values are rendered in milliseconds rather than through fmt.dur,
-   * which rounds to whole seconds: a query that has been running for 0.42 s
-   * would read as "0 s", and a running statement that reads as zero time is
-   * the same class of lie as an unknown that reads as zero.
-   */
   function secondsNode(s, reason) {
     if (!isNum(s)) return unknown(reason);
     if (s < 1) return el('span', { text: fmt.ms(Math.round(s * 1000)) });
@@ -216,7 +141,6 @@
     return el('span', { text: fmt.dur(s) });
   }
 
-  /** Long free text in a table cell: shown short, carried whole in the title. */
   function clipped(text, max) {
     if (text === null || text === undefined) return unknown('The server did not return this text.');
     var s = String(text).replace(/\s+/g, ' ').trim();
@@ -234,20 +158,6 @@
     ]);
   }
 
-  /* ----------------------------------------------------------- live panel --- */
-
-  /**
-   * A card that owns its own request and its own five states.
-   *
-   * loading, ok, "the reader answered and the answer is that it cannot read",
-   * "the route does not exist yet" and "the request failed" are all different.
-   * The panel paints a skeleton immediately and replaces it; if the operator
-   * leaves before the answer lands, the answer is thrown away rather than
-   * written into a detached node.
-   *
-   * Every panel is independent on purpose: /api/pg/activity failing must cost
-   * the sessions card and nothing else.
-   */
   function livePanel(title, path, render, opts) {
     opts = opts || {};
     var body = el('div');
@@ -263,8 +173,6 @@
       try {
         paintPanel(body, env, path, render, opts);
       } catch (err) {
-        /* A render that throws is a defect in this file, and it says so rather
-           than leaving a card that is empty for no stated reason. */
         body.appendChild(ui.errorState(
           'This panel could not be drawn',
           'The data arrived but the console failed to render it: ' + (err && err.message ? err.message : String(err)) +
@@ -277,9 +185,6 @@
   }
 
   function paintPanel(body, env, path, render, opts) {
-    /* No API at all. The console runs from file:// in the test harnesses and in
-       an egress-restricted network, and on the fixtures it must say so rather
-       than draw an empty table that reads as "there is nothing here". */
     if (env.mode === A.MODE.SAMPLE) {
       body.appendChild(ui.emptyState(
         'Not available on bundled sample data',
@@ -289,10 +194,6 @@
     }
 
     var e = env.error || {};
-    /* Two very different failures arrive through the same flag. The reader
-       answering {ok:false, reason, message} is a NORMAL state with an
-       actionable message -- not configured, unreachable, refused -- and gets a
-       callout. A transport failure gets an error state with a retry. */
     var readerAnswered = !!(env.data && env.data.ok === false);
 
     if (!env.ok && !readerAnswered) {
@@ -330,13 +231,6 @@
     }
   }
 
-  /**
-   * The route is not wired yet.
-   *
-   * Deliberately not an error state: nothing has failed. The reader exists on
-   * the server and index.js has not been given the route, which is a wiring
-   * step with a name and a file, so this says both.
-   */
   function notWired(path) {
     var mod = moduleFor(path);
     return ui.emptyState(
@@ -347,14 +241,6 @@
         'Nothing here has failed -- there is simply no answer yet.');
   }
 
-  /**
-   * The reader answered honestly that it cannot read.
-   *
-   * "Not configured", "unreachable" and "denied" are normal states of this
-   * platform, each with a fix, and each message is written on the server so
-   * there is exactly one wording of it. The reason is shown as a pill so the
-   * shape of the problem is legible before the paragraph is read.
-   */
   function readerRefusal(d) {
     var reason = d.reason || 'error';
     var tone = reason === 'not-configured' ? 'idle' : reason === 'denied' ? 'warn' : 'bad';
@@ -370,17 +256,6 @@
     ]);
   }
 
-  /**
-   * Refresh, which says so when there is nothing to refresh.
-   *
-   * It does not disable itself: a disabled control is drawn in a muted colour
-   * that does not reach WCAG AA against this background, so greying it out
-   * trades a dead control for unreadable text. Pressing it says why instead,
-   * which is also the only way an operator finds out.
-   *
-   * Whether an API exists is not known on the first paint, so the answer is
-   * settled by the probe rather than guessed at while `mode` is still unknown.
-   */
   function refreshButton(rest) {
     var live = true;
     var b = ui.btn('Refresh', {
@@ -392,8 +267,6 @@
             '`npm start` in platform/console/server and open the console it serves.', { timeout: 6000 });
           return;
         }
-        /* A.forget() with no argument drops every cached envelope, so this is a
-           refresh rather than a repaint of the same numbers under a newer clock. */
         A.forget();
         A.go('data', rest);
       }
@@ -414,10 +287,6 @@
     return null;
   }
 
-  /* ====================================================================== */
-  /* PostgreSQL                                                             */
-  /* ====================================================================== */
-
   function renderPgHealth(body, d) {
     body.appendChild(el('div.tiles', [
       ui.statTile('Role', tileText(d.role), { note: 'One cluster; see Replication' }),
@@ -436,9 +305,6 @@
         key: 'ok', label: 'Verdict', status: true,
         sort: function (r) { return r.ok === false ? 0 : r.ok === true ? 2 : 1; },
         render: function (r) {
-          /* Null is not a failure and must not be coloured as one: a
-             single-node cluster reports `ok: null` for replication, and that is
-             the correct answer rather than a red one. */
           if (r.ok === true) return ui.pill('ok', 'ok');
           if (r.ok === false) return ui.pill('attention', 'bad');
           return ui.pill('not applicable', 'idle', { title: 'This check has no pass or fail here; read the detail.' });
@@ -459,15 +325,6 @@
       (isNum(d.deadlocksSinceStatsReset) ? fmt.num(d.deadlocksSinceStatsReset) : 'not reported') + '.'));
   }
 
-  /**
-   * Replication, which on this stack is the absence of it.
-   *
-   * THE FIELDS `lagBytes` AND `lagSeconds` ARE NULL IN THE PAYLOAD AND ARE NOT
-   * RENDERED AT ALL WHEN `configured` IS FALSE. That is the whole point of the
-   * panel. A lag of zero bytes is exactly what a healthy replica looks like, so
-   * printing one for a cluster that has no replica would be a green number
-   * describing something that does not exist.
-   */
   function renderPgReplication(body, d) {
     if (!d.configured) {
       body.appendChild(el('div.callout.info', [
@@ -497,9 +354,6 @@
       return;
     }
 
-    /* Configured. Only now can a lag be shown, and only where one was measured:
-       a standby that has not replied yet reports no interval, which stays
-       unknown rather than becoming zero. */
     body.appendChild(el('div.callout.ok', [
       el('strong', { text: d.state || 'Replicating' }),
       el('p', { text: 'Role ' + (d.role || 'unknown') + '. Every lag below was measured against this server\'s current WAL position.' })
@@ -545,9 +399,6 @@
 
     body.appendChild(el('div.tiles', [
       ui.statTile('Databases', fmt.num(d.count), { note: 'On this cluster' }),
-      /* A total is only a total when every part of it was measured. The server
-         refuses to sum a partial set into `totalSizeBytes`, and this refuses to
-         label the partial sum as a total. */
       ui.statTile(d.sizesComplete ? 'Total size' : 'Size measured so far',
         tileText(bytesText(d.sizesComplete ? d.totalSizeBytes : d.measuredSizeBytes)), {
           note: d.sizesComplete
@@ -584,9 +435,6 @@
       },
       {
         key: 'backends', label: 'Backends', align: 'right',
-        /* Two counts of the same thing, kept apart because their disagreement
-           is information: pg_stat_activity is what this role may SEE, and
-           numbackends is what the statistics collector reports. */
         render: function (r) {
           return numNode(r.backends, 'pg_stat_database reported no backend count for this database.');
         }
@@ -639,8 +487,6 @@
     var s = d.summary || {};
 
     if (d.countsCoverWholeCluster === false) {
-      /* Said before any number is read: without pg_read_all_stats every count
-         below is a count of THIS role's own sessions. */
       body.appendChild(el('div.callout.warn', [
         el('strong', { text: 'These counts cover only this console\'s own sessions.' }),
         el('p', {
@@ -739,12 +585,6 @@
   }
 
   function renderPgStatements(body, d) {
-    /*
-     * pg_stat_statements has three unavailable states and an empty list means
-     * something different in each. The server distinguishes them; this renders
-     * the distinction rather than drawing an empty table that reads as "this
-     * database has no slow queries".
-     */
     if (d.available === false) {
       body.appendChild(el('div.callout.warn', [
         el('strong', { text: 'Slow queries are not being recorded: ' + (d.reason || 'unavailable') + '.' }),
@@ -781,8 +621,6 @@
       {
         key: 'ioReadMs', label: 'Read I/O', align: 'right',
         render: function (r) {
-          /* Null, not zero: with track_io_timing off the server reports 0.0 for
-             "not measured", and zero here would read as "never touched disk". */
           return isNum(r.ioReadMs) ? el('span.num', { text: fmt.ms(r.ioReadMs) })
             : unknown('track_io_timing is off on this server, so no time was measured. This is not zero time.');
         }
@@ -837,9 +675,6 @@
       {
         key: 'sessions', label: 'Sessions', align: 'right',
         render: function (r) {
-          /* Without pg_read_all_stats this count is only the reading role's own
-             sessions, so every other role reports zero whether or not it has
-             any. A zero that means "you may not look" is not printed. */
           if (!complete) {
             return unknown('Session counts per role need pg_read_all_stats, which this console role does not hold. ' +
               'Every role but this console\'s own would read zero, so no number is shown.');
@@ -880,8 +715,6 @@
         ttlMs: 10000, errorTitle: 'The database list could not be read'
       }),
       livePanel('Sessions', API.pgActivity, renderPgActivity, {
-        /* The one panel worth reading almost live: an incident is usually
-           somebody watching a lock clear. */
         ttlMs: 2000, errorTitle: 'Session activity could not be read'
       }),
       livePanel('Slowest statements', API.pgStatements, renderPgStatements, {
@@ -893,10 +726,6 @@
     ]);
   }
 
-  /* ====================================================================== */
-  /* Object storage                                                         */
-  /* ====================================================================== */
-
   function renderStorageCapacity(body, d) {
     var t = d.totals || {}, slots = d.slots || {};
     var usedRatio = isNum(t.usedBytes) && isNum(t.allBytes) && t.allBytes > 0 ? t.usedBytes / t.allBytes : null;
@@ -904,8 +733,6 @@
     body.appendChild(el('div.tiles', [
       ui.statTile('Used', tileText(bytesText(t.usedBytes)), { note: isNum(t.allBytes) ? 'of ' + bytesText(t.allBytes) : 'total not reported' }),
       ui.statTile('Free', tileText(bytesText(t.freeBytes)), { note: d.scope || 'Disk free on the volume servers' }),
-      /* The number that actually limits a write. Free disk is not writable
-         space when the master has no volume slot left to place a new volume. */
       ui.statTile('Writable now', tileText(bytesText(d.available)), {
         note: 'Bound by ' + (d.binding || 'unknown') + ': ' + fmt.num(slots.free) + ' of ' + fmt.num(slots.max) + ' volume slots free'
       }),
@@ -947,15 +774,6 @@
   }
 
   function renderStorageBuckets(body, d) {
-    /*
-     * AN EMPTY LIST HERE HAS TWO MEANINGS AND THEY ARE OPPOSITES.
-     *
-     * The inventory comes from what storage-init recorded, falling back to the
-     * declaration in buckets.yaml; the sizes come from the volume topology.
-     * When both sources of the inventory fail, this reader still answers
-     * ok:true with an empty array -- and rendering that as "no bucket exists in
-     * this object store" is a statement nobody measured.
-     */
     var enumerated = !d.inventoryError && !d.declaredError;
 
     if (d.inventoryError) {
@@ -1004,9 +822,6 @@
       {
         key: 'lockEnforced', label: 'Lock proven', status: true,
         render: function (r) {
-          /* "Configured" and "enforced" are different claims. This one comes
-             from storage-init attempting a real delete of a real object version
-             under real retention, which is the only evidence that counts. */
           if (!r.lock) return el('span.muted', { text: 'n/a' });
           if (r.lockEnforced === 'enforced') return ui.pill('proven', 'ok', { title: 'A versioned delete was attempted and refused.' });
           if (!r.lockEnforced) return unknown('No delete probe result was recorded for this bucket.');
@@ -1020,9 +835,6 @@
           if (!r.replication || r.replication === 'not configured') {
             return el('span.muted', { text: 'not configured', title: 'Nothing is copying this bucket off this node.' });
           }
-          /* The declared-but-not-configured wording comes from the server and
-             is exactly the distinction worth keeping: an intention in
-             buckets.yaml is not a running replication. */
           return el('span', { text: r.replication });
         }
       },
@@ -1110,28 +922,6 @@
     ]);
   }
 
-  /* ====================================================================== */
-  /* Cache (Garnet)                                                         */
-  /* ====================================================================== */
-
-  /*
-   * SPILL, NOT EVICTION.
-   *
-   * The pressure signal on this cache is the fraction of the hybrid log that
-   * has been pushed out to memory and onto disk: (Head - Begin) / (Tail -
-   * Begin), computed by the server from addresses Garnet reports. A rising
-   * ratio costs, in order: reads of spilled records become disk reads; the
-   * spill directory grows inside the same WSL2 virtual disk as Postgres and the
-   * object store; and past SegmentSize x CompactionMaxSegments the Shift
-   * compaction policy deletes the oldest segment whole. That last one does lose
-   * keys -- by age of write, a whole file at a time, because a DISK ceiling was
-   * reached. It is not eviction, it is not LRU, it is not TTL, and filing it
-   * under "evictions" would point an operator at a memory setting that does not
-   * exist.
-   *
-   * The two thresholds below are a UI judgement about when to draw attention,
-   * not a measurement, and they are the only invented numbers on this screen.
-   */
   var SPILL_WARN = 0.5;
   var SPILL_BAD = 0.9;
 
@@ -1160,8 +950,6 @@
     body.appendChild(ui.dl([
       ['Endpoint', mono(d.endpoint || 'unknown')],
       ['Garnet version', textMetricNode(srv.garnetVersion)],
-      /* Garnet reports a redis_version for client-library compatibility. It is
-         the protocol level this server claims, not a Redis it contains. */
       ['RESP compatibility', textMetricNode(srv.redisCompatVersion)],
       ['Authenticated as', id.user
         ? el('span', [mono(id.user), id.matches === false
@@ -1181,13 +969,6 @@
       ])]
     ]));
 
-    /*
-     * NO HIT RATE, AND THE REASON RATHER THAN A ZERO.
-     *
-     * Garnet publishes no keyspace_hits/keyspace_misses. A dashboard that
-     * defaults the absent counters shows a measured-looking 0% hit rate for a
-     * cache that is serving perfectly.
-     */
     if (d.hitRate && d.hitRate.available === false) {
       body.appendChild(calloutOf('info', 'There is no hit rate to show.', d.hitRate.message));
     }
@@ -1264,7 +1045,6 @@
       empty: 'This server reported no log addresses in INFO, so there is nothing to break down.'
     }));
 
-    /* The message is written on the server so there is one wording of it. */
     if (d.evictions && d.evictions.available === false) {
       body.appendChild(calloutOf('info', 'This cache does not evict, so there is no eviction count.', d.evictions.message));
     }
@@ -1288,12 +1068,6 @@
       body.appendChild(hint(d.keysNote));
     }
 
-    /*
-     * There is no per-prefix table. Enumerating needs SCAN or KEYS and sizing
-     * needs MEMORY USAGE or GET, and the console credential holds none of them
-     * on purpose: this is a dashboard, and a compromised console process must
-     * not be able to lift a session token out of the cache.
-     */
     if (d.byPrefix && d.byPrefix.available === false) {
       body.appendChild(calloutOf('info', 'There is no per-prefix breakdown, and there is not supposed to be.', d.byPrefix.message));
     }
@@ -1312,11 +1086,6 @@
       el('span.muted', { text: d.endpoint || '' })
     ]));
 
-    /*
-     * THE ANONYMOUS PING IS THE POINT OF THIS PANEL. Garnet recreates a
-     * password-less `default` user with full rights if the ACL file does not
-     * define one, and nothing else in the stack can see that state.
-     */
     if (d.authRequired === false) {
       body.appendChild(calloutOf('bad', 'This cache answers unauthenticated connections.',
         (d.authProbe || '') + ' Anything that can reach this port has full rights, FLUSHALL included.'));
@@ -1360,17 +1129,10 @@
         ttlMs: 10000, errorTitle: 'The cache server state could not be read'
       }),
       livePanel('Keyspace', API.cacheKeyspace, renderCacheKeyspace, {
-        /* DBSIZE walks the whole store on Garnet, so this panel is deliberately
-           the stalest thing on the screen rather than a scan every ten seconds
-           for as long as somebody leaves the tab open. */
         ttlMs: 120000, errorTitle: 'The key count could not be read'
       })
     ]);
   }
-
-  /* ====================================================================== */
-  /* Queues (NATS JetStream)                                                */
-  /* ====================================================================== */
 
   function jetStreamUnusable(body, d) {
     if (d.jetStream === 'enabled') return false;
@@ -1453,13 +1215,6 @@
     body.appendChild(ui.table([
       { key: 'stream', label: 'Stream', render: function (r) { return mono(r.stream); } },
       { key: 'name', label: 'Consumer', render: function (r) { return mono(r.name); } },
-      /*
-       * pending and ackPending are NEVER added together, here or anywhere.
-       * Pending is work not yet handed out -- the queue is deep, add workers.
-       * ackPending is work handed out and not acknowledged -- the worker is
-       * slow, blocked or gone, and adding workers makes it worse. The sum is
-       * the one number that cannot tell those two incidents apart.
-       */
       {
         key: 'pending', label: 'Not yet delivered', align: 'right',
         render: function (r) { return numNode(r.pending, 'The server did not report a pending count for this consumer.'); }
@@ -1515,10 +1270,6 @@
       })
     ]);
   }
-
-  /* ====================================================================== */
-  /* Database detail                                                        */
-  /* ====================================================================== */
 
   function notFound(kind, name, detail) {
     return ui.emptyState(
@@ -1625,25 +1376,9 @@
     }));
   }
 
-  /* ------------------------------------------------------- query editor --- */
-
-  // Comments and string literals are stripped before the keyword scan, so a row
-  // whose text contains the word "update" is not mistaken for an UPDATE. SELECT
-  // ... INTO writes a table, and several routines write through a call that
-  // begins with SELECT, so both are refused: this box is for reading and the
-  // check has to mean it.
   var WRITE_GRAMMAR = /\b(delete|update|drop|insert|alter|truncate|create|merge|exec|execute|grant|revoke|call|copy|vacuum|reindex|refresh|analyze|cluster)\b/i;
   var SELECT_INTO = /\bselect\b[\s\S]*?\binto\b/i;
 
-  /*
-   * Routines that write, lock, or reach outside the database -- every one of
-   * them callable through a statement that begins with SELECT.
-   *
-   * Function names are matched in full here rather than by bare words:
-   * \block\b finds no word boundary inside `pg_advisory_lock`, so a blocklist
-   * of bare words silently misses every function whose name merely contains
-   * one.
-   */
   var WRITE_ROUTINE = new RegExp('\\b(' + [
     'pg_terminate_backend', 'pg_cancel_backend',
     'pg_read_file', 'pg_read_binary_file', 'pg_write_file', 'pg_ls_dir', 'pg_sleep',
@@ -1660,17 +1395,10 @@
 
   var LEADING_SELECT = /^\s*(?:with\b[\s\S]*?)?select\b/i;
 
-  /**
-   * The statements in a batch, ignoring a single trailing semicolon.
-   *
-   * Refusing a batch outright closes the whole class, rather than chasing the
-   * keywords that might appear inside one.
-   */
   function statementsIn(probe) {
     return probe.split(';').map(function (x) { return x.trim(); }).filter(Boolean);
   }
 
-  /** Remove comments and string literals so they cannot hide a keyword. */
   function stripLiterals(sql) {
     return String(sql)
       .replace(/--[^\n]*/g, ' ')
@@ -1688,11 +1416,6 @@
       'LIMIT ' + ROW_CAP + ';';
   }
 
-  /**
-   * The read-only grammar guard. It is the thing that decides whether a
-   * statement would EVER be sent; an accepted statement is not run, because
-   * this console has no route that executes one.
-   */
   function queryEditor(name) {
     var editorId = 'queryeditor-' + String(name).replace(/[^a-z0-9]/gi, '-');
     var area = el('textarea.queryeditor', {
@@ -1734,13 +1457,6 @@
         return;
       }
 
-      /*
-       * Accepted by the guard, and that is as far as it goes. There is no route
-       * on the console API that runs a statement, the API refuses every
-       * non-GET verb while ARGUS_ALLOW_WRITES is off, and the console's
-       * PostgreSQL role holds pg_monitor and not one table privilege -- so a
-       * result here would have to be invented.
-       */
       ui.clear(result);
       result.appendChild(ui.emptyState(
         'Accepted by the read-only check, and not run',
@@ -1797,10 +1513,6 @@
     mount.appendChild(queryEditor(name));
   }
 
-  /* ====================================================================== */
-  /* Bucket detail                                                          */
-  /* ====================================================================== */
-
   function renderOneBucket(body, d, name) {
     var b = findByName(d.buckets, name);
     if (!b) {
@@ -1825,9 +1537,6 @@
     ]));
 
     if (b.unknownSize && b.unknownSizeReason) {
-      /* The distinction the storage reader exists to protect: "this bucket is
-         empty" and "we have no idea" lead to opposite actions next to a bucket
-         called argus-backups. */
       body.appendChild(calloutOf('info', 'The size of this bucket is unknown, not zero.', b.unknownSizeReason));
     }
 
@@ -1883,14 +1592,6 @@
     if (notes.length) body.appendChild(hint(notes.join(' ')));
   }
 
-  /**
-   * The object browser.
-   *
-   * Deliberately behind a button and never on page load. There is no cheap
-   * object count in S3, and a dashboard that quietly issues a ListObjectsV2 on
-   * every refresh is how a cluster gets a load spike every time somebody leaves
-   * a tab open. One level at a time, from a control a human pressed.
-   */
   function objectBrowser(name) {
     var body = el('div');
     var alive = true;
@@ -1989,10 +1690,6 @@
     mount.appendChild(objectBrowser(name));
   }
 
-  /* ====================================================================== */
-  /* Screen                                                                 */
-  /* ====================================================================== */
-
   registerScreen('data', {
     title: 'Data',
     crumb: 'Data',
@@ -2007,11 +1704,6 @@
         'The databases, object store, cache and queues this platform runs, read live through the console API.',
         [refreshButton(rest)]));
 
-      /* Whether there is an API to read is itself something that has to be
-         found out, so the banner is built after the probe rather than guessing
-         from a mode that may still be 'unknown' on the first paint. The tabs go
-         in immediately: each panel handles its own states, so nothing has to
-         wait for the probe to draw. */
       var banner = el('div');
       mount.appendChild(banner);
       var alive = true;
@@ -2025,8 +1717,6 @@
         { id: 'queues', label: 'Queues', render: queuesTab }
       ], {
         label: 'Data stores',
-        /* The breadcrumb and the document title already name the segment
-           (#/data/cache reads "Data / cache"), so the panel has to match it. */
         initial: rest[0] || null
       }));
     }

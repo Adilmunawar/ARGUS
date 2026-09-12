@@ -99,7 +99,7 @@ function startEventStream(req, res, spec, onLog) {
   function raw(text) {
     if (closed) return true;
     const ok = res.write(text);
-    if (!ok) {
+    if (!ok && !paused) {
       paused = true;
       res.once('drain', () => { paused = false; });
     }
@@ -117,16 +117,16 @@ function startEventStream(req, res, spec, onLog) {
       raw(frame);
     },
     note(event, data) {
-      if (closed) return;
+      if (closed || paused) return;
       raw(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     },
-    close() { end(); res.end(); },
+    close() { if (closed) return; end(); res.end(); },
     get dropped() { return dropped; },
     resetDropped() { const n = dropped; dropped = 0; return n; }
   };
 
   const beat = setInterval(() => {
-    if (closed) return;
+    if (closed || paused) return;
     raw(': ping\n\n');
     const n = sink.resetDropped();
     if (n > 0) sink.note('dropped', { lines: n, reason: 'the browser could not keep up with this stream' });

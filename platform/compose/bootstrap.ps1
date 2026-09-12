@@ -1,44 +1,6 @@
-<#
-.SYNOPSIS
-  Prepare this machine to run the Argus stack: generate every secret, write
-  .env and ./secrets/, and check the things that fail silently later.
-
-.DESCRIPTION
-  Run once:
-
-      pwsh -File ./bootstrap.ps1          # or: powershell -File ./bootstrap.ps1
-      docker compose up -d
-
-  It REFUSES to overwrite an existing .env. Regenerating secrets underneath a
-  running stack does not "reset" it -- it half-breaks it in ways that read as
-  unrelated bugs:
-
-    * Grafana writes the admin password into its database on FIRST boot and
-      ignores the environment afterwards. A new value locks you out.
-    * A new Postgres role password does not match the role that already exists,
-      so every client gets "password authentication failed" while the server is
-      perfectly healthy.
-    * A new alert token 401s every alert Alertmanager delivers, and Alertmanager
-      reports a delivery failure, not a credential failure.
-
-  Use -Rotate only when you intend to tear the stack down with its volumes.
-
-.NOTES
-  Written for Windows PowerShell 5.1, which is what ships on Windows 10.
-  Two 5.1 traps this script avoids deliberately:
-
-    * [RandomNumberGenerator]::GetBytes(n) is a .NET 6+ STATIC overload and
-      throws "Method invocation failed" on 5.1. Create() the instance instead.
-    * Out-File / Set-Content / > default to UTF-16LE or add a BOM on 5.1.
-      docker compose cannot parse either, and the error it gives names a
-      random variable rather than the encoding. Everything here is written with
-      [IO.File]::WriteAllText and a BOM-less UTF8Encoding.
-#>
 [CmdletBinding()]
 param(
-  # Regenerate .env and ./secrets/ even if they exist. Destructive: see above.
   [switch]$Rotate,
-  # Skip resolving image tags to digests (the only step that needs a network).
   [switch]$SkipDigests
 )
 
@@ -58,16 +20,6 @@ function Say  ([string]$m) { Write-Host "  $m" }
 function Head ([string]$m) { Write-Host ""; Write-Host $m -ForegroundColor Cyan }
 function Warn ([string]$m) { $script:Warnings += $m; Write-Host "  ! $m" -ForegroundColor Yellow }
 function Die  ([string]$m) { Write-Host ""; Write-Host "  x $m" -ForegroundColor Red; Write-Host ""; exit 1 }
-
-# --- generation -------------------------------------------------------------
-#
-# Every generated value is HEX. Not because hex is stronger -- it is weaker per
-# character -- but because these strings are parsed by five different things
-# before they reach the service that uses them: the Compose interpolator, a
-# POSIX shell inside an init container, a NATS config file, a psql session, and
-# a Java properties reader. A dollar sign or a hash or a quote in the wrong one
-# of those is a boot failure whose message never mentions the password. 48 hex
-# characters is 192 bits and cannot be mis-parsed by any of them.
 
 $script:Rng = [Security.Cryptography.RandomNumberGenerator]::Create()
 
@@ -99,19 +51,11 @@ function Write-TextNoBom {
   [IO.File]::WriteAllText($Path, $Text, $utf8)
 }
 
-# A Compose file-secret is delivered to the container BYTE FOR BYTE. A trailing
-# newline becomes part of the password for any consumer that does not strip it
-# -- Grafana __FILE and postgres_exporter DATA_SOURCE_PASS_FILE both keep it,
-# while the Postgres entrypoint happens to strip it. That inconsistency is
-# exactly how "the password works for Postgres but not for the exporter"
-# happens. Write no newline, ever.
 function Write-FileSecret {
   param([string]$Name, [string]$Value)
   $p = Join-Path $SecretsDir $Name
   Write-TextNoBom -Path $p -Text $Value
   try {
-    # Windows ACLs, not chmod. Honest limit: through a WSL2 bind mount these are
-    # advisory, and anyone with local administrator reads them regardless.
     $acl = Get-Acl $p
     $acl.SetAccessRuleProtection($true, $false)
     foreach ($r in @($acl.Access)) { [void]$acl.RemoveAccessRule($r) }
@@ -128,8 +72,6 @@ Write-Host ""
 Write-Host "  Argus stack bootstrap" -ForegroundColor Cyan
 Write-Host "  $Here"
 
-# --- 1. preconditions -------------------------------------------------------
-
 Head "1. Checking this machine"
 
 $compose = Join-Path $Here 'docker-compose.yml'
@@ -137,8 +79,6 @@ if (-not (Test-Path $compose)) { Die "docker-compose.yml is not next to this scr
 if (-not (Test-Path $Example)) { Die ".env.example is missing. It is the template this script fills in." }
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-  # Docker Desktop adds this to PATH for NEW shells only. A shell opened before
-  # the install has no docker on PATH and the failure looks like "not installed".
   $known = Join-Path $env:ProgramFiles 'Docker\Docker\resources\bin\docker.exe'
   if (Test-Path $known) {
     Warn "docker is not on this shell PATH but is installed. Using it directly -- open a new terminal to fix PATH."
@@ -161,11 +101,6 @@ if ($osType -ne 'linux') {
   Die "Docker is in $osType-container mode. Every image here is Linux. Switch containers from the Docker Desktop tray menu."
 }
 
-# WSL2 memory. The compose file header states the arithmetic: core is 4.2 GB of
-# limits and core+observability+connect is 8.8 GB, which does not fit beside
-# Windows on a 16 GB machine. Left at the default, WSL2 takes half of RAM and
-# the stack is OOM-killed one container at a time, in an order that changes
-# every boot.
 $wslConfig = Join-Path $env:USERPROFILE '.wslconfig'
 if (Test-Path $wslConfig) {
   $mem = Select-String -Path $wslConfig -Pattern '^\s*memory\s*=' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -175,8 +110,6 @@ if (Test-Path $wslConfig) {
   Warn "No $wslConfig. Create it with [wsl2] / memory=9GB / processors=6, then run 'wsl --shutdown'."
 }
 
-# Subnet collision. A hardcoded 172.28/16 that a corporate VPN also routes does
-# not fail loudly -- Docker wins the route and the VPN silently blackholes.
 $subnet = '172.28.0.0/16'
 if (Test-Path $EnvFile) {
   $existing = Select-String -Path $EnvFile -Pattern '^ARGUS_SUBNET=' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -196,8 +129,6 @@ try {
   Warn "Could not read the routing table; check 'route print' for $prefix.x before the first up."
 }
 
-# Published ports. A collision is a hard bind failure at up time whose message
-# names the port but not what holds it.
 $ports = [ordered]@{
   'console'  = @('CONSOLE_PORT', 8787)
   'postgres' = @('PG_PORT', 5432)
@@ -225,8 +156,6 @@ foreach ($name in $ports.Keys) {
   }
 }
 
-# --- 2. refuse to clobber ---------------------------------------------------
-
 Head "2. Secrets"
 
 if ((Test-Path $EnvFile) -and -not $Rotate) {
@@ -249,8 +178,6 @@ if ($Rotate -and (Test-Path $EnvFile)) {
 
 if (-not (Test-Path $SecretsDir)) { [void](New-Item -ItemType Directory -Path $SecretsDir) }
 
-# ./secrets/ holds extensionless files. The repo .gitignore covers *.key, *.pem
-# and .env -- none of which match a file named pg_superuser_password.
 $gitignore  = Join-Path $RepoRoot '.gitignore'
 $ignoreLine = 'platform/compose/secrets/'
 $ignoreText = if (Test-Path $gitignore) { [IO.File]::ReadAllText($gitignore) } else { '' }
@@ -262,7 +189,6 @@ if ($ignoreText -notmatch [regex]::Escape($ignoreLine)) {
   Say "$ignoreLine already ignored"
 }
 
-# The generated values, keyed by the .env.example placeholder they replace.
 $gen = [ordered]@{}
 foreach ($k in @(
   'ARGUS_S3_ADMIN_SECRET','ARGUS_S3_CONSOLE_SECRET','ARGUS_S3_APP_SECRET',
@@ -273,17 +199,10 @@ foreach ($k in @(
   'GARNET_CONSOLE_PASSWORD','NATS_ARGUS_PASSWORD','NATS_AGENT_PASSWORD'
 )) { $gen[$k] = New-HexSecret 24 }
 
-# Guacamole JSON_SECRET_KEY is a 128-bit AES key given as hex. Any length but 32
-# hex characters is rejected at startup. Whoever holds it can mint a session as
-# anyone, to anything -- the single highest-value string in the stack.
 $gen['GUAC_JSON_SECRET_KEY'] = New-HexSecret 16
 $gen['TARGET_SSH_PASSWORD']  = New-HexSecret 16
 $gen['AZURITE_ACCOUNT_KEY']  = New-Base64Secret 32
 
-# The break-glass account replaces guacadmin/guacadmin, whose hash is in every
-# copy of the Guacamole schema on the internet. Guacamole stores
-# SHA256(password_bytes + UPPERCASE_HEX(salt)) -- the salt is appended as its
-# uppercase hex TEXT, not as raw bytes.
 $breakglassPassword = New-HexSecret 16
 $saltBytes = New-Object byte[] 32
 $script:Rng.GetBytes($saltBytes)
@@ -295,12 +214,6 @@ try {
 } finally { $sha.Dispose() }
 $gen['GUAC_BREAKGLASS_SALT_HEX'] = $saltHexUpper
 $gen['GUAC_BREAKGLASS_HASH_HEX'] = -join ($hashBytes | ForEach-Object { $_.ToString('X2') })
-
-# --- 3. write .env ----------------------------------------------------------
-#
-# Built by rewriting .env.example line by line rather than emitting a fresh
-# file, so every comment in it survives into .env. Those comments are the only
-# documentation an operator has at 3am about why NATS_TAG must end in -alpine.
 
 $lines    = [IO.File]::ReadAllLines($Example)
 $out      = New-Object 'System.Collections.Generic.List[string]'
@@ -408,12 +321,6 @@ if ($derived.Contains('ARGUS_GARNET_MEM_LIMIT_BYTES')) {
   Say "garnet budget    GARNET_MEM_LIMIT=$memLimit -> ARGUS_GARNET_MEM_LIMIT_BYTES=$($derived['ARGUS_GARNET_MEM_LIMIT_BYTES'])"
 }
 
-# --- 4. write ./secrets/ ----------------------------------------------------
-
-# pg_exporter_password is BOTH a file-secret (read by postgres_exporter) and an
-# environment value (used by pg-init to CREATE the role). If those two diverge
-# the exporter authenticates against a role whose password is something else,
-# and the only symptom is a permanently-down scrape target.
 Write-FileSecret 'pg_superuser_password'   (New-HexSecret 24)
 Write-FileSecret 'pg_exporter_password'    $gen['ARGUS_PG_EXPORTER_PASSWORD']
 Write-FileSecret 'grafana_admin_password'  (New-HexSecret 16)
@@ -421,47 +328,19 @@ Write-FileSecret 'console_alert_token'     (New-HexSecret 24)
 Write-FileSecret 'grafana_db_password'     $gen['ARGUS_PG_GRAFANA_PASSWORD']
 Say "wrote secrets/   (5 file-secrets)"
 
-# The break-glass password is the one plaintext an operator genuinely needs to
-# keep. Writing it beside the others is honest about where it lives, rather than
-# printing it into a scrollback buffer and pretending it is gone.
 Write-FileSecret 'guac_breakglass_password' $breakglassPassword
 Say "wrote secrets/guac_breakglass_password  (the Guacamole break-glass login)"
 
-# --- Garnet ACL -------------------------------------------------------------
-#
-# Garnet reads its users from a file, not from its config, and it EXITS if that
-# file is missing rather than starting without authentication -- so the cache
-# profile cannot come up at all until this is written.
-#
-# Two lines, and both matter:
-#
-#   `user default off` is the whole of the authentication story. Garnet FAILS
-#   OPEN: delete this line and an anonymous client is handed the `default` user
-#   and can SET and FLUSHALL, while the container health check still reports
-#   healthy -- it probes the port, not the identity. Nothing else here notices.
-#
-#   The console user is deliberately near-powerless. It can observe the cache
-#   (ping, info, dbsize, latency, client list) and it cannot read a value, list
-#   keys, or wipe it: no +get, no +keys, no +scan, no +flushall, no config|set.
-#   A dashboard has no business reading what is IN a cache, and this console is
-#   read-only in the application layer too -- this is the second layer.
-#
-# Written by bootstrap because it carries a generated password, so it belongs
-# beside the other file-secrets and outside git, never in the committed conf.
 $garnetSecrets = Join-Path $SecretsDir 'garnet'
 if (-not (Test-Path $garnetSecrets)) { [void](New-Item -ItemType Directory -Path $garnetSecrets) }
 $consoleAcl = 'user console on >' + $gen['GARNET_CONSOLE_PASSWORD'] +
   ' ~* -@all +ping +select +info +dbsize +time +acl|whoami +config|get' +
   ' +client|info +client|list +command +command|count +command|docs +command|info +latency|histogram'
-# LF endings and no BOM: Garnet parses this file itself and a CR or a BOM lands
-# inside the username or the password hash.
 Write-TextNoBom -Path (Join-Path $garnetSecrets 'users.acl') -Text ("user default off`n" + $consoleAcl + "`n")
 Say "wrote secrets/garnet/users.acl  (default OFF, console observe-only)"
 
 Write-TextNoBom -Path $alertRendered -Text $alertText
 Say "wrote secrets/alertmanager.yml  ($($alertFilled.Count) placeholders substituted from .env)"
-
-# --- 5. resolve tags to digests --------------------------------------------
 
 if (-not $SkipDigests) {
   Head "3. Resolving image tags"
@@ -474,9 +353,6 @@ if (-not $SkipDigests) {
     $mm = [regex]::Match($l, '^(?<k>[A-Z0-9_]*TAG)=(?<v>[^\s#]+)')
     if ($mm.Success) { $tags[$mm.Groups['k'].Value] = $mm.Groups['v'].Value }
   }
-  # Core only. The observability and connect images are pulled when their
-  # profile is first started; pulling ~30 images here would make a first run
-  # look like a hang.
   $imageFor = [ordered]@{
     'SEAWEEDFS_TAG' = 'chrislusf/seaweedfs'
     'POSTGIS_TAG'   = 'postgis/postgis'
@@ -511,14 +387,10 @@ if (-not $SkipDigests) {
   Say "wrote images.lock ($($lock.Count - 2) entries, $failed unresolved)"
 }
 
-# --- 6. validate ------------------------------------------------------------
-
 Head "4. Validating the compose file"
 docker compose config -q 2>&1 | ForEach-Object { Write-Host "    $_" }
 if ($LASTEXITCODE -ne 0) { Die "docker compose config rejected the file. Nothing was started." }
 Say "docker compose config: ok"
-
-# --- done -------------------------------------------------------------------
 
 Write-Host ""
 if ($script:Warnings.Count) {

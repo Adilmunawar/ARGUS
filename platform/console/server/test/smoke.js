@@ -1,16 +1,3 @@
-/*
- * Argus console API: smoke tests.
- *
- *   node test/smoke.js
- *
- * These run against a real server on a real port with NO AWS credentials,
- * because that is the state the server has to survive: a laptop, a fresh
- * container, an expired SSO session. The whole point of the AWS layer is that
- * "not configured" is a normal answer rather than an outage, and the only way
- * to know that holds is to run it that way.
- *
- * Exit code is the failure count, so CI can gate on it.
- */
 'use strict';
 
 const http = require('http');
@@ -19,12 +6,7 @@ const assert = require('assert');
 const PORT = Number(process.env.SMOKE_PORT || 8899);
 process.env.ARGUS_PORT = String(PORT);
 process.env.ARGUS_HOST = '127.0.0.1';
-// The degraded local-development mode. It is legal only on a loopback bind --
-// src/index.js refuses to start with it on any other interface -- and
-// test/auth.js is where authentication itself is exercised.
 process.env.ARGUS_AUTH = 'off';
-// Deliberately point the credential chain at nothing, so the run is the same
-// on a developer machine with a profile and on a CI box without one.
 process.env.AWS_ACCESS_KEY_ID = '';
 process.env.AWS_SECRET_ACCESS_KEY = '';
 process.env.AWS_PROFILE = '__argus_smoke_no_such_profile__';
@@ -99,13 +81,11 @@ function send(method, path) {
   await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
   await new Promise((r) => natsStub.listen(NATS_PORT, '127.0.0.1', r));
 
-  /* ------------------------------------------------------------- health --- */
   const health = await get('/api/health');
   check('health answers 200', () => assert.strictEqual(health.status, 200));
   check('health is json', () => assert.match(health.headers['content-type'], /application\/json/));
   check('health reports a version', () => assert.ok(JSON.parse(health.body).version));
 
-  /* --------------------------------------------------------------- host --- */
   const host = JSON.parse((await get('/api/host')).body);
   check('host reports its own name', () => assert.ok(host.hostname && host.hostname.length));
   check('host cpu usage is a real ratio', () => {
@@ -121,7 +101,6 @@ function send(method, path) {
   });
   check('host telemetry is timestamped', () => assert.ok(Date.parse(host.at) > 0));
 
-  // Two samples must differ: a single cumulative reading would be constant.
   await new Promise((r) => setTimeout(r, 250));
   const host2 = JSON.parse((await get('/api/host')).body);
   check('cpu is sampled over an interval, not since boot', () => {
@@ -129,7 +108,6 @@ function send(method, path) {
       `window ${host2.cpu.sampledOverMs}ms`);
   });
 
-  /* ---------------------------------------------------------------- aws --- */
   const cap = JSON.parse((await get('/api/capabilities')).body);
   check('capabilities answers without credentials', () => assert.ok(cap.region));
   check('capabilities reports aws as not connected', () => assert.strictEqual(cap.aws.connected, false));
@@ -155,12 +133,6 @@ function send(method, path) {
     assert.ok(overview.host.hostname, 'host section should still work');
   });
 
-  /* ------------------------------------------------------------- storage --- */
-  /* These run with NO object store reachable, which is the state on a laptop
-     before `docker compose up` and during any outage of it. The requirement is
-     not that they succeed -- it is that they fail as data rather than as a
-     stack trace, so the console can render a reason instead of a blank panel. */
-
   for (const path of ['/api/storage/health', '/api/storage/capacity', '/api/storage/buckets']) {
     const r = await get(path);
     check(`${path} degrades to a reason, not a 500`, () => {
@@ -177,10 +149,6 @@ function send(method, path) {
   check('lock-status says "not determined" rather than inventing a verdict', () => {
     assert.strictEqual(lock.status, 200);
     const b = JSON.parse(lock.body);
-    /* The dangerous failure here is a green shield with nothing behind it, so
-       the only two acceptable answers are a real verdict or an explicit
-       "undetermined". A default of "enforced" would be a lie about the one
-       control ADR-0020 depends on. */
     if (b.determined) assert.ok(['enforced', 'not-enforced', 'unknown'].includes(b.verdict), `verdict ${b.verdict}`);
     else assert.ok(b.message && /probe|storage-init/i.test(b.message), 'no explanation for the missing verdict');
   });
@@ -192,13 +160,9 @@ function send(method, path) {
 
   const badType = await get('/api/storage/preview?bucket=argus-ml&key=payload.exe');
   check('preview refuses a type that is not on the allowlist', () => {
-    /* 415 when the store is reachable, an upstream failure when it is not.
-       What must never happen is 200: the allowlist decides the content type,
-       so a hole here is stored XSS against the console's own origin. */
     assert.notStrictEqual(badType.status, 200, 'an executable was previewable');
   });
 
-  /* -------------------------------------------------------------- guards --- */
   const post = await send('POST', '/api/aws/instances');
   check('mutating verbs are refused while read-only', () => {
     assert.strictEqual(post.status, 405);
@@ -330,7 +294,6 @@ function send(method, path) {
     assert.strictEqual(shared.length, 1, shared.join(' | '));
   });
 
-  /* --------------------------------------------------------------- cache --- */
   let upstreamCalls = 0;
   const counted = async () => { upstreamCalls += 1; return { call: upstreamCalls }; };
   const cold = await cache.through('smoke:warmth', 60000, counted);
@@ -374,7 +337,6 @@ function send(method, path) {
     assert.strictEqual(cache.has('smoke:bound:' + (overflow - 1)), true, 'the newest key was evicted');
   });
 
-  /* -------------------------------------------------------------- report --- */
   server.close();
   natsStub.close();
 

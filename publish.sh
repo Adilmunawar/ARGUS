@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-#
-# publish.sh: create the GitHub repository, push, release, and protect main.
-#
-#   cd argus
-#   ./publish.sh                    # public  (default)
-#   ./publish.sh --private          # start private, flip later
-#   ./publish.sh --name my-repo     # different repository name
-#
-# Authentication: this uses the GitHub CLI's own login. Run `gh auth login`
-# once and it stores an OAuth token in your system keychain. Nothing is typed
-# into a script, pasted into a URL, or written to .git/config in plain text.
-#
-# If you must use a PAT instead, export it yourself before running:
-#   read -rs GH_TOKEN && export GH_TOKEN     # -s hides it, and it stays out of shell history
-# Never pass a token as a command-line argument: arguments are visible to every
-# other process on the machine via `ps`.
 
 set -euo pipefail
 
@@ -39,7 +23,6 @@ done
 say() { printf '\n\033[1;32m▸\033[0m %s\n' "$1"; }
 die() { printf '\n\033[1;31m✗\033[0m %s\n' "$1" >&2; exit 1; }
 
-# ── Preflight ────────────────────────────────────────────────────────────────
 command -v git >/dev/null || die "git is not installed."
 command -v gh  >/dev/null || die "GitHub CLI is not installed. https://cli.github.com, then run: gh auth login"
 [[ -d .git ]] || die "Run this from inside the argus repository."
@@ -63,7 +46,6 @@ say "Publishing as $OWNER/$NAME  (${VISIBILITY#--})"
 read -rp "  Continue? [y/N] " ok
 [[ "$ok" =~ ^[Yy]$ ]] || { echo "  Cancelled."; exit 0; }
 
-# ── Create ───────────────────────────────────────────────────────────────────
 if gh repo view "$OWNER/$NAME" >/dev/null 2>&1; then
   say "Repository already exists, adding it as a remote"
   git remote get-url origin >/dev/null 2>&1 || git remote add origin "https://github.com/$OWNER/$NAME.git"
@@ -82,7 +64,6 @@ say "Pushing $(git rev-list --count HEAD) commits and $(git tag | wc -l | tr -d 
 git push -u origin "$BRANCH"
 git push --tags
 
-# ── Release ──────────────────────────────────────────────────────────────────
 LATEST="$(git describe --tags --abbrev=0 2>/dev/null || true)"
 if [[ -n "$LATEST" ]] && ! gh release view "$LATEST" >/dev/null 2>&1; then
   say "Cutting release $LATEST"
@@ -93,11 +74,6 @@ if [[ -n "$LATEST" ]] && ! gh release view "$LATEST" >/dev/null 2>&1; then
   gh release create "$LATEST" --title "$LATEST" --notes "${NOTES:-See CHANGELOG.md}"
 fi
 
-# ── Protect ──────────────────────────────────────────────────────────────────
-# Signed commits are deliberately not required here. Turning that on without a
-# signing key configured locks the owner out of their own repository. Configure
-# signing first, then enable it in Settings -> Branches. ADR-0023 has the
-# reconciler verify signatures regardless of what GitHub enforces.
 BRANCH="$(git symbolic-ref --short HEAD)"
 
 say "Protecting $BRANCH: pull request required, validate checks required"
@@ -124,7 +100,6 @@ else
   printf '    %s\n' "$protect_err" | head -3
 fi
 
-# Free for public repositories.
 gh api -X PATCH "repos/$OWNER/$NAME" \
   -f 'security_and_analysis[secret_scanning][status]=enabled' \
   -f 'security_and_analysis[secret_scanning_push_protection][status]=enabled' >/dev/null 2>&1 \

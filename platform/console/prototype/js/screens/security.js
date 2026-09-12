@@ -1,27 +1,14 @@
-/* Security: posture, alerts, vulnerabilities, recorded sessions, evidence.
- *
- * Everything here renders strings that came from outside the product: Wazuh rule
- * names, CVE component strings, session reasons typed by an operator. They are
- * built as text nodes through ui.el and never as markup.
- *
- * Classic script, no modules, ES5 only: the console opens from file:// with no
- * build step and no network (ADR-0027).
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
 
-  /* siem-01 and guac-01 run Ubuntu. Wazuh reports 0 for the Defender family on
-   * them because the family does not exist there, not because it failed. */
   var LINUX_HOSTS = { 'siem-01': true, 'guac-01': true };
 
   var SEV_TONE = { critical: 'bad', high: 'bad', medium: 'warn', low: 'info' };
   var STATE_TONE = { open: 'warn', ack: 'info', resolved: 'ok' };
   var SESSION_TONE = { active: 'warn', closed: 'ok', terminated: 'bad' };
 
-  /* Named CIS and Microsoft baseline checks, one set per control family. The
-   * numbering follows the CIS Microsoft Windows Server benchmark layout. */
   var CIS_CHECKS = {
     'Account policy': [
       '1.1.1 Enforce password history: 24 passwords remembered',
@@ -60,8 +47,6 @@
     ]
   };
 
-  /* A recorded session is only useful if you can see what was typed. These are
-   * the keystroke tracks Guacamole would have written alongside the video. */
   var KEYSTROKES = {
     's-2291': [
       { at: 18, text: 'sqlcmd -S sql-drill-01 -E -Q "SELECT @@VERSION"' },
@@ -97,22 +82,18 @@
     ]
   };
 
-  /* ------------------------------------------------------------ helpers --- */
-
   function isApplicable(d, host, colIndex) {
     return !(LINUX_HOSTS[host] && d.posture.families[colIndex] === 'Defender');
   }
 
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
 
-  /** mm:ss, or h:mm:ss once a recording runs past an hour. */
   function offsetLabel(seconds) {
     var s = Math.max(0, Math.round(seconds));
     var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
     return (h ? h + ':' + pad2(m) : pad2(m)) + ':' + pad2(sec);
   }
 
-  /** What else would stop if this machine were pulled off the network. */
   function blastFor(name) {
     var d = A.data;
     var guests = d.vms.filter(function (v) { return v.host === name; })
@@ -128,8 +109,6 @@
     if (app) return name + ' serves ' + app.display + ' on ' + app.host + '.';
     return 'Nothing else in the inventory is recorded as running on ' + name + '.';
   }
-
-  /* ------------------------------------------------------------ posture --- */
 
   function postureTab() {
     var d = A.data, p = d.posture;
@@ -171,7 +150,6 @@
     ]);
 
     var grid = ui.heatgrid(p.hosts, p.families, function (host, colIndex) {
-      // ui.heatgrid renders null as the not-applicable tone.
       if (!isApplicable(d, host, colIndex)) return null;
       return p.scores[host][colIndex];
     }, {
@@ -243,8 +221,6 @@
       ], { flush: false })
     ]);
   }
-
-  /* ------------------------------------------------------------- alerts --- */
 
   function acknowledgeDialog(alert) {
     A.dialog({
@@ -490,8 +466,6 @@
     var tableHost = el('div');
     var alertTable = null;
 
-    /* The table is built once and re-fed, so the operator's chosen sort
-       survives a token change. */
     function paint(tokens) {
       var rows = ui.applyTokens(d.alerts, tokens || [], accessors);
       if (alertTable) { alertTable.setRows(rows); return; }
@@ -525,15 +499,11 @@
     ]);
   }
 
-  /* --------------------------------------------------- vulnerabilities --- */
-
   function waiverCell(v) {
     var d = A.data;
     if (!v.waiver) return el('span.muted', { text: 'none' });
     var expired = v.waiver.until < d.now;
     if (expired) {
-      /* An expired waiver is not a silent pass. It is a finding with nobody
-       * currently accountable for it. */
       return el('div.col', [
         ui.pill('waiver expired', 'bad'),
         el('span.muted', {
@@ -547,14 +517,6 @@
     });
   }
 
-  /**
-   * Add a waiver.
-   *
-   * The fields are built once, here, and held. A.dialog evaluates body() and
-   * actions() as siblings of one element tree and appends the panel to the
-   * document afterwards, so a getElementById lookup from actions() would find
-   * nothing. Holding the nodes removes the ordering question entirely.
-   */
   function addWaiverDialog() {
     var owner = el('input.field', { type: 'text', id: 'waiver-owner', autocomplete: 'off', spellcheck: 'false' });
     var reason = el('textarea.field', { id: 'waiver-reason', rows: '3', spellcheck: 'false' });
@@ -637,12 +599,8 @@
     ]);
   }
 
-  /* ----------------------------------------------------------- sessions --- */
-
   function buildPlayer(session) {
     var keys = (KEYSTROKES[session.id] || []).slice();
-    // Guarding the divisor, deliberately: a zero-length recording has nothing
-    // to scrub through, and 1 keeps the arithmetic finite rather than pretending.
     var duration = session.duration > 0 ? session.duration : 1;
     var playTimer = null;
     var speed = 1;
@@ -652,22 +610,9 @@
       text: session.user + ' on ' + session.target + ' · ' + session.protocol + ' · ' + session.reason
     });
 
-    /* Two readouts on purpose. statusNode is a live region and only changes when
-     * the operator does something. posNode ticks once a second and is NOT live,
-     * because a screen reader announcing the playhead every second is unusable. */
     var statusNode = el('p.hint', { role: 'status', text: 'Paused at the start.' });
     var posNode = el('span.mono', { text: offsetLabel(0) + ' / ' + offsetLabel(duration) });
 
-    /*
-     * Markers live INSIDE the track: `left: N%` on an absolutely positioned
-     * span resolves against the nearest positioned ancestor, so the track has
-     * to be that ancestor.
-     *
-     * They are also capped. One absolutely positioned span per keystroke is
-     * fine for six and meaningless for two thousand: past the cap the track is
-     * sampled evenly, so the shape of the activity survives without asking the
-     * compositor to place a marker every half pixel.
-     */
     var MARKER_CAP = 160;
     var markerKeys = keys;
     if (keys.length > MARKER_CAP) {
@@ -683,8 +628,6 @@
       });
     }));
 
-    /* The scrubber is an input[type=range]: a div you can only drag fails
-     * WCAG 2.5.7 Dragging Movements, and an operator on a keyboard cannot seek. */
     var range = el('input', {
       type: 'range', min: '0', max: String(duration), step: '1', value: '0',
       'aria-label': 'Playhead in the recording of ' + session.id + ', ' + session.user
@@ -703,12 +646,6 @@
       placeholder: 'Filter keystrokes'
     });
 
-    /*
-     * The keystroke track is sorted by offset, so the last entry at or before a
-     * position is a binary search, not a scan of the whole track with no early
-     * exit. This runs twice per position change, and a position change happens
-     * on every tick of playback and on every pointer move while scrubbing.
-     */
     function currentIndex(at) {
       var lo = 0, hi = keys.length - 1, idx = -1;
       while (lo <= hi) {
@@ -719,8 +656,6 @@
       return idx;
     }
 
-    // The lowercased haystack is computed once per track rather than once per
-    // line per keystroke of the filter.
     var haystack = keys.map(function (k) { return k.text.toLowerCase(); });
 
     function paintLog() {
@@ -771,7 +706,6 @@
       stop();
       statusNode.textContent = 'Playing at ' + speed + 'x from ' + offsetLabel(Number(range.value)) + '.';
       playTimer = window.setInterval(function () {
-        // The tab panel is rebuilt on navigation, so a detached player stops itself.
         if (!document.body.contains(range)) { stop(); return; }
         var at = Number(range.value) + speed;
         if (at >= duration) {
@@ -883,8 +817,6 @@
     ]);
   }
 
-  /* ---------------------------------------------------------- evidence --- */
-
   function evidenceItems() {
     var d = A.data;
 
@@ -960,8 +892,6 @@
     ]);
   }
 
-  /* -------------------------------------------------------------- screen --- */
-
   A.screen('security', {
     title: 'Security',
     crumb: 'Security',
@@ -976,14 +906,9 @@
 
       mount.appendChild(ui.pageHeader('Security',
         'Baseline drift, alerts, vulnerabilities and every recorded session, with the evidence pack that ties them together.'));
-      // The bell links to #/security/alerts, so that tab opens. Selecting it is
-      // not the same as reordering the tablist, which would move the tabs about
-      // depending on how you arrived.
       mount.appendChild(ui.tabs(items, {
         label: 'Security sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,
-        /* Overview links to "#/security/alerts?id=al-9021", so the alert it
-           names is revealed and highlighted when the tab opens. */
         onSelect: function (id) {
           var want = ctx && ctx.params && ctx.params.id;
           if (id === 'alerts' && want) ui.revealRow(mount, want, { label: 'Alert ' + want + ' is highlighted' });

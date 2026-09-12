@@ -1,25 +1,3 @@
-/*
- * Argus console API: streaming and observability-reader tests.
- *
- *   node test/streams.js
- *
- * Two things are being proved here.
- *
- * FIRST, that every one of these upstreams is genuinely optional. Loki,
- * Prometheus, Alertmanager and the Docker socket proxy all sit behind the
- * `observability` Compose profile, which the core stack does not start. A
- * console that 500s or hangs when they are absent is a console nobody can use
- * during the outage it exists for, so "not configured" and "unreachable" are
- * asserted as ordinary 200 answers carrying a reason.
- *
- * SECOND, that Last-Event-ID actually replays. Emitting `id:` and then ignoring
- * the header on reconnect is silent data loss dressed up as a feature, so the
- * Loki tail is driven through a real WebSocket server built here by hand --
- * Node has a WebSocket client but no server, and the handshake is smaller than
- * the dependency would be.
- *
- * Exit code is the failure count, so CI can gate on it.
- */
 'use strict';
 
 const http = require('http');
@@ -51,7 +29,7 @@ process.env.AWS_SECRET_ACCESS_KEY = '';
 process.env.AWS_PROFILE = '__argus_streams_no_such_profile__';
 process.env.AWS_EC2_METADATA_DISABLED = 'true';
 
-const { server, logRing } = require('../src/index.js');
+const { server, logRingFor } = require('../src/index.js');
 const { RingBuffer, replayPlan } = require('../src/sse.js');
 const containers = require('../src/containers.js');
 const metrics = require('../src/metrics.js');
@@ -128,8 +106,6 @@ function frames(text) {
   });
 }
 
-/* ------------------------------------------------------------ stub upstreams --- */
-
 const PROM_QUERY_RANGE = {
   status: 'success',
   data: {
@@ -202,8 +178,6 @@ const dockerStub = http.createServer((req, res) => {
   res.end(text);
 });
 
-/* A WebSocket server small enough to read. Node ships a client and no server,
-   and the handshake plus unmasked text framing is all this needs. */
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 function textFrame(payload) {
@@ -260,8 +234,6 @@ function listen(s, port) {
   await listen(dockerStub, DOCKER_PORT);
   await listen(lokiStub, LOKI_PORT);
 
-  /* -------------------------------------------------- the ring buffer alone --- */
-
   const ring = new RingBuffer(4);
   for (const value of ['a', 'b', 'c']) ring.push(value);
   check('a ring buffer numbers entries from one and replays only what came after an id', () => {
@@ -298,8 +270,6 @@ function listen(s, port) {
     assert.strictEqual(replayPlan(ring, 'nine').resumed, false);
     assert.strictEqual(replayPlan(ring, '-4').resumed, false);
   });
-
-  /* ------------------------------------------------------- SSE framing --- */
 
   const beats = await openStream('/api/heartbeats/stream');
   check('a stream answers as an event stream and forbids buffering', () => {
@@ -344,8 +314,6 @@ function listen(s, port) {
   });
   beats.close();
 
-  /* ------------------------------------------- two-strike gate and uptime --- */
-
   await heartbeats.runOnce(probe);
   check('a failing check stays pending until it has failed more than maxRetries times', () => {
     assert.strictEqual(probe.lastBeat.statusName, 'pending', `status ${probe.lastBeat.statusName}`);
@@ -370,8 +338,24 @@ function listen(s, port) {
   });
 
   check('uptime is a ratio of what was actually observed, or null when nothing was', () => {
-    assert.strictEqual(heartbeats.uptimeOver([null, null], 2), null);
-    assert.strictEqual(heartbeats.uptimeOver([{ up: 3, down: 1 }], 1), 0.75);
+    assert.strictEqual(heartbeats.uptimeOver([null, null], 2, 0), null);
+    assert.strictEqual(heartbeats.uptimeOver([{ period: 0, up: 3, down: 1 }], 1, 0), 0.75);
+  });
+  check('an uptime window reads the slots the window covers, not the first slots in the ring', () => {
+    const ring = new Array(4).fill(null);
+    ring[2] = { period: 102, up: 1, down: 0 };
+    ring[3] = { period: 99, up: 0, down: 1 };
+    assert.strictEqual(heartbeats.uptimeOver(ring, 2, 102), 1);
+    assert.strictEqual(heartbeats.uptimeOver(ring, 4, 102), 0.5);
+    assert.strictEqual(heartbeats.uptimeOver(ring, 4, 99), 0);
+  });
+  check('a ring slot reused by a later period does not carry the older period forward', () => {
+    const reused = new heartbeats.Monitor({ id: 'streams-wrap', label: 'Wrap', probe: async () => ({ up: true }) });
+    const at = Date.now();
+    heartbeats.record(reused, heartbeats.STATUS.UP, 1, at);
+    heartbeats.record(reused, heartbeats.STATUS.UP, 1, at + 24 * 3600 * 1000);
+    const slot = reused.minutely[Math.floor((at + 24 * 3600 * 1000) / 60000) % reused.minutely.length];
+    assert.strictEqual(slot.up, 1, `a wrapped slot accumulated ${slot.up} beats from earlier days`);
   });
 
   const uptime = JSON.parse((await get('/api/heartbeats/uptime')).body);
@@ -390,8 +374,6 @@ function listen(s, port) {
     assert.strictEqual(mine[0].statusName, 'up');
     assert.strictEqual(mine[1].statusName, 'down');
   });
-
-  /* ------------------------------------------- loki tail, live, then replay --- */
 
   const tail = await openStream('/api/logs/stream?query=' + encodeURIComponent('{container="argus-console"}'));
   check('the log stream opens against a reachable Loki', () => {
@@ -443,7 +425,8 @@ function listen(s, port) {
   await farBehind.until((t) => t.includes('event: open'), 4000);
   check('a resume from before the buffer begins is answered with a gap, not silence', () => {
     const replayed = frames(farBehind.text).filter((f) => f.event === 'line');
-    assert.strictEqual(replayed.length, logRing.size, 'the whole buffer was not replayed');
+    assert.strictEqual(replayed.length, logRingFor('{container="argus-console"}').size,
+      'the whole buffer was not replayed');
     const open = frames(farBehind.text).find((f) => f.event === 'open');
     assert.strictEqual(open.data.replayedFrom, 0);
   });
@@ -462,8 +445,6 @@ function listen(s, port) {
     assert.strictEqual(lokiLabels.ok, true, JSON.stringify(lokiLabels).slice(0, 200));
     assert.deepStrictEqual(lokiLabels.labels, ['container', 'job']);
   });
-
-  /* -------------------------------------------------------- prometheus --- */
 
   const cpu = JSON.parse((await get('/api/metrics/series?name=hostCpuBusyRatio&window=3600000&points=120')).body);
   check('a named series comes back as points a sparkline can draw', () => {
@@ -496,8 +477,6 @@ function listen(s, port) {
     assert.strictEqual(promTargets.total, 2);
     assert.strictEqual(promTargets.down, 1);
   });
-
-  /* ---------------------------------------------------------- containers --- */
 
   const list = JSON.parse((await get('/api/containers')).body);
   check('the container inventory reads through the socket proxy', () => {
@@ -548,8 +527,6 @@ function listen(s, port) {
     feed(whole.subarray(12));
     assert.deepStrictEqual(collected, [[1, 'out line\n'], [2, 'err line\n']]);
   });
-
-  /* --------------------------------------- degradation: absent and unreachable --- */
 
   const unreachable = ['/api/alerts/active', '/api/alerts/groups', '/api/alerts/silences',
     '/api/alerts/receivers', '/api/alerts/health'];
@@ -630,8 +607,6 @@ function listen(s, port) {
     assert.strictEqual(typeof unconfiguredLogs, 'function');
   });
 
-  /* ------------------------- the stream routes themselves, with nothing behind them --- */
-
   const bareServer = spawn(process.execPath, [path.resolve(__dirname, '..', 'src', 'index.js')], {
     env: {
       ...process.env,
@@ -688,7 +663,55 @@ function listen(s, port) {
 
   bareServer.kill('SIGKILL');
 
-  /* -------------------------------------------------------------- report --- */
+  const deadUpstreamServer = spawn(process.execPath, [path.resolve(__dirname, '..', 'src', 'index.js')], {
+    env: {
+      ...process.env,
+      ARGUS_PORT: String(DEAD_PORT + 2),
+      ARGUS_HOST: '127.0.0.1',
+      ARGUS_AUTH: 'off',
+      ARGUS_LOG_LEVEL: 'error',
+      ARGUS_LOKI_URL: `http://127.0.0.1:${DEAD_PORT}`,
+      ARGUS_DOCKER_PROXY_URL: `http://127.0.0.1:${DEAD_PORT}`,
+      ARGUS_SSE_HEARTBEAT_MS: '1000',
+      ARGUS_UPSTREAM_TIMEOUT_MS: '2000',
+      ARGUS_HEARTBEAT_INTERVAL_MS: '3600000'
+    },
+    stdio: ['ignore', 'ignore', 'pipe']
+  });
+
+  function askDeadUpstream(requestPath) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`${requestPath} was still open after 6 seconds`)), 6000);
+      const req = http.request({
+        host: '127.0.0.1', port: DEAD_PORT + 2, path: requestPath,
+        headers: { accept: 'text/event-stream', 'sec-fetch-site': 'same-origin' }
+      }, (res) => {
+        let body = '';
+        res.on('data', (d) => { body += d; });
+        res.on('end', () => { clearTimeout(timer); resolve({ status: res.statusCode, body }); });
+      });
+      req.on('error', (err) => { clearTimeout(timer); reject(err); });
+      req.end();
+    });
+  }
+
+  for (let i = 0; i < 50; i += 1) {
+    try { await askDeadUpstream('/api/health'); break; } catch (err) { await sleep(100); }
+  }
+
+  for (const requestPath of ['/api/logs/stream?query=' + encodeURIComponent('{a="b"}'),
+    '/api/containers/logs?id=abc', '/api/containers/events']) {
+    let answer = null;
+    let failure = null;
+    try { answer = await askDeadUpstream(requestPath); } catch (err) { failure = err; }
+    check(`${requestPath} ends the event stream when its upstream is configured but dead`, () => {
+      assert.strictEqual(failure, null, failure && failure.message);
+      assert.match(answer.body, /event: unavailable/,
+        'the stream ended without saying why its upstream was unreachable');
+    });
+  }
+
+  deadUpstreamServer.kill('SIGKILL');
 
   server.close();
   promStub.close();

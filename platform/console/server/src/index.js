@@ -1,25 +1,3 @@
-/*
- * The Argus console API.
- *
- *   node src/index.js          # http://127.0.0.1:8787
- *
- * Serves real host telemetry, a real AWS inventory, and the console's own
- * static files, from one process with no build step.
- *
- * Deliberate choices:
- *
- *  - Node's own http module, no framework. The console runs inside an
- *    egress-restricted network (ADR-0027) and every dependency is a thing that
- *    has to be reviewed and patched there. The only dependencies are the AWS
- *    clients, which are doing work nothing in the standard library does.
- *  - Binds to loopback unless told otherwise. An estate inventory should not
- *    appear on a network interface because somebody ran `npm start`.
- *  - Read-only unless ARGUS_ALLOW_WRITES is set. The route table refuses
- *    mutating verbs outright, so evaluating the dashboard cannot terminate an
- *    instance.
- *  - Every payload carries `stale` and `cachedAt`. A number without an age is
- *    a number an operator will trust for longer than they should.
- */
 'use strict';
 
 const http = require('http');
@@ -79,10 +57,6 @@ if (authConfig.mode === 'off') {
 
 const STARTED = new Date();
 
-/* A handler returns one of these when the response is not JSON -- object
-   preview is the only case today. Without an escape hatch the alternative is a
-   second server or a base64 blob inside a JSON envelope, and the second one
-   quietly triples the memory cost of every image an operator opens. */
 class RawResponse {
   constructor({ status = 200, headers = {}, body = null, stream = null }) {
     this.status = status;
@@ -92,10 +66,6 @@ class RawResponse {
   }
 }
 
-/* Map a thrown error onto the status it deserves.
- *
- * The console renders retry affordances off these, so getting them wrong means
- * offering Try Again for something that will never succeed. */
 const STATUS_FOR = {
   ValidationError: 400,
   UnsupportedType: 415,
@@ -113,8 +83,6 @@ function statusForError(err) {
   return 500;
 }
 
-/* decodeURIComponent throws URIError on a malformed escape such as "%" or
-   "%zz". A request for one of those must be a 404, not an unhandled throw. */
 function safeDecode(s) {
   try { return decodeURIComponent(s); } catch (err) { return s; }
 }
@@ -146,7 +114,20 @@ async function pgTableOptions(q) {
   return { database: requested };
 }
 
-const logRing = new RingBuffer(config.logRingLines);
+const logRings = new Map();
+
+function logRingFor(query) {
+  const existing = logRings.get(query);
+  if (existing) {
+    logRings.delete(query);
+    logRings.set(query, existing);
+    return existing;
+  }
+  while (logRings.size >= config.logRingQueries) logRings.delete(logRings.keys().next().value);
+  const ring = new RingBuffer(config.logRingLines);
+  logRings.set(query, ring);
+  return ring;
+}
 
 function streamUnavailable(reason) {
   return new RawResponse({
@@ -159,8 +140,6 @@ function streamUnavailable(reason) {
   });
 }
 
-/* ------------------------------------------------------------------ routes --- */
-
 const routes = {
   'GET /api/health': async (q, ctx) => ({
     status: 'ok',
@@ -169,8 +148,6 @@ const routes = {
     ...(ctx && ctx.principal ? { version: require('../package.json').version } : {})
   }),
 
-  /* One call the UI can make on load to learn what this deployment can do,
-     instead of discovering it from a series of failures. */
   'GET /api/capabilities': async (q, ctx) => {
     const principal = ctx && ctx.principal;
     if (!principal) {
@@ -215,12 +192,6 @@ const routes = {
   'GET /api/aws/alarms': async () => aws.alarms(),
   'GET /api/aws/cost': async () => aws.cost(),
 
-  /* ---------------------------------------------------------- object store ---
-     The S3 replacement. Unlike the /api/aws/* routes above, these read a
-     service this project runs itself, so "not configured" is not an expected
-     answer -- if these fail, something is actually wrong, and the reason says
-     which part. */
-
   'GET /api/storage/health': async () => storage.health(),
   'GET /api/storage/capacity': async () => storage.capacity(),
   'GET /api/storage/buckets': async () => storage.buckets(),
@@ -232,15 +203,9 @@ const routes = {
   'GET /api/storage/object': async (q) =>
     storage.describeObject({ bucket: q.bucket, key: q.key }),
 
-  /* Budgeted, serialised, and only ever reached from a button. See storage.js. */
   'GET /api/storage/prefix-size': async (q) =>
     storage.prefixSize({ bucket: q.bucket, prefix: q.prefix || '' }),
 
-  /* The one non-JSON route. Every header here is load-bearing: these are
-     user-uploaded survey photographs served from the console's own origin, so
-     without the sandbox and a content type chosen by allowlist rather than by
-     the uploader, an .html in a bucket is stored XSS against the control
-     plane. */
   'GET /api/storage/preview': async (q) => {
     const { body, contentType, contentLength } = await storage.previewObject({ bucket: q.bucket, key: q.key });
     return new RawResponse({
@@ -257,12 +222,6 @@ const routes = {
       body
     });
   },
-
-  /* ------------------------------------------------------ the rest of the stack ---
-     Postgres, the cache, the queues and the vault. Each module reports an
-     unreachable service as a normal state with a reason, so a route here
-     answering 200 with ok:false is the expected shape while that service's
-     profile is not started -- not a failure to handle. */
 
   'GET /api/pg/server': async () => pg.server(),
   'GET /api/pg/databases': async () => pg.databases(),
@@ -289,13 +248,6 @@ const routes = {
   'GET /api/secrets/seal-status': async () => secrets.sealStatus(),
   'GET /api/secrets/ha': async () => secrets.ha(),
   'GET /api/secrets/sandbox': async () => secrets.sandbox(),
-
-  /* -------------------------------------------------------------- streams ---
-     Loki, Prometheus, Alertmanager and the Docker socket proxy all sit behind
-     the `observability` Compose profile, which the core stack does not start.
-     Every route here answers "not configured" as data, the way the AWS layer
-     does, because a console that 500s when an optional profile is down is a
-     console nobody trusts during the outage it was built for. */
 
   'GET /api/logs/health': async () => logs.health(),
   'GET /api/logs/labels': async () => logs.labels(),
@@ -329,7 +281,8 @@ const routes = {
     return new EventStream({
       label: 'logs',
       onOpen: (sink, req) => {
-        const plan = replayPlan(logRing, req.headers['last-event-id']);
+        const ring = logRingFor(selector);
+        const plan = replayPlan(ring, req.headers['last-event-id']);
         if (plan.resumed) {
           if (plan.missed > 0) {
             sink.note('gap', {
@@ -345,13 +298,16 @@ const routes = {
         sink.note('open', { query: selector, limit, replayedFrom: plan.from });
 
         return logs.openTail({ query: selector, limit }, {
-          onLine: (line) => sink.send('line', line, logRing.push(line)),
+          onLine: (line) => sink.send('line', line, ring.push(line)),
           onDropped: (count) => sink.note('dropped', {
             lines: count,
             reason: 'loki reported dropped entries for this tail'
           }),
-          onUnavailable: (reason) => sink.note('unavailable', reason),
-          onClose: (code) => sink.note('closed', { code: code === undefined ? null : code })
+          onUnavailable: (reason) => { sink.note('unavailable', reason); sink.close(); },
+          onClose: (code) => {
+            sink.note('closed', { code: code === undefined ? null : code });
+            sink.close();
+          }
         });
       }
     });
@@ -395,14 +351,15 @@ const routes = {
     return new EventStream({
       label: 'container-logs',
       onOpen: (sink) => {
-        let stop = () => {};
+        let stop = null;
+        let stopped = false;
         sink.note('open', { id, tail });
         containers.openLogs({ id, tail, since: q.since }, {
           onLine: (line) => sink.send('line', line),
-          onUnavailable: (reason) => sink.note('unavailable', reason),
-          onClose: () => sink.note('closed', { id })
-        }).then((fn) => { stop = fn; }, () => {});
-        return () => stop();
+          onUnavailable: (reason) => { sink.note('unavailable', reason); sink.close(); },
+          onClose: () => { sink.note('closed', { id }); sink.close(); }
+        }).then((fn) => { stop = fn; if (stopped) fn(); }, () => {});
+        return () => { stopped = true; if (stop) stop(); };
       }
     });
   },
@@ -417,14 +374,15 @@ const routes = {
     return new EventStream({
       label: 'container-events',
       onOpen: (sink) => {
-        let stop = () => {};
+        let stop = null;
+        let stopped = false;
         sink.note('open', {});
         containers.openEvents({
           onEvent: (event) => sink.send('event', event),
-          onUnavailable: (reason) => sink.note('unavailable', reason),
-          onClose: () => sink.note('closed', {})
-        }).then((fn) => { stop = fn; }, () => {});
-        return () => stop();
+          onUnavailable: (reason) => { sink.note('unavailable', reason); sink.close(); },
+          onClose: () => { sink.note('closed', {}); sink.close(); }
+        }).then((fn) => { stop = fn; if (stopped) fn(); }, () => {});
+        return () => { stopped = true; if (stop) stop(); };
       }
     });
   },
@@ -452,9 +410,6 @@ const routes = {
     }
   }),
 
-  /* The estate in one call, for the overview screen. Partial failure is the
-     normal case -- an account may allow EC2 and deny RDS -- so each section
-     carries its own ok/reason and one denial does not blank the page. */
   'GET /api/overview': async () => {
     const [identity, instances, buckets, databases, alarms, h] = await Promise.all([
       aws.identity(), aws.instances(), aws.buckets(), aws.databases(), aws.alarms(), host.snapshot()
@@ -462,8 +417,6 @@ const routes = {
     return { identity, instances, buckets, databases, alarms, host: h, at: new Date().toISOString() };
   }
 };
-
-/* ------------------------------------------------------------------- serve --- */
 
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -494,8 +447,6 @@ function sendJson(res, status, body) {
 
 async function serveStatic(req, res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
-  // Resolve, then verify containment. Joining user input onto a root without
-  // this check allows path traversal.
   const target = path.resolve(WEB_ROOT, '.' + rel);
   if (target !== WEB_ROOT && !target.startsWith(WEB_ROOT + path.sep)) {
     return sendJson(res, 403, { error: 'forbidden' });
@@ -521,11 +472,6 @@ const server = http.createServer(async (req, res) => {
   headers.apply(res);
   res.setHeader('x-argus-request-id', requestId);
 
-  /* WHATWG URL, not url.parse. Node deprecated the legacy parser precisely
-     because its behaviour is not standardised and gets security decisions
-     wrong -- and the value it produces here is fed straight into a path
-     resolution. A parse that throws on a malformed request is the correct
-     outcome; it becomes a 400 rather than an ambiguous path. */
   let parsed;
   try {
     parsed = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
@@ -612,10 +558,6 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // Mutating verbs are refused unless writes are explicitly enabled, before
-  // any route is even looked up. Sign-in and sign-out are carved out: they are
-  // authentication, not a change to the estate, and refusing them here would
-  // make the default read-only deployment impossible to log into.
   if (!config.allowWrites && !authRoutes.WRITE_PATHS.has(pathname)
       && req.method !== 'GET' && req.method !== 'HEAD') {
     return sendJson(res, 405, {
@@ -635,9 +577,6 @@ const server = http.createServer(async (req, res) => {
       } else if (body instanceof RawResponse) {
         res.writeHead(body.status, body.headers);
         if (body.stream) {
-          /* Destroy the upstream body if the browser goes away mid-download,
-             so an operator closing a tab does not leave the S3 connection open
-             until it times out. */
           res.on('close', () => { if (typeof body.stream.destroy === 'function') body.stream.destroy(); });
           body.stream.on('error', (err) => {
             log('error', `${key} stream failed: ${err && err.message}`);
@@ -659,10 +598,6 @@ const server = http.createServer(async (req, res) => {
     log('error', `${key} failed: ${err && err.message}`);
     if (res.headersSent) { res.destroy(); return; }
     const status = statusForError(err);
-    /* A 4xx is the caller's fault and the caller can fix it, so it gets the
-       real reason. A 5xx is ours: the client gets a shape and the stack stays
-       in the log, because an internal stack in an HTTP body is a map of the
-       filesystem. */
     if (status < 500) {
       const c = storage.classify(err);
       sendJson(res, status, { ok: false, error: err.name || c.reason, message: err.message || c.message });
@@ -677,10 +612,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-/* Without these a console reachable from anything but a reverse proxy can be
-   held open by a client that never finishes a request. The Node docs are
-   explicit that requestTimeout must be non-zero when there is no proxy in
-   front, and this one is designed to run standalone. */
 server.requestTimeout = 30000;
 server.headersTimeout = 10000;
 server.keepAliveTimeout = 20000;
@@ -729,8 +660,6 @@ function registerMonitors() {
 
 registerMonitors();
 
-/* Shut down on a signal rather than being killed mid-response, so a rolling
-   restart does not drop the request somebody is waiting on. */
 function shutdown(signal) {
   log('info', `${signal} received, closing`);
   heartbeats.stop();
@@ -750,4 +679,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, routes, RawResponse, EventStream, logRing };
+module.exports = { server, routes, RawResponse, EventStream, logRingFor };

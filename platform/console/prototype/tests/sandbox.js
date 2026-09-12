@@ -1,30 +1,3 @@
-/**
- * Argus Console: the full-scale sandbox.
- *
- *   node tests/sandbox.js [path-to-index.html]
- *
- * run-tests.js asserts properties. This file tries to break the console the
- * way a person does: it opens it in nine different environments and then
- * presses every control it can find, on every screen, and watches for anything
- * that throws, navigates nowhere, traps focus, or leaves a timer running.
- *
- * A property test cannot find a control that was never wired; only pressing
- * it can.
- *
- *   ENV     boot integrity in nine environments (viewport x theme x density)
- *   ROUTE   every route and every deep link renders in every environment
- *   SWEEP   every button and link on every screen is pressed, and observed
- *   DIALOG  every dialog opens, traps focus, closes on Escape, restores focus
- *   MENU    every overflow menu opens, is reachable by keyboard, stays on screen
- *   FLOW    the destructive ladder, elevation, and a recorded session end to end
- *   KBD     the whole console driven by keyboard alone
- *   TABLE   every column of every table sorts both ways without throwing
- *   FUZZ    malformed URLs, tampered storage, and a storage-less browser
- *   LEAK    a long tour leaves no timers and no detached live regions
- *   QUIET   no console errors and no network requests, anywhere, ever
- *
- * Exit code is the number of failures.
- */
 const { chromium } = require('playwright');
 const fs = require('fs');
 const os = require('os');
@@ -76,13 +49,8 @@ async function goRoute(page, route) {
   return true;
 }
 
-/** Dismiss whatever overlay a click may have produced, and return to a clean shell. */
 async function reset(page) {
   await page.evaluate(() => {
-    // Close through the console's own teardown. Removing the scrim by hand
-    // leaves the opener stack holding a dialog that no longer exists, and the
-    // next dialog inherits its opener -- a bug in the harness that reads
-    // exactly like a bug in the product.
     if (window.ARGUS && window.ARGUS.dismissOverlays) window.ARGUS.dismissOverlays();
     document.querySelectorAll('.scrim.is-dialog').forEach(n => n.remove());
     document.querySelectorAll('.menu[role="menu"]').forEach(n => n.remove());
@@ -103,8 +71,6 @@ async function reset(page) {
 (async () => {
   const browser = await chromium.launch();
   const started = Date.now();
-
-  /* ================================================================ ENV === */
 
   for (const env of ENVS) {
     const ctx = await browser.newContext({
@@ -143,8 +109,6 @@ async function reset(page) {
     rec('ENV', `${env.id}: the shell does not scroll sideways`,
       !boot.overflowX, `scrollWidth exceeds clientWidth`);
 
-    /* ============================================================== ROUTE === */
-
     let routeFails = [], overflow = [];
     for (const r of ROUTES.concat(DEEP)) {
       const ok = await goRoute(page, r);
@@ -171,8 +135,6 @@ async function reset(page) {
     await ctx.close();
   }
 
-  /* ============================== the deep passes run on one rich context === */
-
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
   const errs = [];
@@ -181,9 +143,6 @@ async function reset(page) {
   await page.goto(URL, { waitUntil: 'load' });
   await settle(page, 200);
 
-  /* ============================================================== SWEEP === */
-
-  // Press every control on every screen and watch what happens.
   let dead = [], threw = [], swept = 0;
   for (const r of ROUTES) {
     await goRoute(page, r);
@@ -196,9 +155,6 @@ async function reset(page) {
       const snapshot = () => page.evaluate(() => ({
         hash: location.hash,
         main: document.getElementById('main').textContent.length,
-        // Sorting changes neither the hash nor the amount of text, so the
-        // observable effect is the order of the rows and the aria-sort that
-        // announces it.
         sorts: Array.prototype.map.call(document.querySelectorAll('#main th[aria-sort]'),
           n => n.getAttribute('aria-sort')).join(','),
         order: Array.prototype.map.call(document.querySelectorAll('#main tbody tr'),
@@ -220,8 +176,6 @@ async function reset(page) {
           label: (n.getAttribute('aria-label') || n.textContent || '').trim().slice(0, 40),
           visible: rect.width > 0 && rect.height > 0,
           disabled: n.getAttribute('aria-disabled') === 'true' || n.disabled === true,
-          // Pressing the sidebar item you are already on, or the tab that is
-          // already selected, is correctly a no-op.
           alreadyCurrent: n.getAttribute('aria-current') === 'page' ||
             n.getAttribute('aria-selected') === 'true'
         };
@@ -244,8 +198,6 @@ async function reset(page) {
       const blank = await page.evaluate(() =>
         document.getElementById('main').textContent.trim().length < 20);
 
-      // A control that produced no observable effect at all is a control that
-      // is not wired to anything.
       const didSomething = after.hash !== before.hash || after.main !== before.main ||
         after.sorts !== before.sorts || after.order !== before.order ||
         after.dialog || after.menu || after.drawer || after.flash ||
@@ -259,8 +211,6 @@ async function reset(page) {
     dead.length === 0, dead.slice(0, 10).join(' '));
   rec('SWEEP', 'no control throws or blanks the screen',
     threw.length === 0, threw.slice(0, 6).join(' | '));
-
-  /* ============================================================= DIALOG === */
 
   const DIALOGS = [
     { id: 'shortcuts', open: 'window.ARGUS.shortcuts()' },
@@ -278,7 +228,6 @@ async function reset(page) {
     const r = await page.evaluate(async src => {
       const opener = document.getElementById('helpbtn');
       opener.focus();
-      // eslint-disable-next-line no-eval
       eval(src);
       await new Promise(r => setTimeout(r, 200));
       const dlg = document.querySelector('.dialog[role="dialog"]');
@@ -303,8 +252,6 @@ async function reset(page) {
     rec('DIALOG', `${d.id}: Escape closes it`, r.closed, JSON.stringify(r));
     rec('DIALOG', `${d.id}: focus returns to whatever opened it`, r.restored, JSON.stringify(r));
   }
-
-  /* =============================================================== MENU === */
 
   await reset(page);
   await goRoute(page, 'apps');
@@ -333,8 +280,6 @@ async function reset(page) {
   }
   rec('MENU', 'every row menu opens on screen, escapes its scroll container, and closes',
     menuBad.length === 0, menuBad.slice(0, 4).join(' | '));
-
-  /* =============================================================== FLOW === */
 
   await reset(page);
   const ladder = await page.evaluate(async () => {
@@ -418,8 +363,6 @@ async function reset(page) {
   rec('FLOW', 'the session never renders a credential', sess.noCreds, JSON.stringify(sess));
   rec('FLOW', 'Escape ends the session', sess.closed, JSON.stringify(sess));
 
-  /* ================================================================ KBD === */
-
   await reset(page);
   await goRoute(page, 'overview');
   const kbd = await page.evaluate(async () => {
@@ -450,8 +393,6 @@ async function reset(page) {
     tabOrder.noPositive, JSON.stringify(tabOrder));
   rec('KBD', 'a skip link is the first thing in the document', tabOrder.hasSkip, JSON.stringify(tabOrder));
 
-  /* ============================================================== TABLE === */
-
   let sortFails = [];
   for (const r of ROUTES) {
     await goRoute(page, r);
@@ -470,9 +411,6 @@ async function reset(page) {
           const b = th.getAttribute('aria-sort');
           const orderB = Array.prototype.map.call(th.closest('table').querySelectorAll('tbody tr'),
             n => n.dataset.key || n.textContent.slice(0, 12)).join('|');
-          // The column that is already the active sort toggles to descending
-          // on its first press, which is correct; what matters is that the two
-          // presses land on the two directions and actually reorder the rows.
           const both = [a, b].sort().join(',') === 'ascending,descending';
           if (!both) bad.push(`${label}:${a}/${b}`);
           else if (orderA === orderB && orderA.indexOf('|') !== -1) bad.push(`${label}: aria-sort flipped but rows did not move`);
@@ -538,8 +476,6 @@ async function reset(page) {
   });
   rec('FLOW', 'every heartbeat bar carries its reading in words, not only in colour',
     hb.count > 0 && hb.named && hb.role && hb.shapes, JSON.stringify(hb));
-
-  /* =============================================================== FUZZ === */
 
   const FUZZ = [
     '#/apps?q=%', '#/apps?q=%zz', '#/apps?%=1', '#/data?x=%E0%A4',
@@ -617,7 +553,6 @@ async function reset(page) {
     pollutedBy.length === 0 && leakedToClass.length === 0,
     `${tamperFails.length + notRecovered.length + pollutedBy.length + leakedToClass.length} failures`);
 
-  // A browser with storage switched off entirely.
   const noStore = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   await noStore.addInitScript(() => {
     const boom = () => { throw new Error('storage disabled'); };
@@ -625,7 +560,7 @@ async function reset(page) {
       Object.defineProperty(window, 'localStorage', {
         get() { return { getItem: boom, setItem: boom, removeItem: boom, clear: boom }; }
       });
-    } catch (e) { /* ignore */ }
+    } catch (e) {  }
   });
   const p2 = await noStore.newPage();
   const p2errs = [];
@@ -646,8 +581,6 @@ async function reset(page) {
   rec('FUZZ', 'a storage-less browser raises no page error',
     p2errs.length === 0, p2errs.slice(0, 2).join(' | '));
   await noStore.close();
-
-  /* =============================================================== LEAK === */
 
   await page.goto(URL, { waitUntil: 'load' });
   await settle(page, 200);
@@ -680,15 +613,11 @@ async function reset(page) {
   rec('LEAK', 'exactly one live region survives a long tour',
     liveRegions === 1, `${liveRegions} live regions`);
 
-  /* ============================================================== QUIET === */
-
   rec('QUIET', 'the whole sandbox produced no page errors',
     errs.length === 0, errs.slice(0, 4).join(' | '));
 
   await ctx.close();
   await browser.close();
-
-  /* ============================================================= report === */
 
   const bySuite = {};
   results.forEach(r => {

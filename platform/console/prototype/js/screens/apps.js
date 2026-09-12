@@ -1,24 +1,8 @@
-/* Argus Console: Applications.
- *
- * A list of every service on the platform, and a detail view that answers the
- * three questions an operator actually has at 03:00: what is it, what does it
- * depend on, and what is it doing right now.
- *
- * Classic script, no modules, no build step, no network (ADR-0027). Every node
- * is built through ui.el, never from an HTML string: this screen renders log
- * lines, commit messages and dependency names that come from outside the
- * product, so one innerHTML here would be a stored XSS in an admin tool.
- */
 (function () {
   'use strict';
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
-  /* app.js is parsed before the screens and defers its own boot, so A.screen
-   * exists by now. The queue below guards against that ordering regressing:
-   * registrations are queued and flushed the moment app.js installs the real
-   * registry, rather than depending on the order of two <script> tags staying
-   * the way it is today. */
   function registerScreen(id, def) {
     if (typeof A.screen === 'function') { A.screen(id, def); return; }
     var q = (A._screenQueue = A._screenQueue || []);
@@ -34,21 +18,15 @@
     });
   }
 
-  /* ------------------------------------------------------------- shared --- */
-
   function healthPill(health) {
     return ui.pill(health === 'ok' ? 'Healthy' : 'Degraded', health === 'ok' ? 'ok' : 'warn');
   }
 
   function mono(text) { return el('code.mono', { text: String(text) }); }
 
-  /** A visible label plus a screen-reader suffix, so "Restart" is never just
-   *  "Restart" to somebody listening to a page of identical buttons. */
   function named(label, suffix) {
     return [label, el('span.sr', { text: ' ' + suffix })];
   }
-
-  /* --------------------------------------------------------------- list --- */
 
   var FILTER_FIELDS = [
     { key: 'name', label: 'Name' },
@@ -88,9 +66,6 @@
         render: function (r) { return fmt.time(r.deployedAt); }
       },
       {
-        /* Secondary actions live behind the overflow menu rather than as six
-         * more buttons per row. The trigger stops its own click from reaching
-         * the row, which is itself a link to the application. */
         key: 'actions', label: 'Actions', align: 'right', sortable: false,
         render: function (r) {
           return ui.menu([
@@ -110,10 +85,6 @@
     ];
   }
 
-  /* The console runs from file:// in development and behind a VPN in
-   * production, and the async clipboard API is unavailable in the first and
-   * blocked without a user gesture in some builds of the second. Neither case
-   * should lose the operator the link, so failure falls back to showing it. */
   function copyLink(app) {
     var href = A.href('apps', [app.name]);
     var url = window.location.href.split('#')[0] + href;
@@ -125,7 +96,7 @@
         });
         return;
       }
-    } catch (e) { /* fall through */ }
+    } catch (e) {  }
     A.flash('info', 'Copy the link', url);
   }
 
@@ -155,15 +126,6 @@
     var appTable = null;
 
     function paint() {
-      /* Four table states, and three of them are wrong if they share wording.
-       * There is no loading state here because the dataset ships with the
-       * console, but "nothing exists yet", "nothing matches your filters" and a
-       * populated table ask the operator to do completely different things, so
-       * they never reuse a sentence.
-       *
-       * The host is only cleared when an empty state genuinely replaces the
-       * table, so the instance stays connected and the operator's sort survives
-       * a token change. */
       if (!d.apps.length) {
         appTable = null;
         ui.clear(tableHost);
@@ -198,8 +160,6 @@
       filterHost.appendChild(ui.propertyFilter(FILTER_FIELDS, function (t) { tokens = t; paint(); }));
     }
 
-    // propertyFilter owns its own token state, so clearing means replacing the
-    // widget as well as the row set; otherwise the tokens stay on screen.
     function clearFilters() {
       tokens = [];
       mountFilter();
@@ -214,8 +174,6 @@
     mount.appendChild(tableHost);
     paint();
   }
-
-  /* ------------------------------------------------------------ actions --- */
 
   function openDeployDialog(app) {
     var versions = [];
@@ -279,8 +237,6 @@
     });
   }
 
-  /* ------------------------------------------------------------ overview --- */
-
   var DEP_KINDS = [
     ['databases', 'database'],
     ['buckets', 'bucket'],
@@ -324,15 +280,8 @@
     ]);
   }
 
-  /* ----------------------------------------------------------- instances --- */
-
-  /** Prefer a Service Fabric node that actually lists the service; otherwise
-   *  round-robin the cluster. Placement has to be plausible and identical on
-   *  every run, because the tests compare rendered output. */
   var poolCache = null, poolCacheFor = null;
   function nodeForService(serviceName, index) {
-    // Memoised per service, so the pool is computed once rather than once per
-    // instance on every render of the Instances tab.
     if (poolCacheFor !== d.sfNodes) { poolCacheFor = d.sfNodes; poolCache = Object.create(null); }
     var pool = poolCache[serviceName];
     if (!pool) {
@@ -354,8 +303,6 @@
           node: node.name,
           nodeHost: node.host,
           port: svc.port,
-          // Derived from the indices, never from Math.random: a random number
-          // here would make every screenshot and every assertion flake.
           uptimeS: Math.max(60, app.uptimeDays * 86400 - si * 3600 - i * 1800),
           restarts: (svc.port + si * 7 + i) % 4
         });
@@ -400,8 +347,6 @@
     }), { flush: true });
   }
 
-  /* ---------------------------------------------------------------- logs --- */
-
   function logEntries(app) {
     var first = app.services[0];
     var upstream = (app.services[1] || first).name;
@@ -443,10 +388,6 @@
     var live = false;
     var selId = 'log-level-' + app.name;
 
-    /* The log region is aria-live="off" on purpose. A streaming log on
-     * aria-live="polite" interrupts a screen-reader user on every new line and
-     * makes the rest of the page unusable, so the operator asks for the latest
-     * line with a button instead of having it read at them. */
     var view = el('div.logview', {
       role: 'region',
       tabindex: '0',
@@ -489,13 +430,6 @@
       A.announce(visible().length + ' log lines at level ' + levelSel.value);
     });
 
-    /* The tail.
-     *
-     * The buffer is CAPPED: a tail that appends without bound eventually runs
-     * the console out of memory, and the cap is what the eventual real stream
-     * will need too. The interval is registered with A.onLeave, so leaving the
-     * screen stops the work it started.
-     */
     var TAIL_CAP = 500;
     var tailTimer = null;
     var tailSeq = 0;
@@ -505,8 +439,6 @@
     }
 
     function tick() {
-      // The node is gone once the operator switches tab; a tab switch does not
-      // go through the router, so the leave hook has not fired yet.
       if (!document.body.contains(view)) { stopTail(); return; }
       var seed = entries[tailSeq % entries.length];
       tailSeq += 1;
@@ -517,7 +449,7 @@
       });
       if (entries.length > TAIL_CAP) entries.splice(0, entries.length - TAIL_CAP);
       paint();
-      view.scrollTop = 1e9;   // no scrollHeight read, so no forced layout
+      view.scrollTop = 1e9;
     }
 
     var toggle = ui.btn('Paused', {
@@ -562,8 +494,6 @@
     ]);
   }
 
-  /* -------------------------------------------------------------- traces --- */
-
   function traceSpans(app) {
     var t = app.p95;
     var svc = app.services;
@@ -578,8 +508,6 @@
 
   function tracesTab(app) {
     var spans = traceSpans(app);
-    // Same shape: a divisor guard, not a default. An instantaneous root span
-    // would otherwise divide by zero and render every bar at Infinity percent.
     var total = spans[0].dur > 0 ? spans[0].dur : 1;
     var slowest = spans.slice(1).reduce(function (a, b) { return b.dur > a.dur ? b : a; }, spans[1]);
 
@@ -598,9 +526,6 @@
       ]);
     }));
 
-    // Every chart gets a table equivalent. The picture is the summary; the
-    // table is the data, and it is the only one of the two a screen reader,
-    // a printout or a copy-paste into an incident channel can use.
     var cols = [
       { key: 'name', label: 'Span' },
       { key: 'start', label: 'Starts at', align: 'right', render: function (r) { return fmt.ms(r.start); } },
@@ -623,8 +548,6 @@
       }), { flush: true })
     ]);
   }
-
-  /* -------------------------------------------------------------- config --- */
 
   function configRows(app) {
     var rows = [
@@ -665,9 +588,6 @@
         key: 'value', label: 'Value',
         sort: function (r) { return r.secret || r.value; },
         render: function (r) {
-          // A secret is rendered as its path and nothing else. The console has
-          // no read path to a secret value, by design, so there is nothing here
-          // to leak into a screenshot or a support ticket.
           if (r.secret) {
             return el('div.row', [mono(r.secret), ui.pill('value hidden', 'idle')]);
           }
@@ -695,8 +615,6 @@
       }), { flush: true })
     ]);
   }
-
-  /* ------------------------------------------------------ deploy history --- */
 
   var DEPLOY_STATE = {
     done: ['Completed', 'ok'],
@@ -768,8 +686,6 @@
     }), { flush: true });
   }
 
-  /* ------------------------------------------------------------- detail --- */
-
   function renderDetail(mount, ctx) {
     var app = d.appByName(ctx.rest[0]);
     if (!app) {
@@ -814,15 +730,9 @@
       { id: 'deploys', label: 'Deploy history', render: function () { return deployTab(app, ctx); } }
     ], {
       label: 'Sections of ' + app.display,
-      // This screen is the only one that emits ?tab= (from the row overflow
-      // menu, which offers "Logs" and "Deploy history"). The second path
-      // segment is accepted too, so #/apps/mills/logs works like every other
-      // detail screen in the console.
       initial: (ctx && ctx.params && ctx.params.tab) || (ctx && ctx.rest && ctx.rest[1]) || null
     }));
   }
-
-  /* ----------------------------------------------------------- register --- */
 
   registerScreen('apps', {
     title: 'Applications',
