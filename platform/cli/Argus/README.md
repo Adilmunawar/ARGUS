@@ -278,8 +278,9 @@ defined exactly once in the source and present after import, that every
 `Verb-Noun` call site resolves to something that exists (the defect that made
 version 0.1.0 inert was a call to `Get-ArgusDeviceCodeToken`, which was defined
 nowhere), that every file tokenises without a single operator Windows PowerShell
-5.1 cannot parse, and that the session cache round-trips under whichever
-protection the host actually supports.
+5.1 cannot parse, that no file carries a comment token or a `Write-Host`, that
+every name in `FileList` is on disk, and that the session cache round-trips
+under whichever protection the host actually supports.
 
 ## Known gaps
 

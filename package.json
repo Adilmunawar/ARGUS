@@ -1,6 +1,6 @@
 {
   "name": "argus",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "private": true,
   "description": "Argus: a sovereign, Windows-first private cloud. This manifest exists only to pin the console prototype's test dependencies.",
   "license": "MIT",

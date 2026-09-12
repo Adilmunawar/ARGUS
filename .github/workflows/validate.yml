@@ -37,6 +37,12 @@ jobs:
       - name: Every SQL and HCL file parses
         run: python3 .github/scripts/check-syntax.py
 
+      - name: Comment stripper passes its own self-test
+        run: python3 .github/scripts/check-comments.py --self-test
+
+      - name: Configuration and scripts carry no comments
+        run: python3 .github/scripts/check-comments.py
+
       - name: GitOps specs validate against their schemas
         run: python3 .github/scripts/check-gitops.py
 
@@ -72,6 +78,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - run: npx playwright install --with-deps chromium
+
+      - name: JavaScript carries no comments
+        run: node .github/scripts/check-comments.js
 
       - name: No external requests in the console bundle
         run: python3 .github/scripts/check-egress.py

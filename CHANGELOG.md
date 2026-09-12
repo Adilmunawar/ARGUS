@@ -2,6 +2,40 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.7.0] - 2026-09-12
+
+CI had been red on `main` since 2026-09-09 and every pull request was blocked by it. Fixing that surfaced a wider problem: several advertised features could not work, because nine bind mounts in `docker-compose.yml` pointed at paths the repository never contained. Docker answers a missing bind source by creating an empty directory and carrying on, so those services started unconfigured or crash-looped, and nothing said so.
+
+### Fixed
+- **CI was red for two independent reasons.** The secret scan matched a code comment in `docker-compose.yml` and a PowerShell *variable name* in `bootstrap.ps1`; a grep cannot tell a credential from the word "password". It is replaced by a scanner that understands comments, variable references, function calls, property access, command lines, placeholders and entropy, and that proves itself against 43 known-good and known-bad cases before every run. Separately, `sandbox.js` asserted a screen count of 10 while the console registers 13, failing all nine environments.
+- **The three test harnesses had drifted.** All carried the same stale 10-route list, so `stack`, `system` and `storage` were never exercised by any suite. Each now asserts that the set it covers equals the set the console registers, so the next screen cannot be added without the tests noticing. That widened coverage immediately found three real defects, all fixed: `storage` was registered but orphaned, reachable only by typing its URL; `Refresh` on the system screen called `A.go` to the route it was already on, which fires no `hashchange` and therefore did nothing at all; and `Refresh` on both new screens stayed mute when the API was not answering, which is indistinguishable from a frozen console.
+- **Six assertions could not fail.** The preference-tamper loop wrote all six hostile blobs in one pass, each overwriting the last, so five were never exercised and the record claiming they "were survived" was passed the literal `true`. Four stress outcomes recorded "skipped" as a pass, so removing the audit sort header, the identity tabs or the whole session player would have left those suites green for ever. The interval-leak accounting decremented on every `clearInterval`, so the net could go negative and hide a leak.
+- **The console server ignored two query parameters.** `/api/pg/tables?database=` passed a string where an options object was expected, so it always returned the `postgres` database's tables *while labelling them with the name that was asked for*. `/api/queues/consumers?stream=` filtered nothing.
+- **A malformed timeout silently disabled every timeout.** Three modules parsed `ARGUS_UPSTREAM_TIMEOUT_MS` with a bare `Number()`, and `NaN` timeouts never fire. There is now one positive-integer reader and all five modules use it.
+- The TTL cache never evicted while its keys came from user-supplied query strings; any `HeadObject` failure was cached as proof a key did not exist, which could rename correct keys; the 5 MB preview cap was a no-op when `ContentLength` was absent; `DescribeAlarms` read only its first page so `inAlarm` undercounted; decoded request paths were logged verbatim, so `%0a` forged log lines.
+- **The object-storage init tool never re-applied retention** on an existing bucket and compared only the lock mode, so one day of retention against a declared 35-day COMPLIANCE lock passed every boot green, in a tool whose header promises it exits non-zero on mismatch.
+- The GitOps secret guard used an inline `(?i)` flag, invalid in the ECMA-262 dialect JSON Schema specifies; it worked only because CI validates with Python. It now also constrains secret-named *keys*, not just values.
+- `down.ps1` listed five of eight profiles while claiming every one, so garnet, nats and openbao were left to `--remove-orphans`, which force-removes them and bypasses the stop ordering and grace periods compose sets. `bootstrap.ps1` validated the compose file in the caller's working directory rather than its own.
+- `publish.sh` sent its branch-protection payload as untyped strings, so GitHub answered 422, the error was swallowed, and it reported that protection needed a paid plan.
+- **No compose profile except `parity` could start alone** — and `parity` could not start at all, because it depends on services behind other profiles and Compose resolves `depends_on` only against enabled ones.
+
+### Added
+- **Authentication on the console API.** It had none, and the Dockerfile bound `0.0.0.0`, so anyone who could reach the port got object previews, live SQL statement text, vault seal state and this host's network inventory. Sessions are server-side behind a `__Host-` cookie, origin-checked rather than CSRF-tokened, with scrypt passwords from `node:crypto`, throttling and lockout, and audit that never records a credential. `ARGUS_AUTH=off` on a non-loopback bind refuses to start.
+- **Live streaming**: SSE with heartbeats and a ring buffer that replays from `Last-Event-ID`, a Loki reader turning a WebSocket tail into an event stream, Prometheus, Alertmanager and container readers, and a heartbeat store with uptime arithmetic and incident history. Every upstream is optional and answers "not configured" rather than hanging.
+- **A live log screen**, a reusable heartbeat bar, a live alert inbox on the security screen, and a multiplexed `EventSource` torn down by the existing `onLeave` hook.
+- **The four stacks compose mounted but never contained**: the observability configuration (Prometheus with seven rule files, Loki, Alloy, Grafana provisioning, the Alertmanager template), the Guacamole schema seed with a break-glass admin replacing the stock account, single-node Nomad, and the OpenBao policies `provision.sh` has always looked for.
+- **An S3 parity harness**: 23 legs over a 32-row conformance matrix derived from SeaweedFS's own route registrations, reporting conforms / differs / absent-by-design / untestable per feature. Where there is no expectation it reports *untestable*, never silently *conform*. The reference is LocalStack pinned to 4.14.0 — the last release before the Community edition was discontinued and the image began requiring a paid token — and is optional throughout, so the suite can equally be pointed at real AWS.
+- **Mailpit**, because `.env.example` had pointed `SMTP_HOST` at a service that did not exist since the observability profile was written.
+- **The OpenTofu module** `vm-sql-01.tf` has always declared, so `tofu init` no longer fails on the only IaC file in the tree.
+- New CI checks: every compose bind mount resolves to a committed path, every profile can start alone, every SQL and HCL file parses, every GitOps kind has a schema, and the console server's tests run at all — they never had.
+
+### Changed
+- **Code and configuration carry no comments.** 7,629 lines across 68 files. Names, structure and layout carry the meaning; prose lives in README and docs, where a reader finds it deliberately. Two checks enforce it, each with a `--fix` mode that is the same code path, so check and fix cannot disagree.
+- The PowerShell CLI was dead three ways: `Connect-Argus` called a function defined nowhere in the repository, the manifest demanded 7.4 while the platform targets 5.1 and the body used `??`, and its comment promised DPAPI caching the code did not do. It is a real module now, and its Pester suite fails on any operator or construct 5.1 rejects.
+
+### Note
+- 295 property checks, 125 sandbox checks and 66 server tests pass, up from 247, 113 and 34. The server tests had never run in CI.
+
 ## [0.6.1] - 2026-09-08
 
 An adversarial audit was run against the console by an agent that did not write it, with every finding verified by executing the page rather than reading it. It found ten defects that the 153-assertion suite had passed over, including one critical. All are fixed, and each has a regression in the new **GUARD** suite.

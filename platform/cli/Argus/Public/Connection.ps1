@@ -123,7 +123,8 @@ function Connect-Argus {
         $identity = Invoke-ArgusRequest -Path '/api/auth/session'
     } catch {
         $rejection = $_
-        if (-not $connection.Restored) {
+        $stale = $connection.Restored -and ([string]$rejection.FullyQualifiedErrorId) -like '*ArgusUnauthenticated*'
+        if (-not $stale) {
             Set-ArgusConnectionState -Connection $null -Confirm:$false
             $PSCmdlet.ThrowTerminatingError($rejection)
         }
