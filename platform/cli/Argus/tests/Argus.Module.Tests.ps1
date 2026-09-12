@@ -96,6 +96,35 @@ Describe 'Argus manifest' {
         @($manifestData.AliasesToExport).Count | Should -Be 0
         @($manifestData.VariablesToExport).Count | Should -Be 0
     }
+
+    It 'lists only files that are on disk' {
+        $missing = @($manifestData.FileList | Where-Object { -not (Test-Path -LiteralPath (Join-Path $moduleRoot $_)) })
+        $missing -join ', ' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'House rules' {
+    It '<Name> carries no comment' -ForEach $fileCases {
+        $tokenErrors = $null
+        $tokens = [System.Management.Automation.PSParser]::Tokenize(
+            [System.IO.File]::ReadAllText($FullName), [ref]$tokenErrors)
+        $comments = @($tokens |
+            Where-Object { $_.Type -eq 'Comment' } |
+            ForEach-Object { "line $($_.StartLine)" })
+
+        $comments -join '; ' | Should -BeNullOrEmpty
+    }
+
+    It '<Name> writes nothing straight to the host' -ForEach $fileCases {
+        $tokenErrors = $null
+        $tokens = [System.Management.Automation.PSParser]::Tokenize(
+            [System.IO.File]::ReadAllText($FullName), [ref]$tokenErrors)
+        $offenders = @($tokens |
+            Where-Object { $_.Type -eq 'Command' -and $_.Content -eq 'Write-Host' } |
+            ForEach-Object { "line $($_.StartLine)" })
+
+        $offenders -join '; ' | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'Exported surface' {

@@ -10,8 +10,8 @@ function Receive-ArgusStream {
         [Parameter()][string]$ContainerId,
         [Parameter()][int]$Tail,
         [Parameter()][string]$Since,
-        [Parameter()][int]$Seconds = 30,
-        [Parameter()][int]$First = 0
+        [Parameter()][ValidateRange(1, 86400)][int]$Seconds = 30,
+        [Parameter()][ValidateRange(0, 100000)][int]$First = 0
     )
 
     $paths = @{

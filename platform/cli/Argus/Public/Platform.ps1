@@ -44,6 +44,9 @@ function Get-ArgusComponentHealth {
     )
 
     begin {
+        try { Get-ArgusConnectionState -Required | Out-Null }
+        catch { $PSCmdlet.ThrowTerminatingError($_) }
+
         $paths = @{
             storage    = '/api/storage/health'
             postgres   = '/api/pg/health'

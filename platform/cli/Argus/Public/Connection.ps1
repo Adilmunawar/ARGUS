@@ -83,8 +83,10 @@ function Connect-Argus {
     } else {
         if (-not $Credential -and -not $Force) {
             $cached = Read-ArgusSessionCache
-            if ($cached -and $cached.BaseUri.AbsoluteUri -eq $base.AbsoluteUri) {
-                $connection.Origin = $cached.Origin
+            if ($cached -and $cached.Cookie -and $cached.BaseUri.AbsoluteUri -eq $base.AbsoluteUri) {
+                if (-not $Origin -and -not $env:ARGUS_CONSOLE_ORIGIN -and $cached.Origin) {
+                    $connection.Origin = $cached.Origin
+                }
                 $connection.CookieName = $cached.CookieName
                 $connection.Cookie = $cached.Cookie
                 $connection.Protection = $cached.Protection
@@ -104,27 +106,10 @@ function Connect-Argus {
                     -TargetObject $base))
             }
 
-            $session = New-ArgusWebSession -BaseUri $base
-            $body = @{
-                subject  = $Credential.UserName
-                password = (ConvertFrom-ArgusSecureString -SecureString $Credential.Password)
-            }
-
             try {
-                Invoke-ArgusHttp -BaseUri $base -Path '/api/auth/login' -Method POST -Body $body -Origin $originHeader -Session $session | Out-Null
+                $minted = New-ArgusOperatorSession -BaseUri $base -Origin $connection.Origin -Credential $Credential
             } catch {
                 $PSCmdlet.ThrowTerminatingError($_)
-            } finally {
-                $body['password'] = $null
-            }
-
-            $minted = Get-ArgusSetCookie -Session $session -BaseUri $base
-            if (-not $minted) {
-                $PSCmdlet.ThrowTerminatingError((New-ArgusErrorRecord `
-                    -Message 'The console accepted the sign-in but set no session cookie, so nothing can authenticate the requests that follow.' `
-                    -ErrorId 'ArgusNoSessionCookie' `
-                    -Category ([System.Management.Automation.ErrorCategory]::ProtocolError) `
-                    -TargetObject $base))
             }
             $connection.CookieName = $minted.Name
             $connection.Cookie = $minted.Value
@@ -133,11 +118,41 @@ function Connect-Argus {
 
     Set-ArgusConnectionState -Connection $connection -Confirm:$false
 
+    $identity = $null
     try {
         $identity = Invoke-ArgusRequest -Path '/api/auth/session'
     } catch {
-        Set-ArgusConnectionState -Connection $null -Confirm:$false
-        $PSCmdlet.ThrowTerminatingError($_)
+        $rejection = $_
+        if (-not $connection.Restored) {
+            Set-ArgusConnectionState -Connection $null -Confirm:$false
+            $PSCmdlet.ThrowTerminatingError($rejection)
+        }
+
+        Write-Verbose 'The cached session is no longer accepted by the console, so it is being discarded and a fresh sign-in attempted.'
+        Remove-ArgusSessionCache -Confirm:$false | Out-Null
+        $connection.CookieName = $null
+        $connection.Cookie = $null
+        $connection.Restored = $false
+        $connection.Protection = 'memory'
+
+        if (-not $Credential) {
+            $Credential = Get-Credential -Message "Argus operator sign-in for $($base.Authority)"
+        }
+        if (-not $Credential) {
+            Set-ArgusConnectionState -Connection $null -Confirm:$false
+            $PSCmdlet.ThrowTerminatingError($rejection)
+        }
+
+        try {
+            $minted = New-ArgusOperatorSession -BaseUri $base -Origin $connection.Origin -Credential $Credential
+            $connection.CookieName = $minted.Name
+            $connection.Cookie = $minted.Value
+            Set-ArgusConnectionState -Connection $connection -Confirm:$false
+            $identity = Invoke-ArgusRequest -Path '/api/auth/session'
+        } catch {
+            Set-ArgusConnectionState -Connection $null -Confirm:$false
+            $PSCmdlet.ThrowTerminatingError($_)
+        }
     }
 
     $connection.Subject = $identity.subject

@@ -199,6 +199,12 @@ function New-ArgusHttpErrorRecord {
     } elseif ($problem.Status -eq 404) {
         $id = 'ArgusNoSuchEndpoint'
         $category = [System.Management.Automation.ErrorCategory]::ObjectNotFound
+    } elseif ($problem.Status -eq 415) {
+        $id = 'ArgusUnsupportedType'
+        $category = [System.Management.Automation.ErrorCategory]::InvalidType
+    } elseif ($problem.Status -eq 413) {
+        $id = 'ArgusTooLarge'
+        $category = [System.Management.Automation.ErrorCategory]::LimitsExceeded
     } elseif ($problem.Status -eq 429) {
         $id = 'ArgusThrottled'
         $category = [System.Management.Automation.ErrorCategory]::LimitsExceeded
@@ -262,6 +268,39 @@ function Invoke-ArgusHttp {
     }
 
     return $response
+}
+
+function New-ArgusOperatorSession {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][uri]$BaseUri,
+        [Parameter(Mandatory)][string]$Origin,
+        [Parameter(Mandatory)][pscredential]$Credential
+    )
+
+    $session = New-ArgusWebSession -BaseUri $BaseUri
+    $body = @{
+        subject  = $Credential.UserName
+        password = (ConvertFrom-ArgusSecureString -SecureString $Credential.Password)
+    }
+
+    try {
+        Invoke-ArgusHttp -BaseUri $BaseUri -Path '/api/auth/login' -Method POST -Body $body -Origin $Origin -Session $session | Out-Null
+    } finally {
+        $body['password'] = $null
+    }
+
+    $minted = Get-ArgusSetCookie -Session $session -BaseUri $BaseUri
+    if (-not $minted) {
+        throw (New-ArgusErrorRecord `
+            -Message 'The console accepted the sign-in but set no session cookie, so nothing can authenticate the requests that follow.' `
+            -ErrorId 'ArgusNoSessionCookie' `
+            -Category ([System.Management.Automation.ErrorCategory]::ProtocolError) `
+            -TargetObject $BaseUri)
+    }
+
+    return $minted
 }
 
 function ConvertFrom-ArgusResponse {

@@ -61,10 +61,11 @@ elsewhere. It uses no syntax newer than 5.1 — no `??`, no `?.`, no ternary, no
 `&&`/`||`, no `-AsHashtable`, no bare `$IsWindows` — and the test suite enforces
 that by tokenising every file.
 
-Copy the `Argus` folder onto the module path and import it:
+Copy the `Argus` folder onto the module path and import it (the separator is
+`;` on Windows and `:` elsewhere, so this reads it from the platform):
 
 ```powershell
-$destination = Join-Path ($env:PSModulePath -split ';')[0] 'Argus'
+$destination = Join-Path ($env:PSModulePath -split [System.IO.Path]::PathSeparator)[0] 'Argus'
 Copy-Item -Path .\platform\cli\Argus -Destination $destination -Recurse -Force
 Import-Module Argus
 ```
@@ -85,6 +86,12 @@ With no `-BaseUri` it reads `ARGUS_CONSOLE_URL`, then `ARGUS_URL`, then falls
 back to `http://127.0.0.1:8787` — the console's own default bind. With no
 `-Credential` it first tries the cached session for that URL, and prompts only
 if there is none. `-Force` skips the cache and signs in fresh.
+
+A cached cookie the console no longer accepts does not wedge you: when the
+identity probe that follows comes back 401, `Connect-Argus` discards the cache
+and signs in again with the credential it has, or asks for one. An explicit
+`-Origin` (or `ARGUS_CONSOLE_ORIGIN`) always wins over the origin recorded in
+the cache.
 
 ```powershell
 Get-ArgusConnection      # what this session is holding, without a network call
@@ -170,6 +177,13 @@ Get-ArgusContainerStatistic -Id argus-console
 Get-ArgusHeartbeat 50, Get-ArgusUptime, Get-ArgusIncident 20
 ```
 
+`Save-ArgusStorageObject` reads `GET /api/storage/preview`, which is the only
+route that returns an object's bytes — and it is a preview route, not a general
+download. The server serves `.png .jpg .jpeg .gif .webp .bmp .txt .log .json
+.csv .yaml .yml .pdf` only, up to 5 MB, so anything else comes back as
+`ArgusUnsupportedType` (415) or `ArgusTooLarge` (413). There is no route that
+streams an arbitrary object, so this module cannot pretend to be one.
+
 Pipelines work where the shapes line up:
 
 ```powershell
@@ -184,7 +198,15 @@ Get-ArgusContainer -Expand | Get-ArgusContainerStatistic
 Four routes are SSE rather than JSON. `Receive-ArgusStream` reads them and emits
 one object per event, stopping at `-Seconds` (default 30) or after `-First`
 events. Because the read blocks on the socket, the deadline is checked between
-frames; the console's `: ping` heartbeat keeps that from stalling.
+frames; the console's `: ping` heartbeat (every 15 s) keeps that from stalling,
+so the stop can overshoot `-Seconds` by up to one ping. The socket timeouts are
+sized from `-Seconds` rather than fixed, because on PowerShell 7 the request
+timeout covers the whole read and a fixed one would cut a long stream off.
+
+Logs and container streams exist only when the server has Loki or the Docker
+socket proxy configured; without them the route answers 200 with a JSON reason
+instead of an event stream, and that arrives as an `ArgusStreamUnavailable`
+error carrying the server's explanation rather than as silence.
 
 ```powershell
 Receive-ArgusStream Heartbeats -Seconds 60
@@ -230,10 +252,18 @@ the module. The identifiers you can trap on:
 | `ArgusUnauthenticated` | 401. The session expired or was never established. |
 | `ArgusOriginRejected` | 403 `cross-site`. The `Origin` does not match the console's target origin. |
 | `ArgusReadOnly` | 405 `read-only`. `ARGUS_ALLOW_WRITES` is not set on the server. |
-| `ArgusThrottled` | 429. Sign-in lockout or the verify queue is full; `retry-after` says how long. |
+| `ArgusThrottled` | 429. Sign-in lockout or the verify queue is full; the server's message says how long to wait. |
 | `ArgusNoSuchEndpoint` | 404. |
+| `ArgusUnsupportedType` | 415. The object is not one of the previewable types. |
+| `ArgusTooLarge` | 413. The object is over the console's 5 MB preview ceiling. |
 | `ArgusUnreachable` | The console did not answer at all. |
 | `ArgusNoSessionCookie` | Sign-in succeeded but set no cookie. |
+| `ArgusStreamUnavailable` | A stream route answered with JSON, not events — usually the upstream is not configured. |
+| `ArgusStreamInterrupted` | A stream ended before its deadline. |
+
+A cmdlet that rethrows one of these through `ThrowTerminatingError` appends its
+own name, so the value you actually match on is `ArgusUnauthenticated,Get-ArgusHealth`.
+Trap on the prefix.
 
 ## Tests
 
