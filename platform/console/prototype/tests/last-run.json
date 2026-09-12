@@ -1077,7 +1077,7 @@
     "suite": "LOGS",
     "id": "the view stays bounded at its cap through five thousand lines",
     "pass": true,
-    "detail": "{\"n\":60,\"last\":\"2026-09-12 09:42Z INFO  probe line 4999\"}"
+    "detail": "{\"n\":60,\"last\":\"2026-09-12 10:11Z INFO  probe line 4999\"}"
   },
   {
     "suite": "LOGS",
@@ -1815,7 +1815,7 @@
     "suite": "BACKOFF",
     "id": "with jitter on a retry lands in the lower half of its ceiling rather than in lockstep",
     "pass": true,
-    "detail": "min 15037, max 29946"
+    "detail": "min 15180, max 29940"
   },
   {
     "suite": "BACKOFF",

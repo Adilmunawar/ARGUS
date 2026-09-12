@@ -945,7 +945,7 @@
 
       host.appendChild(el('div.row', [
         el('span', ['Size: ', sizeCell(row)]),
-        el('span', ['Objects: ', countCell(row)]),
+        el('span', ['Needles: ', countCell(row)]),
         el('span', ['Lock: ', lockCell(row)]),
         el('span.muted', { text: 'Replication: ' + (row.replication || 'not configured') })
       ]));

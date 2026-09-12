@@ -46,6 +46,13 @@ show_drift() {
   printf '%s\n' "$1" | sed 's/^/         /' >&2
 }
 
+is_json_object() {
+  case "${1:-}" in
+    '{'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 STREAM_CFG=/tmp/nats-init-stream.json
 CONSUMER_CFG=/tmp/nats-init-consumer.json
 
@@ -102,6 +109,9 @@ create_stream() {
 
   if nats_ stream info "$name" >/dev/null 2>&1; then
     have="$(nats_ stream info "$name" -j | jq -c '.config')"
+    is_json_object "$have" || die "$name exists but its configuration could not be read; the server
+         answered '${have:-<nothing>}'. Every comparison below is made against that JSON, so an
+         unreadable answer would report the stream as matching this file without comparing anything."
 
     immutable="$(drift_of "$have" "$(printf '%s' "$want" | jq -c '{retention, storage}')")"
     if [ -n "$immutable" ]; then
@@ -184,6 +194,9 @@ create_consumer() {
 
   if nats_ consumer info "$stream" "$cname" >/dev/null 2>&1; then
     have="$(nats_ consumer info "$stream" "$cname" -j | jq -c '.config')"
+    is_json_object "$have" || die "$stream/$cname exists but its configuration could not be read; the
+         server answered '${have:-<nothing>}'. Every comparison below is made against that JSON, so an
+         unreadable answer would report the consumer as matching this file without comparing anything."
     have_bo="$(printf '%s' "$have" | jq -r 'if (.backoff // []) | length > 0 then "set" else "none" end')"
     if [ "$have_bo" = "none" ]; then
       warn "$stream/$cname has no backoff policy, so every retry is spaced exactly $ackwait apart. A failing

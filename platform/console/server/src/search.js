@@ -89,8 +89,8 @@ async function build() {
       label: al.name || al.fingerprint,
       hint: [al.severity, al.summary].filter(Boolean).join(' · ') || 'firing',
       route: 'security',
-      rest: [],
-      params: { alert: al.fingerprint || al.name }
+      rest: ['alerts'],
+      params: { id: al.fingerprint || al.name }
     })))
   ];
 
