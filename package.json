@@ -11,6 +11,7 @@
     "test:stress": "node platform/console/prototype/tests/stress.js"
   },
   "devDependencies": {
+    "acorn": "^8.18.0",
     "axe-core": "^4.10.2",
     "playwright": "^1.49.1"
   }
