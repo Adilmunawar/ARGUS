@@ -28,15 +28,29 @@ async function goto(page, route) {
   await page.waitForTimeout(40);
 }
 
-async function axeOn(page, label) {
-  const r = await page.evaluate(async () => await window.axe.run(document, {
-    runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] },
-    resultTypes: ['violations'],
-    preload: false
-  }));
-  if (!r.violations.length) { rec('A11Y', label + ': no WCAG A/AA violations', true); return; }
+const AXE_OPTIONS = {
+  runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'] },
+  rules: {
+    'target-size': { enabled: true },
+    'identical-links-same-purpose': { enabled: true }
+  },
+  resultTypes: ['violations'],
+  preload: false
+};
+
+const FORCED_AXE_OPTIONS = Object.assign({}, AXE_OPTIONS, {
+  rules: Object.assign({}, AXE_OPTIONS.rules, { 'color-contrast': { enabled: false } })
+});
+
+async function axeRun(page, opts) {
+  return page.evaluate(async o => await window.axe.run(document, o), opts || AXE_OPTIONS);
+}
+
+async function axeOn(page, label, suite, opts) {
+  const r = await axeRun(page, opts);
+  if (!r.violations.length) { rec(suite || 'A11Y', label + ': no WCAG A/AA violations', true); return; }
   for (const v of r.violations) {
-    rec('A11Y', `${label}: ${v.id}`, false,
+    rec(suite || 'A11Y', `${label}: ${v.id}`, false,
       `${v.impact}: ${v.help} (${v.nodes.length}x) e.g. ${(v.nodes[0].target || []).join(' ')}`);
   }
 }
@@ -1451,6 +1465,418 @@ async function axeOn(page, label) {
     if (a !== b) nondet.push(`${r} ${a}!=${b}`);
   }
   rec('DET', 'every route renders identically on a second visit', nondet.length === 0, nondet.join(' '));
+
+  const cascade = (fs.readFileSync(path.join(ROOT, 'assets', 'app.css'), 'utf8')
+    + fs.readFileSync(path.join(ROOT, 'assets', 'components.css'), 'utf8')).replace(/\s+/g, ' ');
+  const reducedBlocks = cascade.match(/@media \(prefers-reduced-motion: reduce\) \{[^}]*\}/g) || [];
+  rec('MOTION', 'the reduced-motion cascade reaches the view-transition pseudo-elements, which a universal selector cannot',
+    reducedBlocks.some(b => /::view-transition-group\(\*\)/.test(b)
+      && /::view-transition-old\(\*\)/.test(b)
+      && /::view-transition-new\(\*\)/.test(b)
+      && /animation: none/.test(b)),
+    `${reducedBlocks.length} reduced-motion blocks, none naming the view-transition pseudo-elements`);
+
+  rec('SEC', 'the CSP forbids inline style and script attributes and every trusted-types sink',
+    await page.evaluate(() => {
+      const m = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+      if (!m) return false;
+      return ["script-src-attr 'none'", "style-src-attr 'none'",
+        "require-trusted-types-for 'script'", "trusted-types 'none'",
+        "frame-src 'none'", "worker-src 'none'"].every(d => m.content.indexOf(d) !== -1);
+    }));
+
+  await goto(page, 'overview');
+  const virt = await page.evaluate(async () => {
+    const ui = window.ARGUS.ui;
+    const rows = [];
+    for (let i = 0; i < 600; i++) rows.push({ id: 'row-' + i, n: i, label: 'Entry number ' + i });
+    const wrap = ui.table(
+      [{ key: 'id', label: 'Id' }, { key: 'n', label: 'N', align: 'right' }, { key: 'label', label: 'Label' }],
+      rows,
+      { caption: 'Six hundred rows', sortKey: 'n', rowKey: r => r.id, onRow: () => {} });
+    const host = document.createElement('div');
+    host.appendChild(wrap);
+    document.getElementById('main').appendChild(host);
+    const frame = () => new Promise(r => setTimeout(r, 60));
+    await frame();
+    const virtual = wrap.classList.contains('is-virtual');
+    const rendered = wrap.querySelectorAll('tbody tr[data-key]').length;
+    wrap.scrollTop = 4000;
+    await frame();
+    const scrolledTo = wrap.scrollTop;
+    const row = wrap.querySelector('tbody tr[data-key]');
+    const wantKey = row ? row.dataset.key : null;
+    if (row) row.focus({ preventScroll: true });
+    const focusedBefore = !!row && document.activeElement === row;
+    const oneLine = row ? getComputedStyle(row.querySelector('td')).whiteSpace : null;
+
+    wrap.setRows(rows.slice(0, 588));
+    await frame();
+    const afterFilter = wrap.scrollTop;
+    const activeKey = document.activeElement && document.activeElement.dataset
+      ? document.activeElement.dataset.key || null : null;
+
+    const sortBtn = wrap.querySelector('th[data-col="id"] .th-sort');
+    if (sortBtn) sortBtn.click();
+    await frame();
+    const afterSort = wrap.scrollTop;
+
+    host.remove();
+    return { virtual, rendered, scrolledTo, wantKey, focusedBefore, oneLine, afterFilter, activeKey, afterSort };
+  });
+  rec('TBL', 'a table past the virtual threshold renders a window rather than every row',
+    virt.virtual && virt.rendered > 0 && virt.rendered < 200, JSON.stringify({ virtual: virt.virtual, rendered: virt.rendered }));
+  rec('TBL', 'windowed cells stay on one line so the single measured row height holds',
+    virt.oneLine === 'nowrap', `white-space: ${virt.oneLine}`);
+  rec('TBL', 'a focused row is still focused after the window repaints',
+    virt.focusedBefore && !!virt.wantKey && virt.activeKey === virt.wantKey,
+    JSON.stringify({ wanted: virt.wantKey, got: virt.activeKey, focusedBefore: virt.focusedBefore }));
+  rec('TBL', 'changing the rows keeps the operator where they were scrolled to',
+    virt.scrolledTo > 0 && virt.afterFilter > virt.scrolledTo / 2,
+    `scrolled to ${virt.scrolledTo}, after a row change ${virt.afterFilter}`);
+  rec('TBL', 'changing the sort returns to the first row',
+    virt.afterSort === 0, `scrollTop after sorting: ${virt.afterSort}`);
+
+  const backoff = await page.evaluate(() => {
+    const A = window.ARGUS;
+    A.setJitter(false);
+    const flat = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => A.backoffFor(n));
+    const repeat = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => A.backoffFor(n));
+    A.setJitter(true);
+    const spread = [];
+    for (let i = 0; i < 300; i++) spread.push(A.backoffFor(9));
+    A.setJitter(false);
+    const off = A.jitterEnabled();
+    A.setJitter(true);
+    return { flat, repeat, min: Math.min(...spread), max: Math.max(...spread), off, on: A.jitterEnabled() };
+  });
+  rec('BACKOFF', 'the retry ladder doubles from one second and stops at the thirty second ceiling',
+    backoff.flat.join(',') === '1000,2000,4000,8000,16000,30000,30000,30000,30000', backoff.flat.join(','));
+  rec('BACKOFF', 'with jitter off the ladder is identical on every call, so a determinism suite can rely on it',
+    backoff.flat.join(',') === backoff.repeat.join(','), backoff.repeat.join(','));
+  rec('BACKOFF', 'with jitter on a retry lands in the lower half of its ceiling rather than in lockstep',
+    backoff.min >= 15000 && backoff.max <= 30000 && backoff.max - backoff.min > 3000,
+    `min ${backoff.min}, max ${backoff.max}`);
+  rec('BACKOFF', 'the jitter hook reports the state it was set to',
+    backoff.off === false && backoff.on === true, JSON.stringify({ off: backoff.off, on: backoff.on }));
+
+  await goto(page, 'overview');
+  const abortable = await page.evaluate(async () => {
+    const A = window.ARGUS;
+    const first = A.routeSignal();
+    const gen = A.routeGeneration();
+    const liveWhileOpen = !first.aborted;
+    window.location.hash = '#/apps';
+    await new Promise(r => setTimeout(r, 250));
+    const second = A.routeSignal();
+    return {
+      liveWhileOpen,
+      abortedOnLeave: first.aborted,
+      freshIsLive: !second.aborted,
+      distinct: first !== second,
+      generationGrew: A.routeGeneration() > gen
+    };
+  });
+  rec('ROUTE', 'a screen gets an abort signal that stays live while it is on screen', abortable.liveWhileOpen);
+  rec('ROUTE', 'leaving a screen aborts the reads it was still waiting for', abortable.abortedOnLeave);
+  rec('ROUTE', 'the next screen gets its own signal rather than an already-aborted one',
+    abortable.freshIsLive && abortable.distinct, JSON.stringify(abortable));
+  rec('ROUTE', 'the route generation advances so one screen cannot cancel another screen inflight read',
+    abortable.generationGrew);
+
+  const liveStates = await page.evaluate(async () => {
+    const A = window.ARGUS;
+    const real = A.read;
+    const realMode = A.storeMode;
+    A.storeMode = function () { return A.MODE.LIVE; };
+    const bucket = {
+      name: 'argus-backups', createdAt: '2026-01-04T00:00:00.000Z',
+      diskBytes: 4294967296, reclaimableBytes: 1073741824, liveBytes: 3221225472,
+      needles: 1024, liveNeedles: 768, deletedNeedles: 256, objects: null,
+      unknownSize: false, volumes: 3, versioning: true, lock: 'COMPLIANCE', lockDays: 30,
+      lockDeclared: 'COMPLIANCE/30d', lockEnforced: 'enforced', owner: 'ops',
+      lifecycleDays: 90, backup: null, replication: 'not configured'
+    };
+    A.read = function (p) {
+      const at = Date.now();
+      if (p.indexOf('/api/storage/buckets') === 0) {
+        return Promise.resolve({
+          ok: true, mode: 'live', at, stale: false, error: null,
+          data: { buckets: [bucket], count: 1, inventorySource: 'the S3 gateway', countsFrom: 'the SeaweedFS master', countsAreNeedles: true, drift: { declaredButMissing: [], existsButUndeclared: [] }, at: new Date(at).toISOString() }
+        });
+      }
+      if (p.indexOf('/api/storage/capacity') === 0) {
+        return Promise.resolve({
+          ok: false, mode: 'live', at, stale: false, data: null,
+          error: { reason: 'http-503', message: 'The console API answered 503 for /api/storage/capacity.' }
+        });
+      }
+      if (p.indexOf('/api/storage/lock-status') === 0) {
+        return Promise.resolve({
+          ok: true, mode: 'live', at: at - 400000, stale: true,
+          error: { reason: 'unreachable', message: 'The console API is not reachable.' },
+          data: {
+            ok: true, determined: true, verdict: 'enforced', detail: 'One delete of a locked version was refused.',
+            filerBypass: 'unmeasured',
+            filerBypassDetail: 'This run did not probe whether the filer deletes a locked object version.',
+            defaultRetentionStamped: 'unknown',
+            defaultRetentionDetail: 'This run did not read retention back off an object written with no lock headers.',
+            probedAt: new Date(at - 400000).toISOString(), scope: 'the probe bucket', buckets: [], missingLock: [], problems: []
+          }
+        });
+      }
+      return new Promise(() => {});
+    };
+    window.location.hash = '#/overview';
+    await new Promise(r => setTimeout(r, 200));
+    A.forget();
+    window.location.hash = '#/storage';
+    await new Promise(r => setTimeout(r, 500));
+    const main = document.getElementById('main');
+    const text = main.textContent;
+    const out = {
+      panels: main.querySelectorAll('.card').length,
+      loading: main.querySelectorAll('.skel').length,
+      errors: main.querySelectorAll('.empty.is-error').length,
+      errorText: (main.querySelector('.empty.is-error') || {}).textContent || '',
+      stale: /Showing the last value that could be read/.test(text),
+      needles: /Needles/.test(text),
+      reclaimable: /Reclaimable/.test(text),
+      lifecycleCaveat: /stamped on each needle at write time/.test(text),
+      filerCaveat: /filer path is unmeasured/.test(text),
+      sampleState: /Not available on sample data/.test(text),
+      rows: main.querySelectorAll('tbody tr[data-key]').length
+    };
+    A.read = real;
+    A.storeMode = realMode;
+    A.forget();
+    return out;
+  });
+  rec('LIVE', 'a route where one panel fails still renders its other panels',
+    liveStates.panels >= 4 && liveStates.rows > 0 && !liveStates.sampleState, JSON.stringify(liveStates));
+  rec('LIVE', 'a panel that has not answered yet shows a loading skeleton rather than an empty box',
+    liveStates.loading > 0, `${liveStates.loading} skeletons`);
+  rec('LIVE', 'a failed panel names its reason instead of going blank',
+    liveStates.errors === 1 && /could not reach the object store/.test(liveStates.errorText),
+    liveStates.errorText.slice(0, 160));
+  rec('LIVE', 'a stale panel keeps its last reading on screen and says so',
+    liveStates.stale, JSON.stringify({ stale: liveStates.stale }));
+  rec('LIVE', 'the bucket table counts needles and splits reclaimable from live bytes',
+    liveStates.needles && liveStates.reclaimable, JSON.stringify({ needles: liveStates.needles, reclaimable: liveStates.reclaimable }));
+  rec('LIVE', 'a declared lifecycle is shown as binding only what is written after it',
+    liveStates.lifecycleCaveat);
+  rec('LIVE', 'the immutability verdict carries the filer bypass caveat beside it',
+    liveStates.filerCaveat);
+
+  await goto(page, 'overview');
+  const sse = await page.evaluate(async () => {
+    const A = window.ARGUS;
+    const st = A.storeState();
+    const realES = window.EventSource;
+    const opened = [];
+
+    function Fake(url) {
+      this.url = url;
+      this.readyState = 0;
+      this.handlers = {};
+      opened.push(url);
+      Fake.last = this;
+    }
+    Fake.prototype.addEventListener = function (name, fn) {
+      (this.handlers[name] = this.handlers[name] || []).push(fn);
+    };
+    Fake.prototype.removeEventListener = function (name, fn) {
+      const a = this.handlers[name] || [];
+      const i = a.indexOf(fn);
+      if (i !== -1) a.splice(i, 1);
+    };
+    Fake.prototype.close = function () { this.readyState = 2; };
+    Fake.prototype.emit = function (name, ev) {
+      (this.handlers[name] || []).slice().forEach(fn => fn(ev || {}));
+    };
+
+    await A.probe();
+    const previousMode = st.mode;
+    window.EventSource = Fake;
+    st.mode = A.MODE.LIVE;
+    A.setJitter(false);
+
+    const states = [];
+    const close = A.subscribe('/api/events', ['deploys'], {
+      on: { line: () => {} },
+      onState: (s, info) => states.push({ state: s, byBrowser: !!info.byBrowser, inMs: info.inMs === undefined ? null : info.inMs })
+    });
+    await new Promise(r => setTimeout(r, 40));
+
+    const es = Fake.last;
+    const first = { socket: !!es, url: es ? es.url : null };
+    es.readyState = 1;
+    es.emit('open');
+    es.emit('line', { data: '{"n":1}', lastEventId: '42' });
+
+    es.readyState = 0;
+    es.emit('error');
+    const browserManaged = {
+      lastState: states[states.length - 1],
+      socketsOpened: opened.length,
+      sameSocket: Fake.last === es,
+      lastEventId: (A.streamSnapshot()[0] || {}).lastEventId
+    };
+
+    es.readyState = 2;
+    es.emit('error');
+    await new Promise(r => setTimeout(r, 40));
+    const clientManaged = {
+      lastState: states[states.length - 1],
+      socketsOpened: opened.length
+    };
+
+    close();
+    const afterClose = A.streamSnapshot().length;
+    window.EventSource = realES;
+    st.mode = previousMode;
+    A.setJitter(true);
+    return { first, browserManaged, clientManaged, afterClose, states };
+  });
+  rec('STREAM', 'a subscription opens one stream and asks for the topics it needs',
+    sse.first.socket && /topics=deploys/.test(sse.first.url || ''), sse.first.url || 'no socket');
+  rec('STREAM', 'the stream remembers the id of the last line it was given',
+    sse.browserManaged.lastEventId === '42', String(sse.browserManaged.lastEventId));
+  rec('STREAM', 'an error while the socket is still connecting is left to the browser, which resumes from the header',
+    sse.browserManaged.lastState && sse.browserManaged.lastState.state === 'retrying'
+      && sse.browserManaged.lastState.byBrowser === true
+      && sse.browserManaged.sameSocket && sse.browserManaged.socketsOpened === 1,
+    JSON.stringify(sse.browserManaged));
+  rec('STREAM', 'an error on a closed socket falls back to the local backoff ladder instead of waiting forever',
+    sse.clientManaged.lastState && sse.clientManaged.lastState.state === 'retrying'
+      && sse.clientManaged.lastState.byBrowser === false
+      && sse.clientManaged.lastState.inMs === 1000,
+    JSON.stringify(sse.clientManaged));
+  rec('STREAM', 'closing the last subscriber tears the stream down',
+    sse.afterClose === 0, `${sse.afterClose} streams still held`);
+
+  await goto(page, 'overview');
+  const paletteLive = await page.evaluate(async () => {
+    const A = window.ARGUS;
+    const real = A.read;
+    A.read = function (p) {
+      if (p.indexOf('/api/search/index') !== 0) return real.apply(A, arguments);
+      return Promise.resolve({
+        ok: true, mode: 'live', at: Date.now(), stale: false, error: null,
+        data: {
+          count: 2, cap: 2000, truncated: false, droppedForCap: 0, partial: true,
+          items: [
+            { kind: 'Bucket', label: 'argus-sentinel', hint: '12 GB live', route: 'data', rest: ['bucket', 'argus-sentinel'], params: {} },
+            { kind: 'Stream', label: 'ARGUS_EVENTS', hint: '40 messages', route: 'data', rest: ['queues'], params: { stream: 'ARGUS_EVENTS' } }
+          ],
+          sources: [{ kind: 'bucket', ok: true, count: 1 }, { kind: 'alert', ok: false, count: 0, reason: 'unreachable' }]
+        }
+      });
+    };
+    A.forget();
+    A.palette();
+    const input = document.querySelector('.pal-input');
+    input.value = 'argus-sentinel';
+    input.dispatchEvent(new Event('input'));
+    await new Promise(r => setTimeout(r, 250));
+    input.value = 'argus-sentinel';
+    input.dispatchEvent(new Event('input'));
+    const labels = [...document.querySelectorAll('.pal-item .pal-label')].map(n => n.textContent);
+    const note = (document.querySelector('.pal-source') || {}).textContent || '';
+    const liveRegions = document.querySelectorAll('[aria-live]:not([aria-live="off"])').length;
+    A.dismissOverlays();
+    A.read = real;
+    A.forget();
+    return { labels, note, liveRegions };
+  });
+  rec('CMD', 'the palette finds a resource that exists only in the live index',
+    paletteLive.labels.indexOf('argus-sentinel') !== -1, paletteLive.labels.join(' | ') || 'no results');
+  rec('CMD', 'the palette says where its list came from and which readers failed',
+    /Live: 2 resources/.test(paletteLive.note) && /Unreadable: alert/.test(paletteLive.note), paletteLive.note);
+  rec('CMD', 'the live source note adds no live region beyond the shell one and the result count',
+    paletteLive.liveRegions === 2, `${paletteLive.liveRegions} live regions while the palette is open`);
+
+  const paletteSample = await page.evaluate(async () => {
+    window.ARGUS.forget();
+    window.ARGUS.palette();
+    await new Promise(r => setTimeout(r, 250));
+    const note = (document.querySelector('.pal-source') || {}).textContent || '';
+    window.ARGUS.dismissOverlays();
+    return note;
+  });
+  rec('CMD', 'with no API the palette says so rather than implying it searched the platform',
+    /Screens and actions only/.test(paletteSample) && /bundled sample data/.test(paletteSample), paletteSample);
+
+  await goto(page, 'overview');
+
+  const ranRules = await page.evaluate(async () => {
+    const r = await window.axe.run(document, {
+      runOnly: { type: 'tag', values: ['wcag22aa'] },
+      rules: { 'target-size': { enabled: true } },
+      preload: false
+    });
+    return [].concat(r.violations, r.passes, r.incomplete, r.inapplicable).map(x => x.id);
+  });
+  rec('A11Y', 'the WCAG 2.2 target-size rule is actually enabled, not silently skipped',
+    ranRules.indexOf('target-size') !== -1, ranRules.join(',') || 'no rule ran');
+
+  const forcedCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, forcedColors: 'active' });
+  const fp = await forcedCtx.newPage();
+  const forcedErrors = [];
+  fp.on('pageerror', e => forcedErrors.push('pageerror: ' + e.message));
+  await fp.goto(URL, { waitUntil: 'load' });
+  await fp.evaluate(AXE);
+  await fp.waitForTimeout(160);
+
+  rec('FORCED', 'the forced-colors context really is in forced colors',
+    await fp.evaluate(() => window.matchMedia('(forced-colors: active)').matches));
+
+  for (const r of ROUTES) { await goto(fp, r); await axeOn(fp, `forced colors, ${r}`, 'FORCED', FORCED_AXE_OPTIONS); }
+
+  await goto(fp, 'logs');
+  const repainted = await fp.evaluate(() => {
+    const line = document.querySelector('.logline');
+    const view = document.querySelector('.logview');
+    return {
+      lineColor: line ? getComputedStyle(line).color : null,
+      viewBg: view ? getComputedStyle(view).backgroundColor : null,
+      viewColor: view ? getComputedStyle(view).color : null
+    };
+  });
+  rec('FORCED', 'the deepest-tinted component takes the system colours instead of its own',
+    repainted.lineColor === 'rgb(0, 0, 0)' && repainted.viewBg === 'rgb(255, 255, 255)',
+    JSON.stringify(repainted));
+
+  await goto(fp, 'overview');
+  const tones = await fp.evaluate(() => {
+    const host = document.createElement('div');
+    document.getElementById('main').appendChild(host);
+    const sig = {}, glyphs = {};
+    ['ok', 'warn', 'bad', 'info', 'idle'].forEach(t => {
+      const p = window.ARGUS.ui.pill(t, t);
+      host.appendChild(p);
+      const s = getComputedStyle(p);
+      sig[t] = [s.borderTopStyle, s.borderTopWidth, s.borderTopColor, s.color].join(' ');
+      glyphs[t] = (p.querySelector('.pill-glyph') || {}).textContent || '';
+    });
+    const card = document.querySelector('#main .card');
+    const cs = card ? getComputedStyle(card) : null;
+    host.remove();
+    return {
+      sig, glyphs,
+      cardBorder: cs ? cs.borderTopWidth + ' ' + cs.borderTopStyle : null,
+      cardShadow: cs ? cs.boxShadow : null
+    };
+  });
+  rec('FORCED', 'the five status tones stay distinguishable when the system repaints every colour',
+    new Set(Object.keys(tones.sig).map(k => tones.sig[k])).size === 5, JSON.stringify(tones.sig));
+  rec('FORCED', 'every status pill still carries its own glyph, which is what survives a repaint',
+    new Set(Object.keys(tones.glyphs).map(k => tones.glyphs[k])).size === 5, JSON.stringify(tones.glyphs));
+  rec('FORCED', 'a card keeps a real border once its shadow is dropped',
+    !!tones.cardBorder && !/^0px/.test(tones.cardBorder) && tones.cardBorder.indexOf('none') === -1,
+    `border ${tones.cardBorder}, shadow ${tones.cardShadow}`);
+  rec('FORCED', 'no page error in forced colors', forcedErrors.length === 0, forcedErrors.slice(0, 3).join(' | '));
+  await forcedCtx.close();
 
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));

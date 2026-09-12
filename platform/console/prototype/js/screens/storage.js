@@ -50,16 +50,23 @@
     'still held by deleted or superseded versions. Browse the bucket and press Calculate for a counted total.';
 
   var ZERO_COUNT_TITLE =
-    'The volume servers report no file count for this bucket. That is not the same as the bucket being empty: ' +
-    'on this cluster every volume reports a file count of zero even where a listing finds objects. Browse the ' +
-    'bucket, or press Calculate on a prefix, for a counted number.';
-  var APPROX_COUNT_TITLE =
-    'Approximate: summed from volume metadata, so it lags compaction and counts every retained version. ' +
-    'Press Calculate on a prefix for a counted number.';
+    'The volume servers report no needle count for this bucket. That is not the same as the bucket being empty: ' +
+    'on this cluster a volume can report a file count of zero even where a listing finds objects. Browse the ' +
+    'bucket, or press Calculate on a prefix, for a counted number of objects.';
+  var NEEDLE_COUNT_TITLE =
+    'Needles, not objects. The filer splits every file at 4 MB and stores each version of a versioned object ' +
+    'separately, so a 1 GB backup is about 256 needles. Press Calculate on a prefix for a counted object number.';
+
+  var LIFECYCLE_TITLE =
+    'SeaweedFS applies Expiration.Days as a filer TTL path rule stamped on each needle at write time. Objects ' +
+    'written before this rule existed carry no TTL and will never expire, so a declared retention does not ' +
+    'retroactively bound a bucket that was already filling.';
 
   var SHIELD_TITLE =
     'This verdict comes from one attempted delete of one locked object version, in one probe bucket, at boot ' +
-    '-- not from reading this bucket\'s configuration. It is the whole store\'s answer, shown per row.';
+    '-- not from reading this bucket\'s configuration. It is the whole store\'s answer, shown per row. Object ' +
+    'Lock is implemented in the S3 gateway alone, so it says nothing about a delete that reaches the filer ' +
+    'directly; the Immutability panel carries that separately.';
 
   function shieldTone(verdict) {
     if (verdict === 'enforced') return 'ok';
@@ -87,6 +94,9 @@
     if (reason === 'http-500') return 'The console API failed internally and deliberately did not put the detail in the response. It is in `docker compose logs console`.';
     if (reason === 'http-503') return 'The console API could not reach the object store. Check `docker compose ps` in platform/compose.';
     if (reason === 'http-504') return 'The object store did not answer the console in time. It may be compacting, or the volume servers may be unreachable from the console container.';
+    if (reason === 'unreachable') return 'Nothing answered at all, so this is the console API itself rather than the object store behind it.';
+    if (reason === 'timeout') return 'The console API was reached but did not finish in time. That is a slow answer, not a missing one, so retrying is reasonable.';
+    if (reason === 'cancelled') return 'The console abandoned this request when it left the screen that asked for it. Nothing is wrong with the server.';
     return null;
   }
 
@@ -349,6 +359,17 @@
 
     body.appendChild(el('p', { text: d.detail || 'The probe recorded no detail.' }));
 
+    body.appendChild(el('div.callout.' + (d.filerBypass === 'closed' ? 'info' : 'warn'), [
+      el('strong', {
+        text: d.filerBypass === 'closed'
+          ? 'The filer path was probed and refused the delete too.'
+          : 'Object lock lives in the S3 gateway. The filer path is ' + (d.filerBypass || 'unknown') + '.'
+      }),
+      el('p', { text: d.filerBypassDetail || 'This run recorded nothing about the filer path.' }),
+      el('p', { text: d.defaultRetentionDetail || 'This run recorded nothing about whether the bucket default reaches real objects.' }),
+      el('p.hint', { text: 'Bucket default retention stamped on write: ' + (d.defaultRetentionStamped || 'unknown') + '.' })
+    ]));
+
     body.appendChild(el('p.hint', {
       text: 'Scope: ' + (d.scope || 'unknown') + '. ' + SHIELD_TITLE
     }));
@@ -418,10 +439,28 @@
     return el('span', { title: APPROX_SIZE_TITLE }, [el('span', { text: 'approx. ' + v })]);
   }
 
+  function reclaimableCell(b) {
+    if (b.unknownSize) return unknownCell(b.unknownSizeReason || 'The volume topology reported nothing for this bucket.');
+    if (b.reclaimableBytes === null || b.reclaimableBytes === undefined) {
+      return unknownCell('The volume servers did not report a deleted-byte count for this bucket.');
+    }
+    return el('span', {
+      title: 'Space still held on disk by deleted or superseded needles. It returns only when the volume is ' +
+        'compacted, so live is ' + bytesOr(b.liveBytes) + ' of the ' + bytesOr(b.diskBytes) + ' footprint.'
+    }, [el('span', { text: bytesOr(b.reclaimableBytes) })]);
+  }
+
   function countCell(b) {
     if (b.unknownSize) return unknownCell(b.unknownSizeReason || 'The volume topology reported nothing for this bucket.');
-    if (!b.objects) return unknownCell(ZERO_COUNT_TITLE, 'not counted');
-    return el('span', { title: APPROX_COUNT_TITLE }, [el('span', { text: 'approx. ' + fmt.num(b.objects) })]);
+    if (b.needles === null || b.needles === undefined) {
+      return unknownCell(b.objectsReason || ZERO_COUNT_TITLE, 'not counted');
+    }
+    if (!b.needles) return unknownCell(ZERO_COUNT_TITLE, 'not counted');
+    var live = (b.liveNeedles === null || b.liveNeedles === undefined) ? null : b.liveNeedles;
+    return el('span', { title: NEEDLE_COUNT_TITLE }, [
+      el('span', { text: fmt.num(b.needles) }),
+      live === null ? null : el('span.muted', { text: ' (' + fmt.num(live) + ' live)' })
+    ]);
   }
 
   function lockCell(b) {
@@ -484,7 +523,8 @@
         render: function (b) { return A.link(b.name, ROUTE, null, { bucket: b.name }, 'rlink'); }
       },
       { key: 'diskBytes', label: 'On disk', align: 'right', render: sizeCell, sort: function (b) { return b.unknownSize ? null : b.diskBytes; } },
-      { key: 'objects', label: 'Objects', align: 'right', render: countCell, sort: function (b) { return b.objects || null; } },
+      { key: 'reclaimableBytes', label: 'Reclaimable', align: 'right', render: reclaimableCell, sort: function (b) { return b.unknownSize ? null : b.reclaimableBytes; } },
+      { key: 'needles', label: 'Needles', align: 'right', render: countCell, sort: function (b) { return b.needles || null; } },
       {
         key: 'versioning', label: 'Versioning',
         render: function (b) {
@@ -500,7 +540,10 @@
       { key: 'owner', label: 'Owner', render: function (b) { return b.owner ? el('code.mono', { text: b.owner }) : el('span.muted', { text: 'not declared' }); } },
       {
         key: 'lifecycleDays', label: 'Lifecycle', align: 'right',
-        render: function (b) { return b.lifecycleDays ? fmt.num(b.lifecycleDays) + ' d' : el('span.muted', { text: 'none' }); }
+        render: function (b) {
+          if (!b.lifecycleDays) return el('span.muted', { text: 'none' });
+          return el('span', { title: LIFECYCLE_TITLE }, [el('span', { text: fmt.num(b.lifecycleDays) + ' d, from the rule onward' })]);
+        }
       },
       {
         key: 'backup', label: 'Backup',
@@ -517,10 +560,19 @@
       empty: 'No bucket was found and none is declared.'
     }));
 
+    if ((d.buckets || []).some(function (b) { return b.lifecycleDays; })) {
+      body.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'A lifecycle rule here bounds what is written after it, not what is already there.' }),
+        el('p', { text: LIFECYCLE_TITLE })
+      ]));
+    }
+
     body.appendChild(el('p.hint', {
-      text: 'Bucket list from ' + (d.inventorySource || 'an unnamed source') + '. Sizes are summed from volume ' +
-        'metadata, never by listing objects. A green lock means one delete probe was refused, once, against one ' +
-        'bucket. Read at ' + stamp(d.at) + '.'
+      text: 'Bucket list from ' + (d.inventorySource || 'an unnamed source') + '. Counts are needles from ' +
+        (d.countsFrom || 'the master\'s volume metadata') + ', never a listing: the filer splits at 4 MB and keeps ' +
+        'every version, so needles exceed objects. Reclaimable is disk still held by deleted needles until the ' +
+        'volume is compacted. A green lock means one delete probe was refused, once, against one bucket. ' +
+        'Read at ' + stamp(d.at) + '.'
     }));
   }
 

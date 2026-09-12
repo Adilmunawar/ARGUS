@@ -17,6 +17,14 @@
 
   function now() { return Date.now(); }
 
+  function routeSignal() {
+    return typeof A.routeSignal === 'function' ? A.routeSignal() : null;
+  }
+
+  function routeGeneration() {
+    return typeof A.routeGeneration === 'function' ? A.routeGeneration() : 0;
+  }
+
   function request(path, opts) {
     opts = opts || {};
     var timeoutMs = opts.timeoutMs || 10000;
@@ -25,8 +33,23 @@
       return Promise.reject({ reason: 'no-fetch', message: 'This browser cannot reach the console API.' });
     }
 
+    var outer = opts.abortable === false ? null : (opts.signal || routeSignal());
     var controller = typeof window.AbortController === 'function' ? new window.AbortController() : null;
-    var timer = window.setTimeout(function () { if (controller) controller.abort(); }, timeoutMs);
+    var timedOut = false;
+    var timer = window.setTimeout(function () {
+      timedOut = true;
+      if (controller) controller.abort();
+    }, timeoutMs);
+
+    function onOuterAbort() { if (controller) controller.abort(); }
+    if (outer && controller) {
+      if (outer.aborted) controller.abort();
+      else outer.addEventListener('abort', onOuterAbort);
+    }
+    function release() {
+      window.clearTimeout(timer);
+      if (outer && outer.removeEventListener) outer.removeEventListener('abort', onOuterAbort);
+    }
 
     return window.fetch(state.base + path, {
       method: 'GET',
@@ -35,7 +58,7 @@
       credentials: 'same-origin',
       signal: controller ? controller.signal : undefined
     }).then(function (res) {
-      window.clearTimeout(timer);
+      release();
       if (!res.ok) {
         return Promise.reject({
           reason: 'http-' + res.status,
@@ -44,13 +67,16 @@
       }
       return res.json();
     }, function (err) {
-      window.clearTimeout(timer);
+      release();
       var aborted = err && (err.name === 'AbortError');
+      var cancelled = aborted && !timedOut;
       return Promise.reject({
-        reason: aborted ? 'timeout' : 'unreachable',
-        message: aborted
-          ? 'The console API did not answer within ' + Math.round(timeoutMs / 1000) + ' seconds.'
-          : 'The console API is not reachable. Is it running? `npm start` in platform/console/server.'
+        reason: cancelled ? 'cancelled' : (aborted ? 'timeout' : 'unreachable'),
+        message: cancelled
+          ? 'This request was abandoned because the console left the screen that asked for it. Nothing is wrong with the server.'
+          : (aborted
+            ? 'The console API did not answer within ' + Math.round(timeoutMs / 1000) + ' seconds.'
+            : 'The console API is not reachable. Is it running? `npm start` in platform/console/server.')
       });
     });
   }
@@ -64,7 +90,7 @@
       return Promise.resolve(state);
     }
     if (!state.probing) {
-      state.probing = request('/api/capabilities', { timeoutMs: 2500 }).then(function (caps) {
+      state.probing = request('/api/capabilities', { timeoutMs: 2500, abortable: false }).then(function (caps) {
         state.mode = MODE.LIVE;
         state.capabilities = caps;
         state.probedAt = now();
@@ -96,7 +122,8 @@
 
     var hit = cached[path];
     if (hit && now() - hit.at < ttl) return Promise.resolve(hit.envelope);
-    if (inflight[path]) return inflight[path];
+    var ik = routeGeneration() + '|' + path;
+    if (inflight[ik]) return inflight[ik];
 
     var p = request(path, opts).then(function (data) {
       var envelope = {
@@ -105,10 +132,11 @@
         error: data && data.ok === false ? { reason: data.reason, message: data.message } : null
       };
       cached[path] = { at: now(), envelope: envelope };
-      delete inflight[path];
+      delete inflight[ik];
       return envelope;
     }, function (err) {
-      delete inflight[path];
+      delete inflight[ik];
+      if (err && err.reason === 'cancelled' && hit) return hit.envelope;
       if (hit) {
         var stale = {};
         for (var k in hit.envelope) if (Object.prototype.hasOwnProperty.call(hit.envelope, k)) stale[k] = hit.envelope[k];
@@ -119,7 +147,7 @@
       return { ok: false, data: null, mode: MODE.LIVE, at: now(), stale: false, error: err };
     });
 
-    inflight[path] = p;
+    inflight[ik] = p;
     return p;
   }
 
@@ -131,6 +159,7 @@
     CLOSED: 'closed'
   };
 
+  var CONNECTING = 0;
   var MAX_OPEN_STREAMS = 4;
   var MAX_OPENING_ATTEMPTS = 4;
   var BACKOFF_MIN_MS = 1000;
@@ -166,11 +195,20 @@
     tellSubs(rec, function (sub) { if (sub.onState) sub.onState(next, info || {}); });
   }
 
+  var jitterEnabled = true;
+
+  A.setJitter = function (on) { jitterEnabled = !!on; };
+  A.jitterEnabled = function () { return jitterEnabled; };
+
   function backoffFor(attempts) {
     var steps = Math.max(0, attempts - 1);
     var raw = BACKOFF_MIN_MS * Math.pow(2, Math.min(steps, 12));
-    return Math.min(BACKOFF_MAX_MS, raw);
+    var capped = Math.min(BACKOFF_MAX_MS, raw);
+    if (!jitterEnabled) return capped;
+    return Math.round(capped / 2 + Math.random() * (capped / 2));
   }
+
+  A.backoffFor = backoffFor;
 
   function detachStream(rec) {
     var es = rec.es;
@@ -272,6 +310,27 @@
     var onError = function () {
       if (rec.es !== es) return;
       var wasOpen = rec.state === STREAM.OPEN;
+      var browserWillReconnect = es.readyState === CONNECTING;
+
+      if (browserWillReconnect) {
+        rec.attempts += 1;
+        if (!rec.everOpened && rec.attempts >= MAX_OPENING_ATTEMPTS) {
+          giveUpStream(rec, 'The live stream could not be opened.');
+          return;
+        }
+        setStreamState(rec, STREAM.RETRYING, {
+          byBrowser: true,
+          inMs: null,
+          attempt: rec.attempts,
+          resumeFrom: rec.lastEventId || null,
+          message: wasOpen
+            ? 'The live stream dropped. The browser is reconnecting on its own and sends the id of the last line ' +
+              'it saw, so the gap is replayed rather than skipped.'
+            : 'The live stream has not opened yet. The browser is still trying.'
+        });
+        return;
+      }
+
       detachStream(rec);
       scheduleRetry(rec, wasOpen
         ? 'The console API closed the live stream.'

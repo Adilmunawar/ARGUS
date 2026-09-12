@@ -414,14 +414,14 @@ const routes = {
 
   'GET /api/search/index': async () => search.index(),
 
-  'GET /metrics': async () => new RawResponse({
+  'GET /metrics': async (q, ctx) => new RawResponse({
     status: 200,
     headers: {
       'content-type': 'text/plain; version=0.0.4; charset=utf-8',
       'cache-control': 'no-store'
     },
     body: telemetry.render({
-      version: require('../package.json').version,
+      version: ctx && ctx.principal ? require('../package.json').version : null,
       uptimeSeconds: Math.round(process.uptime()),
       openStreams: openStreamCount()
     })

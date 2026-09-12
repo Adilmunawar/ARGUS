@@ -1077,7 +1077,7 @@
     "suite": "LOGS",
     "id": "the view stays bounded at its cap through five thousand lines",
     "pass": true,
-    "detail": "{\"n\":60,\"last\":\"2026-09-12 09:08Z INFO  probe line 4999\"}"
+    "detail": "{\"n\":60,\"last\":\"2026-09-12 09:42Z INFO  probe line 4999\"}"
   },
   {
     "suite": "LOGS",
@@ -1754,6 +1754,318 @@
   {
     "suite": "DET",
     "id": "every route renders identically on a second visit",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "MOTION",
+    "id": "the reduced-motion cascade reaches the view-transition pseudo-elements, which a universal selector cannot",
+    "pass": true,
+    "detail": "3 reduced-motion blocks, none naming the view-transition pseudo-elements"
+  },
+  {
+    "suite": "SEC",
+    "id": "the CSP forbids inline style and script attributes and every trusted-types sink",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "TBL",
+    "id": "a table past the virtual threshold renders a window rather than every row",
+    "pass": true,
+    "detail": "{\"virtual\":true,\"rendered\":35}"
+  },
+  {
+    "suite": "TBL",
+    "id": "windowed cells stay on one line so the single measured row height holds",
+    "pass": true,
+    "detail": "white-space: nowrap"
+  },
+  {
+    "suite": "TBL",
+    "id": "a focused row is still focused after the window repaints",
+    "pass": true,
+    "detail": "{\"wanted\":\"row-107\",\"got\":\"row-107\",\"focusedBefore\":true}"
+  },
+  {
+    "suite": "TBL",
+    "id": "changing the rows keeps the operator where they were scrolled to",
+    "pass": true,
+    "detail": "scrolled to 4000, after a row change 4000"
+  },
+  {
+    "suite": "TBL",
+    "id": "changing the sort returns to the first row",
+    "pass": true,
+    "detail": "scrollTop after sorting: 0"
+  },
+  {
+    "suite": "BACKOFF",
+    "id": "the retry ladder doubles from one second and stops at the thirty second ceiling",
+    "pass": true,
+    "detail": "1000,2000,4000,8000,16000,30000,30000,30000,30000"
+  },
+  {
+    "suite": "BACKOFF",
+    "id": "with jitter off the ladder is identical on every call, so a determinism suite can rely on it",
+    "pass": true,
+    "detail": "1000,2000,4000,8000,16000,30000,30000,30000,30000"
+  },
+  {
+    "suite": "BACKOFF",
+    "id": "with jitter on a retry lands in the lower half of its ceiling rather than in lockstep",
+    "pass": true,
+    "detail": "min 15037, max 29946"
+  },
+  {
+    "suite": "BACKOFF",
+    "id": "the jitter hook reports the state it was set to",
+    "pass": true,
+    "detail": "{\"off\":false,\"on\":true}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "a screen gets an abort signal that stays live while it is on screen",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ROUTE",
+    "id": "leaving a screen aborts the reads it was still waiting for",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "ROUTE",
+    "id": "the next screen gets its own signal rather than an already-aborted one",
+    "pass": true,
+    "detail": "{\"liveWhileOpen\":true,\"abortedOnLeave\":true,\"freshIsLive\":true,\"distinct\":true,\"generationGrew\":true}"
+  },
+  {
+    "suite": "ROUTE",
+    "id": "the route generation advances so one screen cannot cancel another screen inflight read",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "LIVE",
+    "id": "a route where one panel fails still renders its other panels",
+    "pass": true,
+    "detail": "{\"panels\":4,\"loading\":1,\"errors\":1,\"errorText\":\"This could not be readThe console API answered 503 for /api/storage/capacity. The console API could not reach the object store. Check `docker compose ps` in platform/compose.Try again\",\"stale\":true,\"needles\":true,\"reclaimable\":true,\"lifecycleCaveat\":true,\"filerCaveat\":true,\"sampleState\":false,\"rows\":1}"
+  },
+  {
+    "suite": "LIVE",
+    "id": "a panel that has not answered yet shows a loading skeleton rather than an empty box",
+    "pass": true,
+    "detail": "1 skeletons"
+  },
+  {
+    "suite": "LIVE",
+    "id": "a failed panel names its reason instead of going blank",
+    "pass": true,
+    "detail": "This could not be readThe console API answered 503 for /api/storage/capacity. The console API could not reach the object store. Check `docker compose ps` in pla"
+  },
+  {
+    "suite": "LIVE",
+    "id": "a stale panel keeps its last reading on screen and says so",
+    "pass": true,
+    "detail": "{\"stale\":true}"
+  },
+  {
+    "suite": "LIVE",
+    "id": "the bucket table counts needles and splits reclaimable from live bytes",
+    "pass": true,
+    "detail": "{\"needles\":true,\"reclaimable\":true}"
+  },
+  {
+    "suite": "LIVE",
+    "id": "a declared lifecycle is shown as binding only what is written after it",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "LIVE",
+    "id": "the immutability verdict carries the filer bypass caveat beside it",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "STREAM",
+    "id": "a subscription opens one stream and asks for the topics it needs",
+    "pass": true,
+    "detail": "/api/events?topics=deploys"
+  },
+  {
+    "suite": "STREAM",
+    "id": "the stream remembers the id of the last line it was given",
+    "pass": true,
+    "detail": "42"
+  },
+  {
+    "suite": "STREAM",
+    "id": "an error while the socket is still connecting is left to the browser, which resumes from the header",
+    "pass": true,
+    "detail": "{\"lastState\":{\"state\":\"retrying\",\"byBrowser\":true,\"inMs\":null},\"socketsOpened\":1,\"sameSocket\":true,\"lastEventId\":\"42\"}"
+  },
+  {
+    "suite": "STREAM",
+    "id": "an error on a closed socket falls back to the local backoff ladder instead of waiting forever",
+    "pass": true,
+    "detail": "{\"lastState\":{\"state\":\"retrying\",\"byBrowser\":false,\"inMs\":1000},\"socketsOpened\":1}"
+  },
+  {
+    "suite": "STREAM",
+    "id": "closing the last subscriber tears the stream down",
+    "pass": true,
+    "detail": "0 streams still held"
+  },
+  {
+    "suite": "CMD",
+    "id": "the palette finds a resource that exists only in the live index",
+    "pass": true,
+    "detail": "argus-sentinel | argus-sentinel"
+  },
+  {
+    "suite": "CMD",
+    "id": "the palette says where its list came from and which readers failed",
+    "pass": true,
+    "detail": "Live: 2 resources from the console API. Unreadable: alert."
+  },
+  {
+    "suite": "CMD",
+    "id": "the live source note adds no live region beyond the shell one and the result count",
+    "pass": true,
+    "detail": "2 live regions while the palette is open"
+  },
+  {
+    "suite": "CMD",
+    "id": "with no API the palette says so rather than implying it searched the platform",
+    "pass": true,
+    "detail": "Screens and actions only. The console is running on bundled sample data."
+  },
+  {
+    "suite": "A11Y",
+    "id": "the WCAG 2.2 target-size rule is actually enabled, not silently skipped",
+    "pass": true,
+    "detail": "target-size"
+  },
+  {
+    "suite": "FORCED",
+    "id": "the forced-colors context really is in forced colors",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, overview: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, apps: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, deploys: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, compute: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, data: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, identity: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, security: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, ml: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, ops: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, audit: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, stack: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, system: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, storage: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "forced colors, logs: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "FORCED",
+    "id": "the deepest-tinted component takes the system colours instead of its own",
+    "pass": true,
+    "detail": "{\"lineColor\":\"rgb(0, 0, 0)\",\"viewBg\":\"rgb(255, 255, 255)\",\"viewColor\":\"rgb(0, 0, 0)\"}"
+  },
+  {
+    "suite": "FORCED",
+    "id": "the five status tones stay distinguishable when the system repaints every colour",
+    "pass": true,
+    "detail": "{\"ok\":\"solid 1px rgb(0, 0, 0) rgb(0, 0, 0)\",\"warn\":\"dashed 1px rgb(0, 0, 0) rgb(0, 0, 0)\",\"bad\":\"double 3px rgb(0, 0, 0) rgb(0, 0, 0)\",\"info\":\"dotted 1px rgb(0, 0, 0) rgb(0, 0, 0)\",\"idle\":\"groove 1px rgb(96, 0, 0) rgb(96, 0, 0)\"}"
+  },
+  {
+    "suite": "FORCED",
+    "id": "every status pill still carries its own glyph, which is what survives a repaint",
+    "pass": true,
+    "detail": "{\"ok\":\"●\",\"warn\":\"▲\",\"bad\":\"■\",\"info\":\"◆\",\"idle\":\"○\"}"
+  },
+  {
+    "suite": "FORCED",
+    "id": "a card keeps a real border once its shadow is dropped",
+    "pass": true,
+    "detail": "border 1px solid, shadow none"
+  },
+  {
+    "suite": "FORCED",
+    "id": "no page error in forced colors",
     "pass": true,
     "detail": ""
   },

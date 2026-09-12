@@ -270,6 +270,7 @@ kbd { font: inherit; font-size: 11px; background: var(--cream); border: 1px soli
 .pal-input { min-height: 34px; font-size: 14px; width: 100%; border: 1px solid rgba(var(--ink-rgb),.16);
   border-radius: var(--field); padding: 9px 12px; font-family: inherit; }
 .pal-count { font-size: 11px; color: var(--muted); }
+.pal-source { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .pal-list { list-style: none; max-height: 46vh; overflow-y: auto; margin: 0; padding: 0; }
 .pal-item { display: flex; align-items: baseline; gap: 9px; padding: 8px 10px; border-radius: 9px;
   cursor: pointer; min-height: 30px; }
@@ -505,3 +506,30 @@ body.is-compact .grid { gap: 9px; }
 .menuitem-label { flex: 1; }
 .menuitem-hint { font-size: 11px; color: var(--muted); }
 .menudiv { height: 1px; background: rgba(var(--ink-rgb), .1); margin: 4px 2px; }
+
+.tablewrap.is-virtual td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 36ch; }
+
+@media (forced-colors: active) {
+  :root { --sh-card: none; --sh-float: none; --sh-pop: none; }
+
+  .card, .tile, .dialog, .menu, .drawer, .callout, .empty, .flash, .tablewrap {
+    border: 1px solid CanvasText; background: Canvas; color: CanvasText; }
+
+  .pill { border: 1px solid CanvasText; background: Canvas; color: CanvasText; }
+  .pill.ok { border-style: solid; }
+  .pill.warn { border-style: dashed; }
+  .pill.bad { border-style: double; border-width: 3px; }
+  .pill.info { border-style: dotted; }
+  .pill.idle { border-style: groove; border-color: GrayText; color: GrayText; }
+
+  .btn { border: 1px solid ButtonText; background: ButtonFace; color: ButtonText; }
+  .btn.is-disabled, .btn[disabled] { color: GrayText; border-color: GrayText; }
+  .btn.primary { border-width: 2px; }
+  .btn.danger { border-style: double; border-width: 3px; }
+
+  .nav[aria-current="page"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  :focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
+  .scrim { background: Canvas; }
+
+  .spark, .bar-fill, .meter-fill, .heatcell { forced-color-adjust: none; }
+}

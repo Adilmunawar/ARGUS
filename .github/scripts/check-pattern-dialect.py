@@ -11,8 +11,8 @@ SCHEMA_ROOT = pathlib.Path("platform/gitops/schemas")
 NOT_IN_ECMA = [
     (re.compile(r"\(\?[aiLmsuxt]+[-\w]*\)"), "an inline flag group, which ECMA-262 has no syntax for"),
     (re.compile(r"\(\?P[<=]"), "a Python-spelled named group, which ECMA-262 spells (?<name>)"),
-    (re.compile(r"\\[AZz]"), "a Python string anchor, which ECMA-262 spells ^ and $"),
-    (re.compile(r"[*+?}]\+"), "a possessive quantifier, which ECMA-262 lacks"),
+    (re.compile(r"(?<!\\)\\[AZz]"), "a Python string anchor, which ECMA-262 spells ^ and $"),
+    (re.compile(r"(?<!\\)[*+?}]\+"), "a possessive quantifier, which ECMA-262 lacks"),
     (re.compile(r"\(\?#"), "an inline comment group, which ECMA-262 lacks"),
 ]
 
@@ -31,6 +31,9 @@ SELF_TEST_ACCEPT = [
     "^[A-Za-z_][A-Za-z0-9_]*$",
     "^(?!.*(?:password|secret)=)[^=]+$",
     "(?<=x)y",
+    r"^\{\{[a-z]+\}+$",
+    r"^a\++$",
+    r"^a\\Argus$",
 ]
 
 

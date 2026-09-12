@@ -195,3 +195,7 @@ body.railed .nav{justify-content:center;padding:9px 0}
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (prefers-contrast: more) { :root { --muted: var(--ink-soft); } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) {
+    animation: none !important; transition: none !important; }
+}

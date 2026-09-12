@@ -1,6 +1,6 @@
 @{
     RootModule           = 'Argus.psm1'
-    ModuleVersion        = '0.2.0'
+    ModuleVersion        = '0.3.0'
     GUID                 = '5f1c9a2e-3b7d-4c8a-9e21-7d0c1f6a8b44'
     Author               = 'Zaraat Dost Platform'
     CompanyName          = 'Zaraat Dost'
@@ -18,20 +18,20 @@
         'Get-ArgusAwsInstance', 'Get-ArgusCacheClient', 'Get-ArgusCacheKeyspace',
         'Get-ArgusCacheMemory', 'Get-ArgusCacheServer', 'Get-ArgusCacheState',
         'Get-ArgusCapability', 'Get-ArgusComponentHealth', 'Get-ArgusConnection',
-        'Get-ArgusContainer', 'Get-ArgusContainerStatistic', 'Get-ArgusHealth',
-        'Get-ArgusHeartbeat', 'Get-ArgusHost', 'Get-ArgusIncident',
-        'Get-ArgusLog', 'Get-ArgusLogLabel', 'Get-ArgusLogPattern',
-        'Get-ArgusLogVolume', 'Get-ArgusMetric', 'Get-ArgusMetricRule',
-        'Get-ArgusMetricSeries', 'Get-ArgusMetricStore', 'Get-ArgusMetricTarget',
-        'Get-ArgusOverview', 'Get-ArgusPostgresActivity', 'Get-ArgusPostgresDatabase',
-        'Get-ArgusPostgresReplication', 'Get-ArgusPostgresRole', 'Get-ArgusPostgresServer',
-        'Get-ArgusPostgresStatement', 'Get-ArgusPostgresTable', 'Get-ArgusQueueAccount',
-        'Get-ArgusQueueConsumer', 'Get-ArgusQueueServer', 'Get-ArgusQueueStream',
-        'Get-ArgusSecretsHighAvailability', 'Get-ArgusSecretsSandbox', 'Get-ArgusSecretsSealStatus',
-        'Get-ArgusSession', 'Get-ArgusStorageBucket', 'Get-ArgusStorageCapacity',
-        'Get-ArgusStorageLock', 'Get-ArgusStorageObject', 'Get-ArgusUptime',
-        'Invoke-ArgusApi', 'Measure-ArgusStoragePrefix', 'Receive-ArgusStream',
-        'Save-ArgusStorageObject'
+        'Get-ArgusConsoleMetric', 'Get-ArgusContainer', 'Get-ArgusContainerStatistic',
+        'Get-ArgusHealth', 'Get-ArgusHeartbeat', 'Get-ArgusHost',
+        'Get-ArgusIncident', 'Get-ArgusLog', 'Get-ArgusLogLabel',
+        'Get-ArgusLogPattern', 'Get-ArgusLogVolume', 'Get-ArgusMetric',
+        'Get-ArgusMetricRule', 'Get-ArgusMetricSeries', 'Get-ArgusMetricStore',
+        'Get-ArgusMetricTarget', 'Get-ArgusOverview', 'Get-ArgusPostgresActivity',
+        'Get-ArgusPostgresDatabase', 'Get-ArgusPostgresReplication', 'Get-ArgusPostgresRole',
+        'Get-ArgusPostgresServer', 'Get-ArgusPostgresStatement', 'Get-ArgusPostgresTable',
+        'Get-ArgusQueueAccount', 'Get-ArgusQueueConsumer', 'Get-ArgusQueueServer',
+        'Get-ArgusQueueStream', 'Get-ArgusSearchIndex', 'Get-ArgusSecretsHighAvailability',
+        'Get-ArgusSecretsSandbox', 'Get-ArgusSecretsSealStatus', 'Get-ArgusSession',
+        'Get-ArgusStorageBucket', 'Get-ArgusStorageCapacity', 'Get-ArgusStorageLock',
+        'Get-ArgusStorageObject', 'Get-ArgusUptime', 'Invoke-ArgusApi',
+        'Measure-ArgusStoragePrefix', 'Receive-ArgusStream', 'Save-ArgusStorageObject'
     )
 
     CmdletsToExport      = @()
@@ -48,7 +48,7 @@
         'Public/Containers.ps1', 'Public/Heartbeats.ps1',
         'Public/Logs.ps1', 'Public/Metrics.ps1',
         'Public/Platform.ps1', 'Public/Postgres.ps1',
-        'Public/Queues.ps1', 'Public/Secrets.ps1',
+        'Public/Queues.ps1', 'Public/Search.ps1', 'Public/Secrets.ps1',
         'Public/Storage.ps1', 'Public/Streams.ps1',
         'tests/Argus.Module.Tests.ps1', 'tests/Argus.TokenCache.Tests.ps1'
     )
@@ -57,7 +57,7 @@
         PSData = @{
             Tags         = @('Argus', 'Console', 'SelfHosted', 'Windows', 'Operations')
             ProjectUri   = 'https://github.com/zaraatdost/argus'
-            ReleaseNotes = 'Rebuilt against the console session-cookie authentication that the server actually implements, with DPAPI session caching on Windows and parity with the console route table.'
+            ReleaseNotes = 'Parity with the console route table as it now stands, including the live search index and the console own-metrics exposition, and a page cap on the only route that pages.'
         }
     }
 }

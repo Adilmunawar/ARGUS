@@ -285,6 +285,10 @@ function writeOperatorsFile(dir, record, extra) {
     assert.match(String(anonymousMetrics.headers['content-type']), /^text\/plain; version=0\.0\.4/);
     assert.match(anonymousMetrics.body, /# TYPE argus_console_requests_total counter/);
   });
+  check('the public exposition does not fingerprint the build either', () => {
+    assert.ok(!anonymousMetrics.body.includes('argus_console_build_info'),
+      'an anonymous scrape can read the build version that /api/health withholds');
+  });
 
   const crossSiteLogin = await login(main, SUBJECT, PASSWORD, { 'sec-fetch-site': 'cross-site' });
   check('a cross-site sign-in is refused before the password is read', () => {

@@ -45,6 +45,10 @@ function Get-ArgusStorageObject {
         [Parameter(ParameterSetName = 'List')]
         [switch]$All,
 
+        [Parameter(ParameterSetName = 'List')]
+        [ValidateRange(1, 10000)]
+        [int]$MaximumPage = 100,
+
         [Parameter(ParameterSetName = 'Describe', Mandatory, ValueFromPipelineByPropertyName)]
         [string]$Key
     )
@@ -57,7 +61,9 @@ function Get-ArgusStorageObject {
             }
 
             $token = $Cursor
+            $pageNumber = 0
             do {
+                $pageNumber = $pageNumber + 1
                 $page = Invoke-ArgusRequest -Path '/api/storage/objects' -Query @{
                     bucket = $Bucket
                     prefix = $Prefix
@@ -65,6 +71,10 @@ function Get-ArgusStorageObject {
                 }
                 $page
                 $token = $page.cursor
+                if ($All -and $token -and $pageNumber -ge $MaximumPage) {
+                    Write-Warning ("Stopped after {0} pages of {1}. The listing is not finished. Raise -MaximumPage, or resume with -Cursor '{2}'." -f $MaximumPage, $Bucket, $token)
+                    break
+                }
             } while ($All -and $token)
         } catch {
             $PSCmdlet.ThrowTerminatingError($_)

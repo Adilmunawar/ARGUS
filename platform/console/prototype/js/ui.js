@@ -270,13 +270,32 @@
         el('td', { colspan: String(cols.length), style: { height: height + 'px', padding: '0' } }));
     }
 
+    function focusedRowKey() {
+      var active = document.activeElement;
+      if (!active || !tbody.contains(active)) return null;
+      var tr = active.closest ? active.closest('tr') : null;
+      if (!tr || tr !== active || !tr.dataset) return null;
+      return tr.dataset.key || null;
+    }
+
+    function restoreRowFocus(key) {
+      if (!key || typeof window.CSS !== 'object' || typeof window.CSS.escape !== 'function') return;
+      var again = tbody.querySelector('tr[data-key="' + window.CSS.escape(key) + '"]');
+      if (again) again.focus({ preventScroll: true });
+      else wrap.focus({ preventScroll: true });
+    }
+
     function renderWindow() {
       var list = current;
+      var keepFocus = focusedRowKey();
+      var viewH = wrap.clientHeight || 480;
+      var scrollAt = wrap.scrollTop;
       clear(tbody);
 
       if (!list.length) {
         tbody.appendChild(el('tr', el('td', { colspan: String(cols.length) },
           el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
+        restoreRowFocus(keepFocus);
         return;
       }
 
@@ -285,6 +304,7 @@
       if (!windowed) {
         list.forEach(function (row, i) { frag.appendChild(buildRow(row, i)); });
         tbody.appendChild(frag);
+        restoreRowFocus(keepFocus);
         return;
       }
 
@@ -295,8 +315,7 @@
         clear(tbody);
       }
 
-      var viewH = wrap.clientHeight || 480;
-      var first = Math.max(0, Math.floor(wrap.scrollTop / rowHeight) - OVERSCAN);
+      var first = Math.max(0, Math.floor(scrollAt / rowHeight) - OVERSCAN);
       var count = Math.ceil(viewH / rowHeight) + OVERSCAN * 2;
       var last = Math.min(list.length, first + count);
 
@@ -305,6 +324,8 @@
       if (last < list.length) frag.appendChild(spacer((list.length - last) * rowHeight));
 
       tbody.appendChild(frag);
+      if (wrap.scrollTop !== scrollAt) wrap.scrollTop = scrollAt;
+      restoreRowFocus(keepFocus);
     }
 
     var scrollQueued = false;
@@ -314,7 +335,11 @@
       window.requestAnimationFrame(function () { scrollQueued = false; renderWindow(); });
     }
 
+    var paintedKey, paintedDir;
     function paint() {
+      var sortChanged = state.key !== paintedKey || state.dir !== paintedDir;
+      paintedKey = state.key;
+      paintedDir = state.dir;
       var list = rows.slice();
       if (state.key) {
         var col = cols.filter(function (c) { return c.key === state.key; })[0];
@@ -329,7 +354,7 @@
       t.setAttribute('aria-rowcount', String(list.length + 1));
       if (windowed && !wasWindowed) wrap.addEventListener('scroll', onScroll);
       if (!windowed && wasWindowed) wrap.removeEventListener('scroll', onScroll);
-      if (windowed) wrap.scrollTop = 0;
+      if (windowed && (sortChanged || !wasWindowed)) wrap.scrollTop = 0;
 
       renderWindow();
 

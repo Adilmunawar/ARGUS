@@ -209,6 +209,7 @@ function send(method, path) {
     assert.strictEqual(exposition.status, 200, `status ${exposition.status}`);
     assert.match(exposition.headers['content-type'], /^text\/plain; version=0\.0\.4/);
     assert.match(exposition.body, /# TYPE argus_console_build_info gauge/);
+    assert.match(exposition.body, /argus_console_uptime_seconds \d+/);
     assert.match(exposition.body, /# TYPE argus_console_request_duration_seconds histogram/);
     assert.match(exposition.body, /argus_console_request_duration_seconds_bucket\{le="\+Inf"\} \d+/);
     assert.match(exposition.body, /argus_console_open_streams \d+/);

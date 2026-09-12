@@ -16,6 +16,21 @@ function Get-ArgusCapability {
     catch { $PSCmdlet.ThrowTerminatingError($_) }
 }
 
+function Get-ArgusConsoleMetric {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+
+    try { $response = Invoke-ArgusRequest -Path '/metrics' -RawResponse }
+    catch { $PSCmdlet.ThrowTerminatingError($_) }
+
+    $content = $response.Content
+    if ($content -is [byte[]]) { $content = [System.Text.Encoding]::UTF8.GetString($content) }
+    if ([string]::IsNullOrWhiteSpace([string]$content)) { return @() }
+
+    return @([string]$content -split "`n" | ForEach-Object { $_.TrimEnd("`r") } | Where-Object { $_.Length -gt 0 })
+}
+
 function Get-ArgusOverview {
     [CmdletBinding()]
     [OutputType([pscustomobject])]

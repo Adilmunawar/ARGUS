@@ -12,11 +12,12 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node test/smoke.js && node test/auth.js && node test/streams.js",
+    "test": "node test/smoke.js && node test/auth.js && node test/streams.js && node test/storage.js",
     "test:smoke": "node test/smoke.js",
     "test:auth": "node test/auth.js",
     "test:streams": "node test/streams.js",
-    "hash-operator-password": "node src/auth/hash-password.js"
+    "hash-operator-password": "node src/auth/hash-password.js",
+    "test:storage": "node test/storage.js"
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch": "^3.700.0",

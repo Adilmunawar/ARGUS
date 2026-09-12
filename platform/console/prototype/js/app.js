@@ -255,9 +255,29 @@
       try { fn(); } catch (e) { if (window.console) window.console.warn('leave hook failed', e); }
     });
   }
+  var routeGen = 0;
+  var routeAbort = null;
+
+  A.routeGeneration = function () { return routeGen; };
+
+  A.routeSignal = function () {
+    if (typeof window.AbortController !== 'function') return null;
+    if (!routeAbort) routeAbort = new window.AbortController();
+    return routeAbort.signal;
+  };
+
+  function abortRoute() {
+    if (!routeAbort) return;
+    var ctrl = routeAbort;
+    routeAbort = null;
+    try { ctrl.abort(); } catch (e) { if (window.console) window.console.warn('route abort failed', e); }
+  }
+
   function runLeaveHooks() {
     var hooks = leaveHooks;
     leaveHooks = [];
+    abortRoute();
+    routeGen += 1;
     drain(hooks);
   }
 
@@ -422,11 +442,40 @@
     return score;
   }
 
-  A.palette = function () {
-    var items = paletteItems();
-    items.forEach(function (it) {
-      it.hay = (it.label + ' ' + (it.hint || '')).toLowerCase();
+  function indexItem(it) {
+    it.hay = (it.label + ' ' + (it.hint || '')).toLowerCase();
+    return it;
+  }
+
+  function liveItemsFrom(payload) {
+    var raw = (payload && payload.items) || [];
+    var out = [];
+    raw.forEach(function (r) {
+      if (!r || !r.label || !r.route) return;
+      out.push(indexItem({
+        kind: r.kind || 'Resource',
+        label: String(r.label),
+        hint: r.hint ? String(r.hint) : '',
+        run: function () { A.go(r.route, r.rest || [], r.params || {}); }
+      }));
     });
+    return out;
+  }
+
+  function liveSourceNote(payload) {
+    var sources = (payload && payload.sources) || [];
+    var bad = sources.filter(function (s) { return !s.ok; }).map(function (s) { return s.kind; });
+    var note = 'Live: ' + ((payload && payload.count) || 0) + ' resource' + (((payload && payload.count) === 1) ? '' : 's') +
+      ' from the console API.';
+    if (payload && payload.truncated) {
+      note += ' Capped at ' + payload.cap + ', so ' + payload.droppedForCap + ' were left out.';
+    }
+    if (bad.length) note += ' Unreadable: ' + bad.join(', ') + '.';
+    return note;
+  }
+
+  A.palette = function () {
+    var items = paletteItems().map(indexItem);
     var results = [], active = 0;
 
     var input = el('input.pal-input', {
@@ -436,6 +485,9 @@
     });
     var list = el('ul.pal-list', { id: 'pal-list', role: 'listbox', 'aria-label': 'Results' });
     var count = el('div.pal-count', { 'aria-live': 'polite' });
+    var source = el('div.pal-source', {
+      text: 'Screens and actions only. Bundled sample resources until the console API answers.'
+    });
 
     function paint() {
       var q = input.value.trim();
@@ -500,7 +552,7 @@
     var dlg = A.dialog({
       title: 'Command palette',
       wide: true,
-      body: function () { return el('div.pal', [input, count, list]); },
+      body: function () { return el('div.pal', [input, count, source, list]); },
       actions: function (close) {
         return el('div.pal-foot', [
           el('span.kbdhint', [el('kbd', '↑'), el('kbd', '↓'), ' to move ']),
@@ -512,6 +564,35 @@
     });
     paint();
     input.focus();
+
+    function stillOpen() { return !!(dlg.panel && dlg.panel.isConnected); }
+
+    function mergeLive(env) {
+      if (!stillOpen()) return;
+      var liveMode = A.MODE ? A.MODE.LIVE : 'live';
+      if (!env || env.mode !== liveMode || !env.ok) {
+        source.textContent = 'Screens and actions only. ' +
+          ((env && env.error && env.error.message) || 'The console API is not answering, so no real resource is listed here.');
+        return;
+      }
+      var live = liveItemsFrom(env.data);
+      if (!live.length) {
+        source.textContent = liveSourceNote(env.data);
+        return;
+      }
+      var wasActive = active;
+      items = items.concat(live);
+      source.textContent = liveSourceNote(env.data) + (env.stale ? ' This list is the last one that could be read.' : '');
+      paint();
+      setActive(wasActive);
+    }
+
+    if (typeof A.read === 'function') {
+      A.read('/api/search/index', { ttlMs: 30000 }).then(mergeLive, function () {
+        if (!stillOpen()) return;
+        source.textContent = 'Screens and actions only. The resource index could not be read.';
+      });
+    }
   };
 
   A.setEnv = function (env, quiet) {

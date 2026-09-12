@@ -147,6 +147,7 @@ Get-ArgusStorageCapacity
 Get-ArgusStorageBucket -Expand
 Get-ArgusStorageLock
 Get-ArgusStorageObject -Bucket surveys -Prefix '2026/' -All
+Get-ArgusStorageObject -Bucket surveys -Prefix '2026/' -All -MaximumPage 500
 Get-ArgusStorageObject -Bucket surveys -Key '2026/plot-14.jpg'
 Measure-ArgusStoragePrefix -Bucket surveys -Prefix '2026/'
 Save-ArgusStorageObject -Bucket surveys -Key '2026/plot-14.jpg' -Path .\plot-14.jpg
@@ -175,7 +176,31 @@ Get-ArgusContainer -Id argus-console
 Get-ArgusContainerStatistic -Id argus-console
 
 Get-ArgusHeartbeat 50, Get-ArgusUptime, Get-ArgusIncident 20
+
+Get-ArgusSearchIndex -Expand
+Get-ArgusSearchIndex -Expand -Kind Bucket
+Get-ArgusConsoleMetric
 ```
+
+`Get-ArgusStorageObject` is the only route that pages, so `-All` is capped at
+`-MaximumPage` pages (100 by default). When the cap stops a listing early it
+warns with the cursor to resume from, rather than looping until the bucket ends.
+
+`Get-ArgusSearchIndex` reads `GET /api/search/index`, the flat live index behind
+the command palette: one entry per bucket, database, stream, container and
+firing alert, each carrying the console route that opens it. It is capped at
+2000 entries and cached for 30 seconds on the server, and a reader that is down
+is reported as a named unavailable source rather than silently contributing
+nothing — the cmdlet raises one warning per such source.
+
+`Get-ArgusConsoleMetric` reads `GET /metrics`, the console's own Prometheus
+exposition: request counts by route and status, a latency histogram with
+event streams excluded, open stream count and uptime. It returns the text as
+lines, so `Get-ArgusConsoleMetric | Select-String argus_console_requests_total`
+works as it reads. `/metrics` is public, because a Prometheus scrape carries no
+session, so it publishes `argus_console_build_info` only to a reader that is
+signed in — the same reason `GET /api/health` withholds the version from an
+anonymous caller.
 
 `Save-ArgusStorageObject` reads `GET /api/storage/preview`, which is the only
 route that returns an object's bytes — and it is a preview route, not a general

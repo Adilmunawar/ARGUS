@@ -237,7 +237,7 @@ function Invoke-ArgusHttp {
     if (-not $Origin) { $Origin = Get-ArgusOriginHeader -BaseUri $BaseUri }
     $uri = New-ArgusUri -BaseUri $BaseUri -Path $Path -Query $Query
 
-    $headers = @{ Origin = $Origin }
+    $headers = @{ 'Origin' = $Origin }
     $headers[$script:ArgusClientHeader] = '1'
     if ($ExtraHeaders) {
         foreach ($name in $ExtraHeaders.Keys) { $headers[$name] = $ExtraHeaders[$name] }

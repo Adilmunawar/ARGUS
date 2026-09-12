@@ -418,6 +418,34 @@ function listen(s, port) {
     assert.deepStrictEqual(replayed.map((f) => Number(f.id)), [firstId + 1, firstId + 2]);
   });
 
+  const byQuery = await openStream(
+    '/api/logs/stream?query=' + encodeURIComponent('{container="argus-console"}')
+      + '&lastEventId=' + String(firstId)
+  );
+  await byQuery.until((t) => t.includes('event: open'), 4000);
+  check('a resume carried in the query string replays the same lines as the header', () => {
+    const replayed = frames(byQuery.text).filter((f) => f.event === 'line');
+    assert.strictEqual(replayed.length, 2, `${replayed.length} replayed lines`);
+    assert.deepStrictEqual(replayed.map((f) => Number(f.id)), [firstId + 1, firstId + 2]);
+    const open = frames(byQuery.text).find((f) => f.event === 'open');
+    assert.strictEqual(open.data.replayedFrom, firstId,
+      'the client sent its position and the server started from the top anyway');
+  });
+  byQuery.close();
+  await sleep(100);
+
+  const bothCarriers = await openStream(
+    '/api/logs/stream?query=' + encodeURIComponent('{container="argus-console"}') + '&lastEventId=0',
+    { 'last-event-id': String(firstId) }
+  );
+  await bothCarriers.until((t) => t.includes('event: open'), 4000);
+  check('the browser header wins over a query value the page may have left behind', () => {
+    const open = frames(bothCarriers.text).find((f) => f.event === 'open');
+    assert.strictEqual(open.data.replayedFrom, firstId, 'a stale query parameter overrode the live header');
+  });
+  bothCarriers.close();
+  await sleep(100);
+
   const farBehind = await openStream(
     '/api/logs/stream?query=' + encodeURIComponent('{container="argus-console"}'),
     { 'last-event-id': '0' }
@@ -485,6 +513,24 @@ function listen(s, port) {
     assert.strictEqual(list.running, 1);
     assert.deepStrictEqual(list.containers[0].names, ['argus-console']);
     assert.strictEqual(list.containers[0].health, 'healthy');
+  });
+
+  const indexed = JSON.parse((await get('/api/search/index')).body);
+  check('a live resource reaches the search index with the route that opens it', () => {
+    assert.strictEqual(indexed.ok, true, JSON.stringify(indexed).slice(0, 300));
+    const entry = indexed.items.find((i) => i.label === 'argus-console');
+    assert.ok(entry, `the running container is not indexed: ${JSON.stringify(indexed.items).slice(0, 300)}`);
+    assert.strictEqual(entry.kind, 'Container');
+    assert.strictEqual(entry.route, 'stack');
+    assert.match(entry.hint, /running/);
+  });
+  check('a reader that is down is a named unavailable source, not a silently short list', () => {
+    const down = indexed.sources.find((s) => s.kind === 'alert');
+    assert.strictEqual(down.ok, false, 'Alertmanager points at a dead port in this harness');
+    assert.ok(down.message && down.message.length > 10, 'the dead source carries no explanation');
+    const up = indexed.sources.find((s) => s.kind === 'container');
+    assert.strictEqual(up.ok, true);
+    assert.strictEqual(up.count, 1);
   });
 
   const inspected = await get('/api/containers/inspect?id=' + CONTAINER_ID);
