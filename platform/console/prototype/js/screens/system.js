@@ -179,17 +179,6 @@
     body.appendChild(el('p.hint', { text: fmt.num(rows.length) + ' ' + noun + ' in this region.' }));
   }
 
-  /* ------------------------------------------------------------- metrics --- */
-
-  /*
-   * Named series only.
-   *
-   * A read-only console does not carry a free-text PromQL box: that is
-   * Grafana's job, it is already in this stack, and an unbounded query_range
-   * is a denial of service against your own Prometheus. The window and the
-   * point count are sent so the server can derive a step from them, which
-   * bounds the cost of the query by the size of the picture.
-   */
   var SERIES = [
     { name: 'hostCpuBusyRatio', title: 'Host CPU busy', reading: 'busy now' },
     { name: 'hostMemoryUsedRatio', title: 'Host memory used', reading: 'used now' },
@@ -223,12 +212,9 @@
 
       var latest = present[present.length - 1];
       body.appendChild(el('div.row', [
-        /* The number first: a sparkline is a shape, not a reading. */
         el('span.num', { text: fmt.ratioPct(latest, 1) }),
         el('span.muted', { text: spec.reading }),
         el('span.spacer'),
-        /* Fixed 0 to 1, never auto-scaled: a series that moves between 98.7%
-           and 99.1% drawn to full height reads as an outage. */
         ui.sparkline(values, {
           min: 0, max: 1, width: 220, height: 34,
           label: spec.title + ' over the last ' + SERIES_WINDOW + ', on a fixed zero to one hundred per cent scale, ' +

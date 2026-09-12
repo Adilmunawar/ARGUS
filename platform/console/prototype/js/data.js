@@ -31,9 +31,6 @@
     return out;
   }
 
-  /* A run of link checks, oldest first, in the shape Uptime Kuma records them:
-     0 down, 1 up. Which samples are down is named rather than generated, so the
-     incident the Sites card draws is the same incident on every run. */
   function checks(count, stepMinutes, downAt) {
     var out = [];
     for (var i = 0; i < count; i++) {

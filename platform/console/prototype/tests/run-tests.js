@@ -13,7 +13,6 @@
  *   CMD    the command palette: search, arrow keys, activation, escape
  *   TBL    every table has a caption, sortable headers carry aria-sort
  *   STATE  empty, no-match and error states are distinguishable
- *   LOGS   the streaming list: bounded, appended not re-rendered, tail yields
  *   GUARD  regressions for every defect an adversarial audit found
  *   CON    contrast computed from rendered pixels, gradients included
  *   TXT    nothing below 11px, nothing clipped
@@ -330,8 +329,6 @@ async function axeOn(page, label) {
     return { ok: /(?:no|zero|0)\s+\S*\s*match/i.test(txt), txt: txt.slice(0, 160) };
   });
   rec('STATE', 'a filter that excludes everything says "no match", not "empty"', states.ok, states.why || '');
-
-  /* ---------------------------------------------------------------- LOGS */
 
   await goto(page, 'logs');
 

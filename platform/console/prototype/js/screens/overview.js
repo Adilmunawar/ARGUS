@@ -193,15 +193,6 @@
     ]);
   }
 
-  /*
-   * The link history, drawn the way Uptime Kuma draws it: one slot per check,
-   * oldest on the left, and the uptime stated in words in the label rather
-   * than left to be counted off the bar.
-   *
-   * The figure is only offered for a window the samples actually cover. A
-   * 24-hour number computed from four checks is the kind of thing an operator
-   * quotes on a bridge call, so it is not printed unless it is true.
-   */
   function linkHistory(site) {
     var beats = site.checks || [];
     var day = ui.uptimeOf(beats, { windowMs: 86400000, now: d.now.getTime() });

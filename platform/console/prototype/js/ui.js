@@ -612,8 +612,6 @@
     return el('div.tabs', [list, panel]);
   }
 
-  /* ------------------------------------------------------- streaming list --- */
-
   var LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
   var LOG_LEVEL_LABEL = { debug: 'Debug', info: 'Info', warn: 'Warning', error: 'Error' };
 
@@ -632,25 +630,6 @@
     return word;
   }
 
-  /**
-   * A bounded, append-only list for a stream that never stops.
-   *
-   * Four properties, every one of which the obvious implementation loses:
-   *
-   *  - COALESCING. Lines are queued and flushed once per animation frame into
-   *    one document fragment, so a burst of nine hundred lines is a single
-   *    appendChild rather than nine hundred paints of the whole list.
-   *  - A BOUNDED DOM. The oldest node is removed as the newest arrives, so the
-   *    node count is the cap whatever the throughput is.
-   *  - SCROLL ANCHORING. Following is released the moment the operator scrolls
-   *    up, and resumed when they return to the bottom, so reading scrollback
-   *    does not fight the stream.
-   *  - aria-live="off" AND KEYBOARD REACH. A streaming log on a live region
-   *    makes a screen reader unusable, so the region is silent and the caller
-   *    offers an explicit announce. The container takes focus and answers the
-   *    scrolling keys, because thousands of focusable lines would be worse
-   *    than none.
-   */
   function logView(opts) {
     var cap = opts.cap;
     var view = el('div.logview.logstream', {
@@ -674,9 +653,6 @@
       if (opts.onFollow) opts.onFollow(pinned);
     });
 
-    /* A scrollable region has to be operable from the keyboard, and thousands
-       of individually focusable lines would be worse than none: the container
-       takes the focus and answers the keys a reader expects. */
     view.addEventListener('keydown', function (e) {
       var page = Math.max(40, view.clientHeight * 0.9);
       var handled = true;
@@ -716,8 +692,6 @@
       pending.length = 0;
       view.appendChild(frag);
       while (view.childElementCount > cap) view.removeChild(view.firstElementChild);
-      /* scrollTop past the end rather than reading scrollHeight: the browser
-         clamps it, and no layout is forced on the hot path. */
       if (pinned) view.scrollTop = 1e9;
       if (opts.onFlush) opts.onFlush(view.childElementCount);
     }
@@ -726,9 +700,6 @@
       if (frame !== null || timer !== null) return;
       if (typeof window.requestAnimationFrame === 'function') {
         frame = window.requestAnimationFrame(flush);
-        /* A backgrounded tab never paints, so the frame callback never runs.
-           The timer is the floor that keeps the buffer from growing while the
-           operator is looking at another window. */
         timer = window.setTimeout(function () {
           if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
           flush();
@@ -746,9 +717,6 @@
         for (var i = 0; i < lines.length; i++) pending.push(lines[i]);
         schedule();
       },
-      /* The one synchronous flush: a first paint from a buffer that is already
-         in memory must not depend on a frame callback, because the same screen
-         twice has to render the same way. */
       flushNow: function () {
         if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
         if (timer !== null) { window.clearTimeout(timer); timer = null; }
@@ -795,9 +763,6 @@
     var w = opts.width || 120, h = opts.height || 28, pad = 2;
     var samples = values || [];
 
-    /* A sample that is not a finite number is a hole in the series, not a
-       zero. The line breaks across it instead of sloping through it, because a
-       straight segment drawn over a scrape outage is a reading nobody took. */
     var clean = [];
     for (var i = 0; i < samples.length; i++) {
       var raw = samples[i];
@@ -806,8 +771,6 @@
     }
     var present = clean.filter(function (v) { return v !== null; });
 
-    /* A fixed domain where the caller knows one: auto-scaling 98.7% to 99.1%
-       across the full height draws a flat service as a crisis. */
     var min = opts.min !== undefined && opts.min !== null ? Number(opts.min)
       : (present.length ? Math.min.apply(null, present) : 0);
     var max = opts.max !== undefined && opts.max !== null ? Number(opts.max)
@@ -860,12 +823,6 @@
     }, el('div.bar-fill' + (opts.tone ? '.' + opts.tone : ''), { style: { width: pct.toFixed(1) + '%' } }));
   }
 
-  /**
-   * Heartbeat vocabulary, taken from Uptime Kuma so a payload from a reader
-   * that copies its model needs no translation: 0 down, 1 up, 2 pending,
-   * 3 maintenance. Anything else is "not measured", which is a third answer
-   * and never folded into either of the first two.
-   */
   var BEAT = { DOWN: 0, UP: 1, PENDING: 2, MAINTENANCE: 3 };
   var BEAT_TONE = { 0: 'bad', 1: 'ok', 2: 'warn', 3: 'maint' };
   var BEAT_WORD = { 0: 'down', 1: 'up', 2: 'pending', 3: 'in maintenance' };
@@ -887,15 +844,6 @@
     return tone || 'none';
   }
 
-  /**
-   * Uptime over a window, counted the way Uptime Kuma counts it: maintenance
-   * is flattened to up, pending to down, and anything unrecognised is left out
-   * of the denominator rather than assumed good.
-   *
-   * `ratio` is null when nothing was counted. `covered` is how much time the
-   * beats actually span, so a caller can refuse to print a 30-day figure from
-   * forty minutes of history.
-   */
   function uptimeOf(beats, opts) {
     opts = opts || {};
     var list = beats || [];
@@ -928,12 +876,6 @@
     };
   }
 
-  /**
-   * The transitions in a beat list, which is the whole incident model: a
-   * heartbeat that differs from the one before it is the event, and everything
-   * between two transitions is one incident. A server that already marks the
-   * transition is believed; one that does not is measured here.
-   */
   function incidentsOf(beats) {
     var list = beats || [], out = [], prev = null;
     for (var i = 0; i < list.length; i++) {
@@ -967,16 +909,6 @@
       fmt.num(u.down) + ' down, ' + fmt.pct(u.ratio * 100, 1) + ' uptime' + window + '.';
   }
 
-  /**
-   * The heartbeat bar: one slot per check, oldest on the left.
-   *
-   * Tone is never the only carrier. Up is a full bar, pending is a short one,
-   * maintenance is a lozenge, down is a full bar cut by a notch and an unfilled
-   * slot is a stub -- four silhouettes that survive greyscale, projection and
-   * a deuteranopic reader, because warn and bad in this palette separate by a
-   * delta-E of 2.9. The label states the uptime in words rather than leaving
-   * the count to the eye.
-   */
   function heartbeatBar(beats, opts) {
     opts = opts || {};
     var slots = opts.slots || 50;

@@ -299,18 +299,6 @@
     });
   }
 
-  /* ------------------------------------------------------- alert inbox --- */
-
-  /*
-   * The live inbox.
-   *
-   * Alertmanager is the single alert engine in this stack by an explicit
-   * decision -- Grafana ships with unified alerting disabled -- so the ranked
-   * list of what is firing right now belongs here rather than being inferred
-   * from a dozen health panels. Nothing below is computed from the fixtures:
-   * when the reader does not answer, the panel says which reader and why, and
-   * the fixture table underneath keeps its own label.
-   */
   var AM_RANK = { critical: 0, page: 1, high: 2, warning: 3, warn: 3, medium: 4, info: 5, low: 6, none: 7 };
 
   function amRank(sev) {
@@ -985,7 +973,6 @@
         { id: 'sessions', label: 'Sessions', render: sessionsTab },
         { id: 'evidence', label: 'Evidence', render: evidenceTab }
       ];
-
 
       mount.appendChild(ui.pageHeader('Security',
         'Baseline drift, alerts, vulnerabilities and every recorded session, with the evidence pack that ties them together.'));

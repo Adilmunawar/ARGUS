@@ -865,19 +865,6 @@
 
   /* ---------------------------------------------------------------- screen --- */
 
-  /* ---------------------------------------------------------- heartbeats ---- */
-
-  /*
-   * Uptime, with the window it is entitled to claim.
-   *
-   * The console records heartbeats in memory, and `argus_console_state` is
-   * mounted read-only, so after a restart the history is minutes old. A
-   * thirty-day uptime figure computed from forty minutes of samples is exactly
-   * the number an operator quotes in a post-incident review, so it is not
-   * printed at all unless the samples cover the window. `coversMs` from the
-   * reader is believed when it is given; otherwise the span of the beats
-   * themselves is the ceiling.
-   */
   var UPTIME_WINDOWS = [
     { key: 'h24', windowMs: 86400000, label: 'Last 24 hours' },
     { key: 'd7', windowMs: 604800000, label: 'Last 7 days' },

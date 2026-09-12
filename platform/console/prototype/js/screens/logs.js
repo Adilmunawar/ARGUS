@@ -1,26 +1,3 @@
-/* Argus Console: Logs.
- *
- * A tail, not a table. The rules that make a streaming list survive a real
- * throughput are all structural, and every one of them is load-bearing:
- *
- *  - THE APPEND PATH NEVER RE-RENDERS. New lines are queued and flushed once
- *    per animation frame into a single document fragment. A burst of nine
- *    hundred lines becomes one appendChild, not nine hundred re-paints of the
- *    whole list.
- *  - THE BUFFER IS BOUNDED. The oldest node is removed as the newest arrives,
- *    so the DOM holds a fixed number of lines whatever the stream does.
- *  - FOLLOW YIELDS TO THE OPERATOR. Scrolling up releases the tail; the stream
- *    keeps arriving but the viewport stops moving, because a log that jumps
- *    while somebody is reading it is unusable.
- *  - THE REGION IS aria-live="off". A streaming log on a live region reads
- *    every line at a screen-reader user and makes the rest of the console
- *    unreachable. The operator asks for the latest line instead, and the
- *    console echoes what it announced so the request is visible.
- *
- * And the honesty rule the rest of the console holds to: when the API is not
- * answering, this screen says nothing is streaming and labels the bundled
- * buffer as bundled. It never presents a replay as a live tail.
- */
 (function () {
   'use strict';
 
@@ -38,17 +15,6 @@
   var KEEP = 2000;
   var ANNOUNCE_GAP_MS = 4000;
 
-  /* ------------------------------------------------------- the sample buffer --- */
-
-  /*
-   * The bundled buffer.
-   *
-   * Derived from the fixture applications so it reads like this estate rather
-   * than like lorem ipsum, and generated from a fixed seed so the same screen
-   * twice produces the same text. It is capped independently of the dataset,
-   * because the stress harness inflates the fixtures fifty-fold and a log view
-   * is not the place to find out.
-   */
   var SAMPLE_LINES = 180;
   var SAMPLE_APPS = 6;
 
@@ -97,8 +63,6 @@
     return out.sort();
   }
 
-  /* ------------------------------------------------------------ live decoding --- */
-
   function toDate(raw) {
     if (raw === null || raw === undefined) return new Date();
     if (raw instanceof Date) return raw;
@@ -124,8 +88,6 @@
       text: String(text)
     };
   }
-
-  /* ------------------------------------------------------------------ screen --- */
 
   registerScreen('logs', {
     title: 'Logs',
@@ -196,8 +158,6 @@
     };
 
     var buffer = [];
-
-    /* ------------------------------------------------------------- controls */
 
     var streamSel = el('select.field', { id: 'log-stream' }, [el('option', { value: 'all', text: 'All streams' })]);
     var levelSel = el('select.field', { id: 'log-level' }, [el('option', { value: 'all', text: 'All levels' })].concat(
@@ -274,8 +234,6 @@
       return true;
     }
 
-    /* A filter change is an operator action, not a stream event, so this is the
-       one path that rebuilds the list -- once, from the buffer that was kept. */
     function repaintFiltered() {
       view.reset();
       var keep = [];
@@ -376,8 +334,6 @@
       followBtn, jumpBtn, announceBtn, clearBtn
     ]);
 
-    /* --------------------------------------------------------------- panels */
-
     var sourceSlot = el('div');
     host.appendChild(sourceSlot);
     host.appendChild(ui.card('Tail', [controls, view.node, counters, echo]));
@@ -454,8 +410,6 @@
       if (state.beats.length > 200) state.beats.splice(0, state.beats.length - 200);
       paintHealth();
     }
-
-    /* ------------------------------------------------------------ the source */
 
     if (!isLive) {
       sourceSlot.appendChild(el('div.callout.warn', [

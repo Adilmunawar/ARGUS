@@ -487,8 +487,6 @@ async function reset(page) {
   rec('TABLE', 'every sortable column sorts both ways and keeps its rows',
     sortFails.length === 0, sortFails.slice(0, 6).join(' | '));
 
-  /* ================================================================ LOGS === */
-
   await goRoute(page, 'logs');
   const logKeys = await page.evaluate(async () => {
     const view = document.querySelector('.logview.logstream');

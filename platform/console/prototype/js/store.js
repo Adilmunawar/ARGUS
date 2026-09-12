@@ -229,10 +229,10 @@
     if (!es) return;
     rec.es = null;
     rec.listeners.forEach(function (pair) {
-      try { es.removeEventListener(pair[0], pair[1]); } catch (e) { /* already gone */ }
+      try { es.removeEventListener(pair[0], pair[1]); } catch (e) {}
     });
     rec.listeners = [];
-    try { es.close(); } catch (e) { /* already closed */ }
+    try { es.close(); } catch (e) {}
   }
 
   function teardownStream(rec) {
@@ -344,17 +344,6 @@
     return null;
   }
 
-  /**
-   * Subscribe to one multiplexed server-sent stream.
-   *
-   * Topics are the subscription: one EventSource per screen carrying every
-   * panel's events, distinguished by event name, because an EventSource never
-   * completes and HTTP/1.1 allows six connections per origin -- a seventh
-   * stream would queue every ordinary read behind it.
-   *
-   * Always resolves to a close function, which is also registered with
-   * A.onLeave, so a stream cannot outlive the screen that opened it.
-   */
   A.subscribe = function (path, topics, handlers) {
     handlers = handlers || {};
     topics = (topics || []).map(String);
@@ -423,11 +412,6 @@
     });
   };
 
-  /**
-   * The values of a Prometheus matrix result, as the flat array ui.sparkline
-   * takes. A sample that is not a finite number becomes null rather than zero:
-   * a line drawn through a scrape outage is an invented reading.
-   */
   A.seriesValues = function (payload) {
     var matrix = payload && payload.data && payload.data.result ? payload.data
       : (payload && payload.result ? payload : null);
