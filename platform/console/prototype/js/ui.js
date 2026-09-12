@@ -612,27 +612,231 @@
     return el('div.tabs', [list, panel]);
   }
 
+  /* ------------------------------------------------------- streaming list --- */
+
+  var LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
+  var LOG_LEVEL_LABEL = { debug: 'Debug', info: 'Info', warn: 'Warning', error: 'Error' };
+
+  function logLevel(raw) {
+    var v = String(raw || '').toLowerCase();
+    if (v === 'err' || v === 'error' || v === 'fatal' || v === 'critical') return 'error';
+    if (v === 'warn' || v === 'warning') return 'warn';
+    if (v === 'debug' || v === 'trace') return 'debug';
+    if (v === 'info' || v === 'notice') return 'info';
+    return 'info';
+  }
+
+  function padLevel(level) {
+    var word = level.toUpperCase();
+    while (word.length < 5) word += ' ';
+    return word;
+  }
+
+  /**
+   * A bounded, append-only list for a stream that never stops.
+   *
+   * Four properties, every one of which the obvious implementation loses:
+   *
+   *  - COALESCING. Lines are queued and flushed once per animation frame into
+   *    one document fragment, so a burst of nine hundred lines is a single
+   *    appendChild rather than nine hundred paints of the whole list.
+   *  - A BOUNDED DOM. The oldest node is removed as the newest arrives, so the
+   *    node count is the cap whatever the throughput is.
+   *  - SCROLL ANCHORING. Following is released the moment the operator scrolls
+   *    up, and resumed when they return to the bottom, so reading scrollback
+   *    does not fight the stream.
+   *  - aria-live="off" AND KEYBOARD REACH. A streaming log on a live region
+   *    makes a screen reader unusable, so the region is silent and the caller
+   *    offers an explicit announce. The container takes focus and answers the
+   *    scrolling keys, because thousands of focusable lines would be worse
+   *    than none.
+   */
+  function logView(opts) {
+    var cap = opts.cap;
+    var view = el('div.logview.logstream', {
+      role: 'log',
+      tabindex: '0',
+      'aria-live': 'off',
+      'aria-label': opts.label
+    });
+
+    var pending = [];
+    var frame = null;
+    var timer = null;
+    var pinned = true;
+    var latest = null;
+    var placeholder = null;
+
+    view.addEventListener('scroll', function () {
+      var atEnd = (view.scrollHeight - view.scrollTop - view.clientHeight) < 24;
+      if (atEnd === pinned) return;
+      pinned = atEnd;
+      if (opts.onFollow) opts.onFollow(pinned);
+    });
+
+    /* A scrollable region has to be operable from the keyboard, and thousands
+       of individually focusable lines would be worse than none: the container
+       takes the focus and answers the keys a reader expects. */
+    view.addEventListener('keydown', function (e) {
+      var page = Math.max(40, view.clientHeight * 0.9);
+      var handled = true;
+      if (e.key === 'End') view.scrollTop = view.scrollHeight;
+      else if (e.key === 'Home') view.scrollTop = 0;
+      else if (e.key === 'PageDown') view.scrollTop += page;
+      else if (e.key === 'PageUp') view.scrollTop -= page;
+      else if (e.key === 'ArrowDown') view.scrollTop += 26;
+      else if (e.key === 'ArrowUp') view.scrollTop -= 26;
+      else handled = false;
+      if (handled) e.preventDefault();
+    });
+
+    function lineNode(line) {
+      return el('div.logline', [
+        el('span.logts', { text: fmt.stamp(line.at) }),
+        ' ',
+        el('span.lvl-' + line.level, { text: padLevel(line.level) }),
+        ' ',
+        el('span.logsrc', { text: line.stream }),
+        ' ',
+        line.text
+      ]);
+    }
+
+    function flush() {
+      frame = null;
+      timer = null;
+      if (!pending.length) return;
+      if (placeholder && placeholder.parentNode === view) {
+        view.removeChild(placeholder);
+        placeholder = null;
+      }
+      var frag = document.createDocumentFragment();
+      for (var i = 0; i < pending.length; i++) frag.appendChild(lineNode(pending[i]));
+      latest = pending[pending.length - 1];
+      pending.length = 0;
+      view.appendChild(frag);
+      while (view.childElementCount > cap) view.removeChild(view.firstElementChild);
+      /* scrollTop past the end rather than reading scrollHeight: the browser
+         clamps it, and no layout is forced on the hot path. */
+      if (pinned) view.scrollTop = 1e9;
+      if (opts.onFlush) opts.onFlush(view.childElementCount);
+    }
+
+    function schedule() {
+      if (frame !== null || timer !== null) return;
+      if (typeof window.requestAnimationFrame === 'function') {
+        frame = window.requestAnimationFrame(flush);
+        /* A backgrounded tab never paints, so the frame callback never runs.
+           The timer is the floor that keeps the buffer from growing while the
+           operator is looking at another window. */
+        timer = window.setTimeout(function () {
+          if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
+          flush();
+        }, 250);
+        return;
+      }
+      timer = window.setTimeout(flush, 16);
+    }
+
+    return {
+      node: view,
+      append: function (line) { pending.push(line); schedule(); },
+      appendMany: function (lines) {
+        if (!lines.length) return;
+        for (var i = 0; i < lines.length; i++) pending.push(lines[i]);
+        schedule();
+      },
+      /* The one synchronous flush: a first paint from a buffer that is already
+         in memory must not depend on a frame callback, because the same screen
+         twice has to render the same way. */
+      flushNow: function () {
+        if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
+        if (timer !== null) { window.clearTimeout(timer); timer = null; }
+        flush();
+      },
+      say: function (text) {
+        clear(view);
+        pending.length = 0;
+        latest = null;
+        placeholder = el('div.logline.logempty', { text: text });
+        view.appendChild(placeholder);
+      },
+      reset: function () {
+        clear(view);
+        pending.length = 0;
+        latest = null;
+        placeholder = null;
+      },
+      setCap: function (n) {
+        cap = n;
+        while (view.childElementCount > cap) view.removeChild(view.firstElementChild);
+      },
+      count: function () { return placeholder ? 0 : view.childElementCount; },
+      latest: function () { return latest; },
+      following: function () { return pinned; },
+      follow: function (on) {
+        pinned = !!on;
+        if (pinned) view.scrollTop = 1e9;
+        if (opts.onFollow) opts.onFollow(pinned);
+      },
+      stop: function () {
+        if (frame !== null) { window.cancelAnimationFrame(frame); frame = null; }
+        if (timer !== null) { window.clearTimeout(timer); timer = null; }
+        pending.length = 0;
+      }
+    };
+  }
+
   /* ------------------------------------------------------------ charts --- */
 
   /** An inline sparkline. Decorative by default; pass a label to expose it. */
   function sparkline(values, opts) {
     opts = opts || {};
     var w = opts.width || 120, h = opts.height || 28, pad = 2;
-    var min = Math.min.apply(null, values), max = Math.max.apply(null, values);
+    var samples = values || [];
+
+    /* A sample that is not a finite number is a hole in the series, not a
+       zero. The line breaks across it instead of sloping through it, because a
+       straight segment drawn over a scrape outage is a reading nobody took. */
+    var clean = [];
+    for (var i = 0; i < samples.length; i++) {
+      var raw = samples[i];
+      var n = (raw === null || raw === undefined) ? NaN : Number(raw);
+      clean.push(isFinite(n) ? n : null);
+    }
+    var present = clean.filter(function (v) { return v !== null; });
+
+    /* A fixed domain where the caller knows one: auto-scaling 98.7% to 99.1%
+       across the full height draws a flat service as a crisis. */
+    var min = opts.min !== undefined && opts.min !== null ? Number(opts.min)
+      : (present.length ? Math.min.apply(null, present) : 0);
+    var max = opts.max !== undefined && opts.max !== null ? Number(opts.max)
+      : (present.length ? Math.max.apply(null, present) : 1);
     var span = (max - min) || 1;
-    var pts = values.map(function (v, i) {
-      var x = pad + (i / (values.length - 1 || 1)) * (w - pad * 2);
-      var y = h - pad - ((v - min) / span) * (h - pad * 2);
-      return x.toFixed(1) + ',' + y.toFixed(1);
-    }).join(' ');
+
+    var runs = [], run = [];
+    for (var j = 0; j < clean.length; j++) {
+      if (clean[j] === null) {
+        if (run.length) { runs.push(run); run = []; }
+        continue;
+      }
+      var x = pad + (j / (clean.length - 1 || 1)) * (w - pad * 2);
+      var y = h - pad - ((clean[j] - min) / span) * (h - pad * 2);
+      run.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+    if (run.length) runs.push(run);
 
     var s = svg('svg', {
       viewBox: '0 0 ' + w + ' ' + h, width: w, height: h, class: 'spark',
       role: opts.label ? 'img' : 'presentation',
       'aria-label': opts.label || null, 'aria-hidden': opts.label ? null : 'true', focusable: 'false'
-    }, [
-      svg('polyline', { points: pts, fill: 'none', stroke: 'var(' + (opts.stroke || '--c1') + ')', 'stroke-width': '1.6', 'stroke-linejoin': 'round', 'stroke-linecap': 'round' })
-    ]);
+    }, runs.map(function (points) {
+      return svg('polyline', {
+        points: points.join(' '), fill: 'none',
+        stroke: 'var(' + (opts.stroke || '--c1') + ')',
+        'stroke-width': '1.6', 'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+      });
+    }));
     return s;
   }
 
@@ -654,6 +858,161 @@
       role: 'img',
       'aria-label': word ? base + ', ' + word : base
     }, el('div.bar-fill' + (opts.tone ? '.' + opts.tone : ''), { style: { width: pct.toFixed(1) + '%' } }));
+  }
+
+  /**
+   * Heartbeat vocabulary, taken from Uptime Kuma so a payload from a reader
+   * that copies its model needs no translation: 0 down, 1 up, 2 pending,
+   * 3 maintenance. Anything else is "not measured", which is a third answer
+   * and never folded into either of the first two.
+   */
+  var BEAT = { DOWN: 0, UP: 1, PENDING: 2, MAINTENANCE: 3 };
+  var BEAT_TONE = { 0: 'bad', 1: 'ok', 2: 'warn', 3: 'maint' };
+  var BEAT_WORD = { 0: 'down', 1: 'up', 2: 'pending', 3: 'in maintenance' };
+
+  function beatAt(beat) {
+    if (!beat) return null;
+    if (typeof beat.at === 'number') return beat.at;
+    if (beat.at instanceof Date) return beat.at.getTime();
+    if (typeof beat.at === 'string') {
+      var t = Date.parse(beat.at);
+      return isFinite(t) ? t : null;
+    }
+    return null;
+  }
+
+  function beatTone(beat) {
+    if (!beat) return 'none';
+    var tone = BEAT_TONE[beat.status];
+    return tone || 'none';
+  }
+
+  /**
+   * Uptime over a window, counted the way Uptime Kuma counts it: maintenance
+   * is flattened to up, pending to down, and anything unrecognised is left out
+   * of the denominator rather than assumed good.
+   *
+   * `ratio` is null when nothing was counted. `covered` is how much time the
+   * beats actually span, so a caller can refuse to print a 30-day figure from
+   * forty minutes of history.
+   */
+  function uptimeOf(beats, opts) {
+    opts = opts || {};
+    var list = beats || [];
+    var clock = opts.now === undefined ? Date.now() : opts.now;
+    var from = opts.windowMs ? clock - opts.windowMs : null;
+    var up = 0, down = 0, unmeasured = 0, first = null, last = null;
+
+    for (var i = 0; i < list.length; i++) {
+      var beat = list[i];
+      if (!beat) continue;
+      var at = beatAt(beat);
+      if (from !== null && at !== null && at < from) continue;
+      if (at !== null) {
+        if (first === null || at < first) first = at;
+        if (last === null || at > last) last = at;
+      }
+      if (beat.status === BEAT.UP || beat.status === BEAT.MAINTENANCE) up += 1;
+      else if (beat.status === BEAT.DOWN || beat.status === BEAT.PENDING) down += 1;
+      else unmeasured += 1;
+    }
+
+    var counted = up + down;
+    return {
+      ratio: counted ? up / counted : null,
+      up: up, down: down, unmeasured: unmeasured, counted: counted,
+      firstAt: first, lastAt: last,
+      coveredMs: (first !== null && last !== null) ? last - first : 0,
+      windowMs: opts.windowMs || null,
+      complete: opts.windowMs ? ((first !== null && last !== null) && (last - first) >= opts.windowMs * 0.95) : true
+    };
+  }
+
+  /**
+   * The transitions in a beat list, which is the whole incident model: a
+   * heartbeat that differs from the one before it is the event, and everything
+   * between two transitions is one incident. A server that already marks the
+   * transition is believed; one that does not is measured here.
+   */
+  function incidentsOf(beats) {
+    var list = beats || [], out = [], prev = null;
+    for (var i = 0; i < list.length; i++) {
+      var beat = list[i];
+      if (!beat) continue;
+      var at = beatAt(beat);
+      var changed = prev !== null && beat.status !== prev.status;
+      if (changed || (beat.important === true && prev !== null)) {
+        out.push({
+          at: at,
+          from: prev.status,
+          to: beat.status,
+          fromWord: BEAT_WORD[prev.status] || 'not measured',
+          toWord: BEAT_WORD[beat.status] || 'not measured',
+          heldMs: (at !== null && prev.at !== null) ? at - prev.at : null,
+          message: beat.msg || beat.message || null
+        });
+      }
+      prev = { status: beat.status, at: at };
+    }
+    return out;
+  }
+
+  function heartbeatSentence(beats, opts) {
+    opts = opts || {};
+    var u = uptimeOf(beats, { windowMs: opts.windowMs, now: opts.now });
+    var who = opts.name ? opts.name + ': ' : '';
+    if (!u.counted) return who + 'no check has been recorded yet.';
+    var window = opts.windowWord ? ' over ' + opts.windowWord : '';
+    return who + 'last ' + fmt.num(u.counted) + ' checks, ' + fmt.num(u.up) + ' up, ' +
+      fmt.num(u.down) + ' down, ' + fmt.pct(u.ratio * 100, 1) + ' uptime' + window + '.';
+  }
+
+  /**
+   * The heartbeat bar: one slot per check, oldest on the left.
+   *
+   * Tone is never the only carrier. Up is a full bar, pending is a short one,
+   * maintenance is a lozenge, down is a full bar cut by a notch and an unfilled
+   * slot is a stub -- four silhouettes that survive greyscale, projection and
+   * a deuteranopic reader, because warn and bad in this palette separate by a
+   * delta-E of 2.9. The label states the uptime in words rather than leaving
+   * the count to the eye.
+   */
+  function heartbeatBar(beats, opts) {
+    opts = opts || {};
+    var slots = opts.slots || 50;
+    var w = opts.width || 260, h = opts.height || 26, gap = 2;
+    var barW = Math.max(1, (w - gap * (slots - 1)) / slots);
+    var tail = (beats || []).slice(-slots);
+    var pad = slots - tail.length;
+    var kids = [];
+
+    for (var i = 0; i < slots; i++) {
+      var beat = i < pad ? null : tail[i - pad];
+      var tone = beatTone(beat);
+      var x = i * (barW + gap);
+      var y = 0, height = h, rx = 2;
+      if (tone === 'warn') { y = h * 0.42; height = h * 0.58; }
+      else if (tone === 'maint') { rx = Math.min(barW, h) / 2; }
+      else if (tone === 'none') { y = h - 4; height = 4; }
+
+      kids.push(svg('rect', {
+        x: x.toFixed(2), y: y.toFixed(2),
+        width: barW.toFixed(2), height: height.toFixed(2), rx: rx.toFixed(2),
+        class: 'hb hb-' + tone
+      }));
+      if (tone === 'bad') {
+        kids.push(svg('rect', {
+          x: x.toFixed(2), y: (h / 2 - 1.5).toFixed(2),
+          width: barW.toFixed(2), height: '3', class: 'hb hb-notch'
+        }));
+      }
+    }
+
+    return svg('svg', {
+      viewBox: '0 0 ' + w + ' ' + h, width: w, height: h, class: 'hbbar',
+      role: 'img', focusable: 'false',
+      'aria-label': opts.label || heartbeatSentence(beats, opts)
+    }, kids);
   }
 
   /**
@@ -1065,6 +1424,9 @@
   UI.card = card; UI.table = table; UI.emptyState = emptyState; UI.errorState = errorState;
   UI.skeleton = skeleton; UI.dl = dl; UI.tabs = tabs; UI.sparkline = sparkline; UI.bar = bar;
   UI.graph = graph; UI.heatgrid = heatgrid; UI.timeline = timeline;
+  UI.heartbeatBar = heartbeatBar; UI.uptimeOf = uptimeOf; UI.incidentsOf = incidentsOf;
+  UI.logView = logView; UI.logLevel = logLevel; UI.LOG_LEVELS = LOG_LEVELS; UI.LOG_LEVEL_LABEL = LOG_LEVEL_LABEL;
+  UI.heartbeatSentence = heartbeatSentence; UI.BEAT = BEAT;
   UI.propertyFilter = propertyFilter; UI.applyTokens = applyTokens; UI.menu = menu;
 
   A.ui = UI;

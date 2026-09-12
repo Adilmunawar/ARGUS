@@ -179,6 +179,81 @@
     body.appendChild(el('p.hint', { text: fmt.num(rows.length) + ' ' + noun + ' in this region.' }));
   }
 
+  /* ------------------------------------------------------------- metrics --- */
+
+  /*
+   * Named series only.
+   *
+   * A read-only console does not carry a free-text PromQL box: that is
+   * Grafana's job, it is already in this stack, and an unbounded query_range
+   * is a denial of service against your own Prometheus. The window and the
+   * point count are sent so the server can derive a step from them, which
+   * bounds the cost of the query by the size of the picture.
+   */
+  var SERIES = [
+    { name: 'hostCpuBusyRatio', title: 'Host CPU busy', reading: 'busy now' },
+    { name: 'hostMemoryUsedRatio', title: 'Host memory used', reading: 'used now' },
+    { name: 'pgConnectionsUsedRatio', title: 'PostgreSQL connections used', reading: 'of max_connections' },
+    { name: 'cacheHitRatio', title: 'Cache hit ratio', reading: 'hits now' }
+  ];
+
+  var SERIES_WINDOW = '6h';
+  var SERIES_POINTS = 220;
+
+  function renderSeries(spec) {
+    return function (body, payload) {
+      if (!payload || payload.ok === false) {
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'This series could not be read.' }),
+          el('p', { text: (payload && payload.message) || 'The metrics reader gave no reason.' })
+        ]));
+        return;
+      }
+
+      var values = A.seriesValues(payload);
+      var present = values.filter(function (v) { return v !== null; });
+
+      if (!present.length) {
+        body.appendChild(ui.emptyState(
+          'No sample in this window',
+          'Prometheus answered and had nothing to return for the last ' + SERIES_WINDOW +
+            '. That is a real answer: the target may not have been scraped yet.'));
+        return;
+      }
+
+      var latest = present[present.length - 1];
+      body.appendChild(el('div.row', [
+        /* The number first: a sparkline is a shape, not a reading. */
+        el('span.num', { text: fmt.ratioPct(latest, 1) }),
+        el('span.muted', { text: spec.reading }),
+        el('span.spacer'),
+        /* Fixed 0 to 1, never auto-scaled: a series that moves between 98.7%
+           and 99.1% drawn to full height reads as an outage. */
+        ui.sparkline(values, {
+          min: 0, max: 1, width: 220, height: 34,
+          label: spec.title + ' over the last ' + SERIES_WINDOW + ', on a fixed zero to one hundred per cent scale, ' +
+            'now ' + fmt.ratioPct(latest, 1)
+        })
+      ]));
+
+      var missing = values.length - present.length;
+      body.appendChild(el('p.hint', {
+        text: fmt.num(values.length) + ' samples over the last ' + SERIES_WINDOW + '.' +
+          (missing
+            ? ' ' + fmt.num(missing) + ' of them were not scraped, so the line is broken there rather than drawn through the gap.'
+            : ' Every point in the window was scraped.')
+      }));
+    };
+  }
+
+  function seriesPanel(spec) {
+    return livePanel(spec.title,
+      '/api/metrics/series?name=' + encodeURIComponent(spec.name) +
+        '&window=' + encodeURIComponent(SERIES_WINDOW) + '&points=' + SERIES_POINTS,
+      renderSeries(spec),
+      { ttlMs: 15000, errorTitle: spec.title + ' could not be read' });
+  }
+
   /* -------------------------------------------------------------- screen --- */
 
   registerScreen('system', {
@@ -253,6 +328,9 @@
         livePanel('S3 buckets', '/api/aws/buckets', function (b, d) { countPanel(b, d, 'buckets', 'buckets'); }),
         livePanel('RDS databases', '/api/aws/databases', function (b, d) { countPanel(b, d, 'databases', 'databases'); })
       ]));
+
+      mount.appendChild(el('div.grid.grid-2', [seriesPanel(SERIES[0]), seriesPanel(SERIES[1])]));
+      mount.appendChild(el('div.grid.grid-2', [seriesPanel(SERIES[2]), seriesPanel(SERIES[3])]));
 
       mount.appendChild(livePanel('This host', '/api/host', renderHost, {
         ttlMs: 2000,

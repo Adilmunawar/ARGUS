@@ -176,6 +176,269 @@
     return p;
   }
 
+  var STREAM = {
+    OFF: 'off',
+    OPENING: 'opening',
+    OPEN: 'open',
+    RETRYING: 'retrying',
+    CLOSED: 'closed'
+  };
+
+  var MAX_OPEN_STREAMS = 4;
+  var BACKOFF_MIN_MS = 1000;
+  var BACKOFF_MAX_MS = 30000;
+  var streams = {};
+
+  function streamKey(path, topics) { return path + '|' + topics.join(','); }
+
+  function streamUrl(rec) {
+    var sep = rec.path.indexOf('?') === -1 ? '?' : '&';
+    var url = state.base + rec.path + sep + 'topics=' + encodeURIComponent(rec.topics.join(','));
+    if (rec.lastEventId) url += '&lastEventId=' + encodeURIComponent(rec.lastEventId);
+    return url;
+  }
+
+  function openStreamCount() {
+    var n = 0;
+    Object.keys(streams).forEach(function (k) { if (streams[k].es) n += 1; });
+    return n;
+  }
+
+  function tellSubs(rec, fn) {
+    rec.subs.slice().forEach(function (sub) {
+      try { fn(sub); } catch (e) { if (window.console) window.console.warn('stream handler failed', e); }
+    });
+  }
+
+  function setStreamState(rec, next, info) {
+    rec.state = next;
+    rec.stateAt = now();
+    rec.history.push({ at: rec.stateAt, state: next, attempt: rec.attempts });
+    if (rec.history.length > 60) rec.history.splice(0, rec.history.length - 60);
+    tellSubs(rec, function (sub) { if (sub.onState) sub.onState(next, info || {}); });
+  }
+
+  function backoffFor(attempts) {
+    var steps = Math.max(0, attempts - 1);
+    var raw = BACKOFF_MIN_MS * Math.pow(2, Math.min(steps, 12));
+    return Math.min(BACKOFF_MAX_MS, raw);
+  }
+
+  function detachStream(rec) {
+    var es = rec.es;
+    if (!es) return;
+    rec.es = null;
+    rec.listeners.forEach(function (pair) {
+      try { es.removeEventListener(pair[0], pair[1]); } catch (e) { /* already gone */ }
+    });
+    rec.listeners = [];
+    try { es.close(); } catch (e) { /* already closed */ }
+  }
+
+  function teardownStream(rec) {
+    rec.closed = true;
+    if (rec.timer) { window.clearTimeout(rec.timer); rec.timer = null; }
+    detachStream(rec);
+    if (streams[rec.key] === rec) delete streams[rec.key];
+    rec.state = STREAM.CLOSED;
+  }
+
+  function attachEvent(rec, es, name) {
+    var fn = function (ev) {
+      if (rec.es !== es) return;
+      if (ev.lastEventId) rec.lastEventId = ev.lastEventId;
+      var payload = null;
+      if (ev.data !== undefined && ev.data !== null && ev.data !== '') {
+        try { payload = JSON.parse(ev.data); } catch (e) { rec.malformed += 1; return; }
+      }
+      rec.received += 1;
+      tellSubs(rec, function (sub) {
+        var handler = sub.on && sub.on[name];
+        if (handler) handler(payload, ev.lastEventId || null);
+      });
+    };
+    es.addEventListener(name, fn);
+    rec.listeners.push([name, fn]);
+  }
+
+  function scheduleRetry(rec, message) {
+    if (rec.closed) return;
+    var delay = backoffFor(rec.attempts);
+    setStreamState(rec, STREAM.RETRYING, {
+      inMs: delay,
+      attempt: rec.attempts,
+      resumeFrom: rec.lastEventId || null,
+      message: message || 'The live stream was interrupted.'
+    });
+    rec.timer = window.setTimeout(function () {
+      rec.timer = null;
+      openStream(rec);
+    }, delay);
+  }
+
+  function openStream(rec) {
+    if (rec.closed || rec.es) return;
+    rec.attempts += 1;
+    setStreamState(rec, STREAM.OPENING, { attempt: rec.attempts, resumeFrom: rec.lastEventId || null });
+
+    var es;
+    try {
+      es = new window.EventSource(streamUrl(rec), { withCredentials: true });
+    } catch (e) {
+      scheduleRetry(rec, 'This browser refused to open the stream.');
+      return;
+    }
+    rec.es = es;
+
+    var onOpen = function () {
+      if (rec.es !== es) return;
+      rec.attempts = 0;
+      rec.openedAt = now();
+      setStreamState(rec, STREAM.OPEN, { resumedFrom: rec.lastEventId || null });
+    };
+    es.addEventListener('open', onOpen);
+    rec.listeners.push(['open', onOpen]);
+
+    var onError = function () {
+      if (rec.es !== es) return;
+      var wasOpen = rec.state === STREAM.OPEN;
+      detachStream(rec);
+      scheduleRetry(rec, wasOpen
+        ? 'The console API closed the live stream.'
+        : 'The live stream could not be opened.');
+    };
+    es.addEventListener('error', onError);
+    rec.listeners.push(['error', onError]);
+
+    Object.keys(rec.names).forEach(function (name) { attachEvent(rec, es, name); });
+  }
+
+  function registerNames(rec, sub) {
+    Object.keys(sub.on || {}).forEach(function (name) {
+      if (rec.names[name]) return;
+      rec.names[name] = true;
+      if (rec.es) attachEvent(rec, rec.es, name);
+    });
+  }
+
+  function streamBlockedBy(key) {
+    if (state.mode === MODE.SAMPLE) {
+      return {
+        reason: 'sample-mode',
+        message: 'The console is running on bundled sample data, so nothing is streaming.'
+      };
+    }
+    if (typeof window.EventSource !== 'function') {
+      return {
+        reason: 'no-eventsource',
+        message: 'This browser cannot open a live stream, so this panel has no source to follow.'
+      };
+    }
+    if (!streams[key] && openStreamCount() >= MAX_OPEN_STREAMS) {
+      return {
+        reason: 'too-many-streams',
+        message: 'The console already holds ' + MAX_OPEN_STREAMS + ' live streams. A browser allows only a ' +
+          'handful per origin, and the rest of the console would queue behind a sixth.'
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Subscribe to one multiplexed server-sent stream.
+   *
+   * Topics are the subscription: one EventSource per screen carrying every
+   * panel's events, distinguished by event name, because an EventSource never
+   * completes and HTTP/1.1 allows six connections per origin -- a seventh
+   * stream would queue every ordinary read behind it.
+   *
+   * Always resolves to a close function, which is also registered with
+   * A.onLeave, so a stream cannot outlive the screen that opened it.
+   */
+  A.subscribe = function (path, topics, handlers) {
+    handlers = handlers || {};
+    topics = (topics || []).map(String);
+
+    var cancelled = false;
+    var rec = null;
+    var sub = {
+      on: handlers.on || {},
+      onState: handlers.onState || null,
+      onUnavailable: handlers.onUnavailable || null
+    };
+
+    function close() {
+      if (cancelled) return;
+      cancelled = true;
+      if (!rec) return;
+      var at = rec.subs.indexOf(sub);
+      if (at !== -1) rec.subs.splice(at, 1);
+      if (!rec.subs.length) teardownStream(rec);
+      rec = null;
+    }
+
+    if (typeof A.onLeave === 'function') A.onLeave(close);
+
+    A.probe().then(function () {
+      if (cancelled) return;
+      var key = streamKey(path, topics);
+      var blocked = streamBlockedBy(key);
+      if (blocked) {
+        if (sub.onUnavailable) sub.onUnavailable(blocked);
+        return;
+      }
+      rec = streams[key];
+      if (!rec) {
+        rec = streams[key] = {
+          key: key, path: path, topics: topics,
+          es: null, listeners: [], names: {}, subs: [],
+          state: STREAM.OFF, stateAt: now(), history: [],
+          attempts: 0, received: 0, malformed: 0,
+          lastEventId: null, openedAt: null, timer: null, closed: false
+        };
+        rec.subs.push(sub);
+        registerNames(rec, sub);
+        openStream(rec);
+        return;
+      }
+      rec.subs.push(sub);
+      registerNames(rec, sub);
+      if (sub.onState) sub.onState(rec.state, { attempt: rec.attempts, resumeFrom: rec.lastEventId || null });
+    });
+
+    return close;
+  };
+
+  A.STREAM = STREAM;
+
+  A.streamSnapshot = function () {
+    return Object.keys(streams).map(function (k) {
+      var rec = streams[k];
+      return {
+        key: rec.key, state: rec.state, attempts: rec.attempts,
+        subscribers: rec.subs.length, received: rec.received,
+        malformed: rec.malformed, lastEventId: rec.lastEventId,
+        openedAt: rec.openedAt, stateAt: rec.stateAt
+      };
+    });
+  };
+
+  /**
+   * The values of a Prometheus matrix result, as the flat array ui.sparkline
+   * takes. A sample that is not a finite number becomes null rather than zero:
+   * a line drawn through a scrape outage is an invented reading.
+   */
+  A.seriesValues = function (payload) {
+    var matrix = payload && payload.data && payload.data.result ? payload.data
+      : (payload && payload.result ? payload : null);
+    var first = matrix && matrix.result && matrix.result[0];
+    if (!first || !first.values) return [];
+    return first.values.map(function (point) {
+      var n = Number(point[1]);
+      return isFinite(n) ? n : null;
+    });
+  };
+
   A.storeMode = function () { return state.mode; };
   A.capabilities = function () { return state.capabilities; };
   A.storeState = function () { return state; };

@@ -31,7 +31,7 @@ function contentTypeOf(req) {
   return String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
 }
 
-function decide(req, pathname) {
+function decide(req, pathname, options) {
   const site = req.headers['sec-fetch-site'];
   const mode = req.headers['sec-fetch-mode'];
   const dest = req.headers['sec-fetch-dest'];
@@ -39,8 +39,9 @@ function decide(req, pathname) {
   const method = req.method;
   const isApi = pathname.startsWith('/api/');
   const safe = SAFE_METHODS.has(method);
+  const stateChanging = !safe && !!(options && options.stateChanging);
 
-  if (isApi && !safe) {
+  if (isApi && stateChanging) {
     if (contentTypeOf(req) !== 'application/json') {
       return { allowed: false, reason: 'content-type' };
     }
@@ -73,7 +74,7 @@ function decide(req, pathname) {
     return { allowed: false, reason: 'no-origin-signal' };
   }
 
-  if (isApi && !safe) return { allowed: false, reason: 'no-origin-signal' };
+  if (isApi && stateChanging) return { allowed: false, reason: 'no-origin-signal' };
 
   return { allowed: true, signal: 'no-ambient-authority' };
 }

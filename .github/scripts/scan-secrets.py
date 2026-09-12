@@ -22,7 +22,7 @@ HARD_RULES = [
 SECRET_KEY = re.compile(
     r"(?:^|[^A-Za-z0-9_])"
     r"(?P<key>[A-Za-z0-9_.\[\]'\"$-]*?"
-    r"(?:password|passwd|pwd|secret|token|apikey|api[_-]key|accesskey|access[_-]key|"
+    r"(?:password|passphrase|passwd|pwd|secret|token|apikey|api[_-]key|accesskey|access[_-]key|"
     r"secret[_-]key|private[_-]key|credential|auth)s?)"
     r"['\"\]]*\s*(?::=|=>|[:=])\s*"
     r"(?P<value>.+)$",
@@ -51,6 +51,7 @@ REFERENCE = re.compile(r"\{\{.*\}\}|\$\{.*\}|%[A-Za-z_]+%|<[A-Za-z_][^>]*>")
 IDENTIFIER_ONLY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DOTTED_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)+$")
 EXPRESSION_CHARS = re.compile(r"[\[\]()]")
+COMMAND_LINE = re.compile(r"\s")
 HEX_OR_B64 = re.compile(r"^[A-Za-z0-9+/=_-]+$")
 
 LINE_COMMENT = {
@@ -165,6 +166,8 @@ def looks_like_secret(raw_value, in_query=False):
         return False
     if not quoted and EXPRESSION_CHARS.search(value):
         return False
+    if COMMAND_LINE.search(value) and re.search(r"[/\\]|&&|\|\|", value):
+        return False
     if value.startswith(("http://", "https://", "/", "./", "../")):
         return False
     if shannon(value) < MIN_ENTROPY:
@@ -241,6 +244,9 @@ SELF_TEST_FLAG = [
     ("a.js", "    const credentials = spec.identities[identity];"),
     ("a.js", "const token = headers['x-argus-token'];"),
     ("a.py", "password = config.get('database', 'password')"),
+    ("a.json", '    "test:auth": "node test/auth.js",'),
+    ("a.json", '    "hash-operator-password": "node src/auth/hash-password.js"'),
+    ("a.json", '    "db:password": "docker compose exec postgres psql -c \\"select 1\\""'),
 ]
 
 SELF_TEST_CATCH = [
@@ -255,6 +261,7 @@ SELF_TEST_CATCH = [
     ("a.yml", "      GUAC_JSON_SECRET_KEY: 4f3c8a1d9b2e7c5a6d0f8b3e1a9c7d52"),
     ("a.env", "ARGUS_S3_CONSOLE_SECRET=xK7pQ2mN9vL4wR8tY1uI3oP6aS5dF0gH"),
     ("a.js", "fetch('/api?auth=Xk92LmQp47vBnT5r&limit=2')"),
+    ("a.txt", 'passphrase = "correct horse battery staple"'),
 ]
 
 

@@ -159,7 +159,7 @@ authConfig.bootFailures = function bootFailures(operatorCount) {
   if (mode === 'session' && operatorCount === 0) {
     out.push(`ARGUS_AUTH=session needs at least one enabled operator. ` +
       `${authConfig.operatorsFile} names no readable records. ` +
-      'Generate one with `node tools/hash-operator-password.js` and mount the file read-only.');
+      'Generate one with `npm run hash-operator-password` and mount the file read-only.');
   }
 
   if (mode === 'proxy' && trustedProxyCidrs.length === 0) {

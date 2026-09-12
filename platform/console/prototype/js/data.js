@@ -31,6 +31,20 @@
     return out;
   }
 
+  /* A run of link checks, oldest first, in the shape Uptime Kuma records them:
+     0 down, 1 up. Which samples are down is named rather than generated, so the
+     incident the Sites card draws is the same incident on every run. */
+  function checks(count, stepMinutes, downAt) {
+    var out = [];
+    for (var i = 0; i < count; i++) {
+      out.push({
+        at: minutesAgo((count - 1 - i) * stepMinutes),
+        status: downAt.indexOf(i) === -1 ? 1 : 0
+      });
+    }
+    return out;
+  }
+
   var data = {
     now: NOW,
 
@@ -51,8 +65,8 @@
     },
 
     sites: [
-      { id: 'a', name: 'Site A', location: 'Lahore', role: 'primary', link: 'up', latencyMs: 4, replicationLagS: 38 },
-      { id: 'b', name: 'Site B', location: 'Karachi colocation', role: 'secondary', link: 'up', latencyMs: 27, replicationLagS: 214 }
+      { id: 'a', name: 'Site A', location: 'Lahore', role: 'primary', link: 'up', latencyMs: 4, replicationLagS: 38, checks: checks(48, 30, []) },
+      { id: 'b', name: 'Site B', location: 'Karachi colocation', role: 'secondary', link: 'up', latencyMs: 27, replicationLagS: 214, checks: checks(48, 30, [30, 31]) }
     ],
 
     hosts: [

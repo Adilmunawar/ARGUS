@@ -193,19 +193,63 @@
     ]);
   }
 
+  /*
+   * The link history, drawn the way Uptime Kuma draws it: one slot per check,
+   * oldest on the left, and the uptime stated in words in the label rather
+   * than left to be counted off the bar.
+   *
+   * The figure is only offered for a window the samples actually cover. A
+   * 24-hour number computed from four checks is the kind of thing an operator
+   * quotes on a bridge call, so it is not printed unless it is true.
+   */
+  function linkHistory(site) {
+    var beats = site.checks || [];
+    var day = ui.uptimeOf(beats, { windowMs: 86400000, now: d.now.getTime() });
+    var sentence = ui.heartbeatSentence(beats, {
+      name: site.name + ' link',
+      windowMs: 86400000,
+      windowWord: 'the last 24 hours',
+      now: d.now.getTime()
+    });
+    var incidents = ui.incidentsOf(beats).filter(function (i) { return i.to === 0; });
+    return el('div.stack', [
+      ui.heartbeatBar(beats, { slots: beats.length || 48, width: 240, label: sentence }),
+      el('div.hbscale', [
+        el('span', { text: '24 h ago' }),
+        el('span', { text: 'now' })
+      ]),
+      el('span', {
+        text: day.ratio === null
+          ? 'No link check has been recorded.'
+          : fmt.pct(day.ratio * 100, 1) + ' of ' + fmt.num(day.counted) + ' checks up' +
+            (incidents.length
+              ? ', ' + fmt.num(incidents.length) + ' drop' + (incidents.length === 1 ? '' : 's') +
+                ', last ' + fmt.ago(new Date(incidents[incidents.length - 1].at))
+              : ', no drop')
+      })
+    ]);
+  }
+
   function sitesCard() {
-    return ui.card('Sites', el('div.sitemap', d.sites.map(function (s) {
-      return el('div.site', [
-        el('h3', { text: s.name }),
-        ui.dl([
-          ['Location', s.location],
-          ['Role', s.role],
-          ['Link', ui.pill(s.link === 'up' ? 'Up' : 'Down', s.link === 'up' ? 'ok' : 'bad')],
-          ['Latency', fmt.ms(s.latencyMs)],
-          ['Replication lag', fmt.dur(s.replicationLagS)]
-        ])
-      ]);
-    })));
+    return ui.card('Sites', [
+      el('div.sitemap', d.sites.map(function (s) {
+        return el('div.site', [
+          el('h3', { text: s.name }),
+          ui.dl([
+            ['Location', s.location],
+            ['Role', s.role],
+            ['Link', ui.pill(s.link === 'up' ? 'Up' : 'Down', s.link === 'up' ? 'ok' : 'bad')],
+            ['Latency', fmt.ms(s.latencyMs)],
+            ['Replication lag', fmt.dur(s.replicationLagS)],
+            ['Link checks', linkHistory(s)]
+          ])
+        ]);
+      })),
+      el('p.hint', {
+        text: 'Every figure on this screen, these link checks included, comes from the bundled sample ' +
+          'dataset. Nothing here has been measured. The Stack screen reads the live estate.'
+      })
+    ]);
   }
 
   function trafficCard() {

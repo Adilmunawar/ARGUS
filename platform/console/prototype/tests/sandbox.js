@@ -36,7 +36,7 @@ const URL = pathToFileURL(path.resolve(FILE)).href;
 const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-sandbox-shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
 const DEEP = [
   'apps/mills', 'apps/agis', 'apps/console',
   'deploys/1847', 'deploys/1843',
@@ -486,6 +486,60 @@ async function reset(page) {
   }
   rec('TABLE', 'every sortable column sorts both ways and keeps its rows',
     sortFails.length === 0, sortFails.slice(0, 6).join(' | '));
+
+  /* ================================================================ LOGS === */
+
+  await goRoute(page, 'logs');
+  const logKeys = await page.evaluate(async () => {
+    const view = document.querySelector('.logview.logstream');
+    if (!view) return { ok: false, why: 'no streaming region' };
+    view.focus();
+    const focused = document.activeElement === view;
+    const bottom = view.scrollTop;
+    view.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    await new Promise(r => setTimeout(r, 40));
+    const top = view.scrollTop;
+    view.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    await new Promise(r => setTimeout(r, 40));
+    return { ok: true, focused, moved: top < bottom, back: view.scrollTop > top };
+  });
+  rec('KBD', 'the streaming log region takes focus and answers Home and End',
+    logKeys.ok && logKeys.focused && logKeys.moved && logKeys.back, JSON.stringify(logKeys));
+
+  await goRoute(page, 'logs');
+  const logFilter = await page.evaluate(async () => {
+    const input = document.getElementById('log-filter');
+    if (!input) return { ok: false, why: 'no filter' };
+    input.value = 'zzzzznotathinginanylog';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    const text = document.querySelector('.logview.logstream').textContent;
+    const lines = document.querySelectorAll('.logview.logstream .logline').length;
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 400));
+    return {
+      ok: true, text: text.trim().slice(0, 80), lines,
+      restored: document.querySelectorAll('.logview.logstream .logline').length
+    };
+  });
+  rec('FLOW', 'a log filter that excludes everything says so rather than showing an empty box',
+    logFilter.ok && logFilter.lines === 1 && /no line in the buffer matches/i.test(logFilter.text) &&
+      logFilter.restored > 1,
+    JSON.stringify(logFilter));
+
+  await goRoute(page, 'overview');
+  const hb = await page.evaluate(() => {
+    const bars = Array.from(document.querySelectorAll('#main .hbbar'));
+    return {
+      count: bars.length,
+      named: bars.every(b => (b.getAttribute('aria-label') || '').length > 20),
+      role: bars.every(b => b.getAttribute('role') === 'img'),
+      shapes: bars.every(b => b.querySelectorAll('rect.hb').length > 0)
+    };
+  });
+  rec('FLOW', 'every heartbeat bar carries its reading in words, not only in colour',
+    hb.count > 0 && hb.named && hb.role && hb.shapes, JSON.stringify(hb));
 
   /* =============================================================== FUZZ === */
 

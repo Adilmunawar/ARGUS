@@ -19,6 +19,10 @@ const assert = require('assert');
 const PORT = Number(process.env.SMOKE_PORT || 8899);
 process.env.ARGUS_PORT = String(PORT);
 process.env.ARGUS_HOST = '127.0.0.1';
+// The degraded local-development mode. It is legal only on a loopback bind --
+// src/index.js refuses to start with it on any other interface -- and
+// test/auth.js is where authentication itself is exercised.
+process.env.ARGUS_AUTH = 'off';
 // Deliberately point the credential chain at nothing, so the run is the same
 // on a developer machine with a profile and on a CI box without one.
 process.env.AWS_ACCESS_KEY_ID = '';

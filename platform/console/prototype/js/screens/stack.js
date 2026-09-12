@@ -865,6 +865,147 @@
 
   /* ---------------------------------------------------------------- screen --- */
 
+  /* ---------------------------------------------------------- heartbeats ---- */
+
+  /*
+   * Uptime, with the window it is entitled to claim.
+   *
+   * The console records heartbeats in memory, and `argus_console_state` is
+   * mounted read-only, so after a restart the history is minutes old. A
+   * thirty-day uptime figure computed from forty minutes of samples is exactly
+   * the number an operator quotes in a post-incident review, so it is not
+   * printed at all unless the samples cover the window. `coversMs` from the
+   * reader is believed when it is given; otherwise the span of the beats
+   * themselves is the ceiling.
+   */
+  var UPTIME_WINDOWS = [
+    { key: 'h24', windowMs: 86400000, label: 'Last 24 hours' },
+    { key: 'd7', windowMs: 604800000, label: 'Last 7 days' },
+    { key: 'd30', windowMs: 2592000000, label: 'Last 30 days' }
+  ];
+
+  function monitorTone(status) {
+    if (status === 1) return 'ok';
+    if (status === 0) return 'bad';
+    if (status === 3) return 'info';
+    if (status === 2) return 'warn';
+    return 'idle';
+  }
+
+  function monitorWord(status) {
+    if (status === 1) return 'up';
+    if (status === 0) return 'down';
+    if (status === 3) return 'in maintenance';
+    if (status === 2) return 'pending';
+    return 'not measured';
+  }
+
+  function uptimeRows(monitor) {
+    var beats = monitor.beats || [];
+    var coversMs = typeof monitor.coversMs === 'number'
+      ? monitor.coversMs
+      : ui.uptimeOf(beats, {}).coveredMs;
+    var served = monitor.uptime || {};
+
+    return UPTIME_WINDOWS.map(function (w) {
+      if (coversMs < w.windowMs * 0.95) {
+        return [w.label, ui.pill('not enough history', 'idle', {
+          title: 'This console has only ' + fmt.dur(coversMs / 1000) + ' of heartbeats for ' +
+            monitor.label + '. A figure for ' + w.label.toLowerCase() + ' would be an extrapolation.'
+        })];
+      }
+      var ratio = typeof served[w.key] === 'number'
+        ? served[w.key]
+        : ui.uptimeOf(beats, { windowMs: w.windowMs }).ratio;
+      if (ratio === null || ratio === undefined) return [w.label, ui.pill('not measured', 'idle')];
+      return [w.label, fmt.pct(ratio * 100, 3)];
+    });
+  }
+
+  function renderMonitor(monitor) {
+    var beats = monitor.beats || [];
+    var last = beats.length ? beats[beats.length - 1] : null;
+    var incidents = ui.incidentsOf(beats);
+    var latest = incidents.length ? incidents[incidents.length - 1] : null;
+
+    return el('div.stack', [
+      el('div.hbrow', [
+        el('span.hbrow-name', { text: monitor.label || monitor.id }),
+        ui.heartbeatBar(beats, {
+          slots: 50,
+          label: ui.heartbeatSentence(beats, { name: monitor.label || monitor.id })
+        }),
+        ui.pill(monitorWord(last ? last.status : null), monitorTone(last ? last.status : null))
+      ]),
+      ui.dl(uptimeRows(monitor).concat([
+        ['Checks held', fmt.num(beats.length)],
+        ['Last transition', latest
+          ? 'went ' + latest.toWord + ' from ' + latest.fromWord +
+            (latest.at ? ' at ' + fmt.stamp(new Date(latest.at)) : '')
+          : 'none recorded since this console started']
+      ]))
+    ]);
+  }
+
+  function heartbeatCard(stillMine) {
+    var body = el('div', [ui.skeleton(3)]);
+    A.read('/api/heartbeats', { ttlMs: 5000 }).then(function (env) {
+      if (!stillMine()) return;
+      ui.clear(body);
+
+      if (!env.ok) {
+        var e = env.error || {};
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'No heartbeat history could be read.' }),
+          el('p', { text: e.message || 'The console API gave no reason.' }),
+          el('p', {
+            text: 'Nothing below has been substituted for it. Until this reader answers, "since when" ' +
+              'is a question this console cannot answer.'
+          })
+        ]));
+        return;
+      }
+
+      var payload = env.data || {};
+      if (payload.ok === false) {
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'The heartbeat recorder is not running.' }),
+          el('p', { text: payload.message || 'The reader answered without a reason.' })
+        ]));
+        return;
+      }
+
+      var monitors = payload.monitors || [];
+      if (!monitors.length) {
+        body.appendChild(ui.emptyState(
+          'No monitor is being recorded',
+          'The console API answered, and it is watching nothing. That is a real answer, not a failure to load.'));
+        return;
+      }
+
+      if (payload.persisted === false) {
+        body.appendChild(el('div.callout.info', [
+          el('strong', { text: 'This history is held in memory only.' }),
+          el('p', {
+            text: 'The console state volume is mounted read-only, so every heartbeat below is lost when ' +
+              'the console restarts. Windows longer than the history covers are withheld rather than ' +
+              'extrapolated.'
+          })
+        ]));
+      }
+
+      body.appendChild(el('div.stack', monitors.map(renderMonitor)));
+      body.appendChild(el('p.hint', {
+        text: 'One slot per check, oldest on the left. A full bar is up, a short bar is a retry that has ' +
+          'not yet been counted as a failure, a notched bar is down and a lozenge is planned maintenance. ' +
+          'A check only becomes a failure after the retry gate, so a single missed probe does not open an ' +
+          'incident.'
+      }));
+    });
+
+    return ui.card('Service heartbeats', body);
+  }
+
   registerScreen('stack', {
     title: 'Stack operations',
     crumb: 'Operations',
@@ -982,6 +1123,7 @@
 
     var summaryBody = el('div', [ui.skeleton(SERVICES.length + 1)]);
     host.appendChild(ui.card('Stack verdict', summaryBody));
+    host.appendChild(heartbeatCard(stillMine));
 
     var results = [];
     var pending = SERVICES.length;

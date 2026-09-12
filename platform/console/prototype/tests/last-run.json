@@ -9,79 +9,85 @@
     "suite": "BOOT",
     "id": "screen \"overview\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"apps\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"deploys\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"compute\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"data\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"identity\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"security\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"ml\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"ops\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"audit\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"stack\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"system\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
     "id": "screen \"storage\" is registered",
     "pass": true,
-    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"logs\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,logs,audit"
   },
   {
     "suite": "BOOT",
@@ -104,6 +110,12 @@
   {
     "suite": "NAV",
     "id": "nav target \"deploys\" has a screen",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "nav target \"logs\" has a screen",
     "pass": true,
     "detail": ""
   },
@@ -171,7 +183,7 @@
     "suite": "NAV",
     "id": "clicking the \"overview\" sidebar button navigates to it",
     "pass": true,
-    "detail": "{\"route\":\"overview\",\"painted\":2200}"
+    "detail": "{\"route\":\"overview\",\"painted\":2485}"
   },
   {
     "suite": "NAV",
@@ -202,6 +214,18 @@
     "id": "the \"deploys\" sidebar button is marked current once open",
     "pass": true,
     "detail": "{\"go\":\"deploys\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"logs\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"logs\",\"painted\":13418}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"logs\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"logs\"}"
   },
   {
     "suite": "NAV",
@@ -715,6 +739,36 @@
   },
   {
     "suite": "NAV",
+    "id": "\"logs\" routes and renders",
+    "pass": true,
+    "detail": "route=logs children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"logs\" sets a document title",
+    "pass": true,
+    "detail": "Logs - Argus Console"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"logs\" updates the breadcrumb",
+    "pass": true,
+    "detail": "crumb=\"Logs\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"logs\" marks the nav item current",
+    "pass": true,
+    "detail": "current=logs"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"logs\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
     "id": "deep link \"apps/mills\" renders",
     "pass": true,
     "detail": ""
@@ -859,6 +913,12 @@
   },
   {
     "suite": "A11Y",
+    "id": "logs: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
     "id": "apps/mills: no WCAG A/AA violations",
     "pass": true,
     "detail": ""
@@ -915,7 +975,7 @@
     "suite": "KBD",
     "id": "the overview has focusable controls",
     "pass": true,
-    "detail": "33 found"
+    "detail": "34 found"
   },
   {
     "suite": "KBD",
@@ -1000,6 +1060,84 @@
     "id": "a filter that excludes everything says \"no match\", not \"empty\"",
     "pass": true,
     "detail": ""
+  },
+  {
+    "suite": "LOGS",
+    "id": "the streaming region is a log region that is never announced automatically",
+    "pass": true,
+    "detail": "{\"role\":\"log\",\"live\":\"off\",\"tabindex\":\"0\",\"labelled\":true,\"lines\":180,\"scrollable\":true}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "the streaming region is reachable and scrollable from the keyboard",
+    "pass": true,
+    "detail": "{\"role\":\"log\",\"live\":\"off\",\"tabindex\":\"0\",\"labelled\":true,\"lines\":180,\"scrollable\":true}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "the view stays bounded at its cap through five thousand lines",
+    "pass": true,
+    "detail": "{\"n\":60,\"last\":\"2026-09-12 05:40Z INFO  probe line 4999\"}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "a new line appends one node and drops one, rather than re-rendering the list",
+    "pass": true,
+    "detail": "{\"records\":2,\"added\":1,\"removed\":1,\"n\":60}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "scrolling up releases the tail and offers a way back to it",
+    "pass": true,
+    "detail": "{\"before\":\"true\",\"released\":\"false\",\"offered\":true,\"after\":\"true\"}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "filtering to one stream narrows the list to that stream alone",
+    "pass": true,
+    "detail": "{\"before\":180,\"after\":30,\"pure\":true,\"name\":\"agis\"}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "no live stream is opened on sample data, and the reason is given in words",
+    "pass": true,
+    "detail": "{\"why\":{\"reason\":\"sample-mode\",\"message\":\"The console is running on bundled sample data, so nothing is streaming.\"},\"during\":0,\"after\":0}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "closing a subscription leaves no stream behind",
+    "pass": true,
+    "detail": "{\"why\":{\"reason\":\"sample-mode\",\"message\":\"The console is running on bundled sample data, so nothing is streaming.\"},\"during\":0,\"after\":0}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "the sample replay a screen starts is stopped when the screen is left",
+    "pass": true,
+    "detail": "{\"started\":1,\"after\":0,\"found\":true}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "the heartbeat bar counts uptime and transitions the way the beats read",
+    "pass": true,
+    "detail": "{\"ratio\":0.9,\"counted\":20,\"incidents\":2,\"label\":\"last 20 checks, 18 up, 2 down, 90.0% uptime.\",\"slots\":20,\"role\":\"img\"}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "the heartbeat bar states its uptime in words rather than leaving it to the eye",
+    "pass": true,
+    "detail": "\"last 20 checks, 18 up, 2 down, 90.0% uptime.\""
+  },
+  {
+    "suite": "LOGS",
+    "id": "a sparkline breaks across a missing sample rather than drawing through it",
+    "pass": true,
+    "detail": "{\"solid\":1,\"holed\":2,\"spread\":0.09999999999999964}"
+  },
+  {
+    "suite": "LOGS",
+    "id": "a fixed domain keeps a flat ratio series flat",
+    "pass": true,
+    "detail": "{\"solid\":1,\"holed\":2,\"spread\":0.09999999999999964}"
   },
   {
     "suite": "LAYOUT",
@@ -1179,7 +1317,7 @@
     "suite": "DENS",
     "id": "laptop-1366 overview stays under two screens",
     "pass": true,
-    "detail": "1319px = 1.7 screens"
+    "detail": "1395px = 1.8 screens"
   },
   {
     "suite": "RESP",
@@ -1203,7 +1341,7 @@
     "suite": "DENS",
     "id": "laptop-1280 overview stays under two screens",
     "pass": true,
-    "detail": "1352px = 1.7 screens"
+    "detail": "1439px = 1.8 screens"
   },
   {
     "suite": "RESP",
@@ -1227,7 +1365,7 @@
     "suite": "DENS",
     "id": "small-laptop overview stays under two screens",
     "pass": true,
-    "detail": "1506px = 2.0 screens"
+    "detail": "1582px = 2.1 screens"
   },
   {
     "suite": "RESP",

@@ -41,7 +41,9 @@ RUN apt-get update \
 
 ENV NODE_ENV=production \
     ARGUS_HOST=0.0.0.0 \
-    ARGUS_PORT=8787
+    ARGUS_PORT=8787 \
+    ARGUS_AUTH=session \
+    ARGUS_AUTH_OPERATORS_FILE=/config/operators.json
 
 WORKDIR /app
 

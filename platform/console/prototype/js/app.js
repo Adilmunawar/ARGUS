@@ -845,7 +845,7 @@
     ['g then c', 'Compute'], ['g then t', 'Data'], ['g then i', 'Identity and secrets'],
     ['g then s', 'Security'], ['g then m', 'ML and geospatial'], ['g then p', 'Operations'],
     ['g then u', 'Audit'], ['g then k', 'Stack'], ['g then y', 'System'],
-    ['g then b', 'Object storage'],
+    ['g then b', 'Object storage'], ['g then l', 'Logs'],
     ['?', 'This list'], ['Escape', 'Close a dialog, drawer or palette'],
     ['g then ,', 'Console preferences']
   ];
@@ -925,7 +925,7 @@
     });
   };
 
-  var GO_KEYS = { o: 'overview', a: 'apps', d: 'deploys', c: 'compute', t: 'data', i: 'identity', s: 'security', m: 'ml', p: 'ops', u: 'audit', k: 'stack', y: 'system', b: 'storage' };
+  var GO_KEYS = { o: 'overview', a: 'apps', d: 'deploys', c: 'compute', t: 'data', i: 'identity', s: 'security', m: 'ml', p: 'ops', u: 'audit', k: 'stack', y: 'system', b: 'storage', l: 'logs' };
   var goArmed = false, goTimer = null;
 
   function isTyping(e) {

@@ -13,6 +13,7 @@
  *   CMD    the command palette: search, arrow keys, activation, escape
  *   TBL    every table has a caption, sortable headers carry aria-sort
  *   STATE  empty, no-match and error states are distinguishable
+ *   LOGS   the streaming list: bounded, appended not re-rendered, tail yields
  *   GUARD  regressions for every defect an adversarial audit found
  *   CON    contrast computed from rendered pixels, gradients included
  *   TXT    nothing below 11px, nothing clipped
@@ -40,7 +41,7 @@ const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-console-shots')
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
 // Detail routes matter more than list routes: they are where the hard layout
 // and the destructive actions live.
 const DEEP = [
@@ -329,6 +330,183 @@ async function axeOn(page, label) {
     return { ok: /(?:no|zero|0)\s+\S*\s*match/i.test(txt), txt: txt.slice(0, 160) };
   });
   rec('STATE', 'a filter that excludes everything says "no match", not "empty"', states.ok, states.why || '');
+
+  /* ---------------------------------------------------------------- LOGS */
+
+  await goto(page, 'logs');
+
+  const region = await page.evaluate(() => {
+    const v = document.querySelector('.logview.logstream');
+    if (!v) return null;
+    return {
+      role: v.getAttribute('role'),
+      live: v.getAttribute('aria-live'),
+      tabindex: v.getAttribute('tabindex'),
+      labelled: !!v.getAttribute('aria-label'),
+      lines: v.querySelectorAll('.logline').length,
+      scrollable: v.scrollHeight > v.clientHeight
+    };
+  });
+  rec('LOGS', 'the streaming region is a log region that is never announced automatically',
+    !!region && region.role === 'log' && region.live === 'off' && region.labelled,
+    JSON.stringify(region));
+  rec('LOGS', 'the streaming region is reachable and scrollable from the keyboard',
+    !!region && region.tabindex === '0' && region.scrollable, JSON.stringify(region));
+
+  const bounded = await page.evaluate(() => {
+    const v = window.ARGUS.ui.logView({ cap: 60, label: 'bounded probe' });
+    document.getElementById('main').appendChild(v.node);
+    for (let i = 0; i < 5000; i++) {
+      v.append({ at: new Date(), level: 'info', stream: 'probe', text: 'line ' + i });
+    }
+    v.flushNow();
+    const n = v.node.childElementCount;
+    const last = v.node.lastElementChild ? v.node.lastElementChild.textContent : '';
+    v.stop();
+    v.node.remove();
+    return { n, last };
+  });
+  rec('LOGS', 'the view stays bounded at its cap through five thousand lines',
+    bounded.n === 60 && /line 4999/.test(bounded.last), JSON.stringify(bounded));
+
+  const incremental = await page.evaluate(() => {
+    const v = window.ARGUS.ui.logView({ cap: 60, label: 'append probe' });
+    document.getElementById('main').appendChild(v.node);
+    for (let i = 0; i < 200; i++) {
+      v.append({ at: new Date(), level: 'info', stream: 'probe', text: 'seed ' + i });
+    }
+    v.flushNow();
+    let records = 0, added = 0, removed = 0;
+    const obs = new MutationObserver(() => {});
+    obs.observe(v.node, { childList: true });
+    v.append({ at: new Date(), level: 'info', stream: 'probe', text: 'the newest line' });
+    v.flushNow();
+    obs.takeRecords().forEach(m => { records++; added += m.addedNodes.length; removed += m.removedNodes.length; });
+    obs.disconnect();
+    const n = v.node.childElementCount;
+    v.stop();
+    v.node.remove();
+    return { records, added, removed, n };
+  });
+  rec('LOGS', 'a new line appends one node and drops one, rather than re-rendering the list',
+    incremental.added === 1 && incremental.removed === 1 && incremental.records === 2 && incremental.n === 60,
+    JSON.stringify(incremental));
+
+  const follow = await page.evaluate(async () => {
+    const view = document.querySelector('.logview.logstream');
+    const buttons = () => Array.from(document.querySelectorAll('#main button'));
+    const toggle = buttons().find(b => /Following the tail|Tail released/.test(b.textContent));
+    const before = toggle.getAttribute('aria-pressed');
+    view.scrollTop = 0;
+    view.dispatchEvent(new Event('scroll'));
+    await new Promise(r => setTimeout(r, 60));
+    const released = toggle.getAttribute('aria-pressed');
+    const jump = buttons().find(b => /Jump to the newest/.test(b.textContent));
+    const offered = !!jump && !jump.hidden;
+    if (jump) jump.click();
+    await new Promise(r => setTimeout(r, 60));
+    return { before, released, offered, after: toggle.getAttribute('aria-pressed') };
+  });
+  rec('LOGS', 'scrolling up releases the tail and offers a way back to it',
+    follow.before === 'true' && follow.released === 'false' && follow.offered && follow.after === 'true',
+    JSON.stringify(follow));
+
+  await goto(page, 'logs');
+  const filtered = await page.evaluate(async () => {
+    const sel = document.getElementById('log-stream');
+    const before = document.querySelectorAll('.logview.logstream .logline').length;
+    const opt = Array.from(sel.options).find(o => o.value !== 'all');
+    if (!opt) return { before, after: 0, pure: false, name: null };
+    sel.value = opt.value;
+    sel.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 400));
+    const sources = Array.from(document.querySelectorAll('.logview.logstream .logline .logsrc'))
+      .map(n => n.textContent);
+    return { before, after: sources.length, pure: sources.every(t => t === opt.value), name: opt.value };
+  });
+  rec('LOGS', 'filtering to one stream narrows the list to that stream alone',
+    filtered.after > 0 && filtered.after < filtered.before && filtered.pure, JSON.stringify(filtered));
+
+  const streamed = await page.evaluate(async () => {
+    let why = null;
+    const close = window.ARGUS.subscribe('/api/logs/stream', ['probe'], {
+      on: { line: () => {} },
+      onUnavailable: w => { why = w; }
+    });
+    await new Promise(r => setTimeout(r, 120));
+    const during = window.ARGUS.streamSnapshot().length;
+    close();
+    return { why, during, after: window.ARGUS.streamSnapshot().length };
+  });
+  rec('LOGS', 'no live stream is opened on sample data, and the reason is given in words',
+    !!streamed.why && streamed.why.reason === 'sample-mode' &&
+      /sample data/i.test(streamed.why.message) && streamed.during === 0,
+    JSON.stringify(streamed));
+  rec('LOGS', 'closing a subscription leaves no stream behind',
+    streamed.after === 0, JSON.stringify(streamed));
+
+  const replay = await page.evaluate(async () => {
+    let live = 0;
+    const mine = new Set();
+    const realSet = window.setInterval, realClear = window.clearInterval;
+    window.setInterval = function () { const id = realSet.apply(window, arguments); mine.add(id); live++; return id; };
+    window.clearInterval = function (id) { if (mine.delete(id)) live--; return realClear.call(window, id); };
+    window.location.hash = '#/logs';
+    await new Promise(r => setTimeout(r, 400));
+    const btn = Array.from(document.querySelectorAll('#main button'))
+      .find(b => /Replay the bundled sample/.test(b.textContent));
+    if (btn) btn.click();
+    await new Promise(r => setTimeout(r, 200));
+    const started = live;
+    window.location.hash = '#/overview';
+    await new Promise(r => setTimeout(r, 500));
+    const after = live;
+    window.setInterval = realSet; window.clearInterval = realClear;
+    return { started, after, found: !!btn };
+  });
+  rec('LOGS', 'the sample replay a screen starts is stopped when the screen is left',
+    replay.found && replay.started > 0 && replay.after === 0, JSON.stringify(replay));
+
+  const heartbeat = await page.evaluate(() => {
+    const beats = [];
+    for (let i = 0; i < 20; i++) beats.push({ at: Date.now() - (20 - i) * 60000, status: i === 9 || i === 10 ? 0 : 1 });
+    const up = window.ARGUS.ui.uptimeOf(beats, {});
+    const incidents = window.ARGUS.ui.incidentsOf(beats);
+    const bar = window.ARGUS.ui.heartbeatBar(beats, { slots: 20 });
+    return {
+      ratio: Math.round(up.ratio * 1000) / 1000,
+      counted: up.counted,
+      incidents: incidents.length,
+      label: bar.getAttribute('aria-label'),
+      slots: bar.querySelectorAll('rect.hb-ok, rect.hb-bad, rect.hb-warn, rect.hb-maint, rect.hb-none').length,
+      role: bar.getAttribute('role')
+    };
+  });
+  rec('LOGS', 'the heartbeat bar counts uptime and transitions the way the beats read',
+    heartbeat.counted === 20 && heartbeat.ratio === 0.9 && heartbeat.incidents === 2,
+    JSON.stringify(heartbeat));
+  rec('LOGS', 'the heartbeat bar states its uptime in words rather than leaving it to the eye',
+    heartbeat.role === 'img' && /18 up, 2 down, 90.0% uptime/.test(heartbeat.label || ''),
+    JSON.stringify(heartbeat.label));
+
+  const gapped = await page.evaluate(() => {
+    const solid = window.ARGUS.ui.sparkline([1, 2, 3, 4], {});
+    const holed = window.ARGUS.ui.sparkline([1, 2, null, 4], {});
+    const fixed = window.ARGUS.ui.sparkline([0.987, 0.991], { min: 0, max: 1, height: 28 });
+    const ys = (fixed.querySelector('polyline').getAttribute('points') || '')
+      .split(' ').map(p => Number(p.split(',')[1]));
+    return {
+      solid: solid.querySelectorAll('polyline').length,
+      holed: holed.querySelectorAll('polyline').length,
+      spread: Math.abs(ys[0] - ys[1])
+    };
+  });
+  rec('LOGS', 'a sparkline breaks across a missing sample rather than drawing through it',
+    gapped.solid === 1 && gapped.holed === 2, JSON.stringify(gapped));
+  rec('LOGS', 'a fixed domain keeps a flat ratio series flat',
+    gapped.spread < 1, JSON.stringify(gapped));
+
+  await goto(page, 'overview');
 
   /* -------------------------------------------------------------- LAYOUT */
 
@@ -1427,7 +1605,7 @@ async function axeOn(page, label) {
     const realSet = window.setInterval, realClear = window.clearInterval;
     window.setInterval = function () { const id = realSet.apply(window, arguments); mine.add(id); live++; return id; };
     window.clearInterval = function (id) { if (mine.delete(id)) live--; return realClear.call(window, id); };
-    for (const r of ['identity', 'security', 'ops', 'stack', 'system', 'storage', 'overview']) {
+    for (const r of ['identity', 'security', 'ops', 'stack', 'system', 'storage', 'logs', 'overview']) {
       window.location.hash = '#/' + r;
       await new Promise(res => setTimeout(res, 260));
     }

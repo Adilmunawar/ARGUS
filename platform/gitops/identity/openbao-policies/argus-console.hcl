@@ -94,7 +94,7 @@ path "sys/audit/*" {
   capabilities = ["deny"]
 }
 
-path "sys/storage/raft/snapshot*" {
+path "sys/storage/raft/*" {
   capabilities = ["deny"]
 }
 
