@@ -57,7 +57,7 @@ The components that matter for us, and the verdict on each:
 
 | Suite | What it asserts |
 |---|---|
-| **BOOT** | The shell loads, the namespace and dataset exist, and all ten screens register |
+| **BOOT** | The shell loads, the namespace and dataset exist, every screen the suite covers registers, and no screen registers that the suite does not cover |
 | **NAV** | Every route and deep link resolves; the breadcrumb, document title and current nav item track the screen; an unknown route says so |
 | **A11Y** | axe-core, WCAG 2.1 A **and** AA, on every screen and on every overlay: the palette, dialogs, the flash bar |
 | **KBD** | Real `Tab` traversal; every stop has a visible focus ring; dialogs trap focus and give it back to whatever opened them; `g`-then-letter jumps work |

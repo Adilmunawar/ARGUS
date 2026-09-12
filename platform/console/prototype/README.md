@@ -31,7 +31,7 @@ The security suite reads the source rather than the DOM, because the property th
 
 ## What it demonstrates
 
-Ten sections, and the interaction rules from `docs/10-CONSOLE-DESIGN.md`:
+Thirteen screens across twelve sidebar sections, and the interaction rules from `docs/10-CONSOLE-DESIGN.md`:
 
 - **Every write is a pull request.** Buttons say *Propose*, and the response shows the reconciler's plan and the blast radius before anything is applied. The two exceptions that run live, quarantine and revoke, both page security.
 - **Recorded, credential-less browser RDP.** The Connect tab requests elevation, states that OpenBao issues a one-time credential the operator never sees, and opens a session in a drawer that survives navigation.

@@ -126,7 +126,7 @@ Three consoles driven at once stayed error-free, and no view drifted beyond 6× 
 
 ## Part 3: The audit findings
 
-Four audits ran in parallel over the shell, the ten screens, the performance profile, and the accessibility and security claims. Each finding below was reproduced in a browser.
+Four audits ran in parallel over the shell, the screens, the performance profile, and the accessibility and security claims. Each finding below was reproduced in a browser.
 
 ### Critical — the console is broken for a real operator
 
