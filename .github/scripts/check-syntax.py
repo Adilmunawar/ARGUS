@@ -103,8 +103,71 @@ def check_hcl():
     return bad
 
 
+META_ARGS = {"source", "version", "count", "for_each", "providers", "depends_on", "lifecycle",
+             "__comments__", "__is_block__", "__start_line__", "__end_line__"}
+
+
+def unquote(value):
+    if isinstance(value, str) and len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
+def module_variables(directory):
+    declared = {}
+    for path in sorted(directory.glob("*.tf")):
+        try:
+            with path.open(encoding="utf-8") as handle:
+                document = hcl2.load(handle)
+        except Exception:
+            continue
+        for block in document.get("variable", []):
+            for name, body in block.items():
+                declared[unquote(name)] = "default" in body
+    return declared
+
+
+def check_terraform_modules():
+    bad = 0
+    checked = 0
+    for path in files({".tf"}):
+        try:
+            with path.open(encoding="utf-8") as handle:
+                document = hcl2.load(handle)
+        except Exception:
+            continue
+        for block in document.get("module", []):
+            for raw_label, body in block.items():
+                label = unquote(raw_label)
+                source = unquote(body.get("source", ""))
+                if not isinstance(source, str) or not source.startswith("."):
+                    continue
+                checked += 1
+                target = (path.parent / source).resolve()
+                if not target.is_dir():
+                    print(f"::error file={path}::module \"{label}\" has source {source}, which is not a directory")
+                    bad += 1
+                    continue
+                declared = module_variables(target)
+                if not declared:
+                    print(f"::error file={path}::module \"{label}\" source {source} declares no variables")
+                    bad += 1
+                    continue
+                passed = {k for k in body if k not in META_ARGS}
+                unknown = sorted(passed - set(declared))
+                missing = sorted(n for n, has_default in declared.items() if not has_default and n not in passed)
+                for name in unknown:
+                    print(f"::error file={path}::module \"{label}\" passes {name}, which {source} does not declare")
+                    bad += 1
+                for name in missing:
+                    print(f"::error file={path}::module \"{label}\" does not pass {name}, which {source} requires")
+                    bad += 1
+    print(f"{checked} local Terraform module call(s) match their module's variables")
+    return bad
+
+
 def main():
-    bad = check_sql() + check_hcl()
+    bad = check_sql() + check_hcl() + check_terraform_modules()
     if bad:
         print(f"{bad} file(s) would be rejected by the tool that has to read them.")
         return 1

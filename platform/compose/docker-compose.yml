@@ -132,7 +132,10 @@ services:
                         "Read:argus-parity-worm","Write:argus-parity-worm","List:argus-parity-worm"] },
           { "name": "argus-parity-deny",
             "credentials": [{ "accessKey": "argus-parity-deny", "secretKey": "$${ARGUS_S3_PARITY_DENY_SECRET}" }],
-            "actions": ["Read:argus-parity","List:argus-parity"] }
+            "actions": ["Read:argus-parity","List:argus-parity"] },
+          { "name": "argus-parity-admin",
+            "credentials": [{ "accessKey": "argus-parity-admin", "secretKey": "$${ARGUS_S3_PARITY_ADMIN_SECRET}" }],
+            "actions": ["Admin"] }
         ] }
         JSON
         echo "wrote filer.toml and s3.json"
@@ -1504,6 +1507,13 @@ services:
       ARGUS_PARITY_SECRET_KEY: ${ARGUS_S3_PARITY_SECRET:?run bootstrap.ps1}
       ARGUS_PARITY_DENY_ACCESS_KEY: argus-parity-deny
       ARGUS_PARITY_DENY_SECRET_KEY: ${ARGUS_S3_PARITY_DENY_SECRET:?run bootstrap.ps1}
+      ARGUS_PARITY_ADMIN_ACCESS_KEY: argus-parity-admin
+      ARGUS_PARITY_ADMIN_SECRET_KEY: ${ARGUS_S3_PARITY_ADMIN_SECRET:?run bootstrap.ps1}
+      ARGUS_PARITY_REPORT: /var/lib/argus/parity/latest.json
+      ARGUS_PARITY_TIMEOUT_MS: "15000"
+      ARGUS_PARITY_REFERENCE_ENDPOINT: ${ARGUS_PARITY_REFERENCE_ENDPOINT:-http://localstack:4566}
+      ARGUS_PARITY_REFERENCE_ACCESS_KEY: ${ARGUS_PARITY_REFERENCE_ACCESS_KEY:-test}
+      ARGUS_PARITY_REFERENCE_SECRET_KEY: ${ARGUS_PARITY_REFERENCE_SECRET_KEY:-test}
       ARGUS_NATS_URL: nats://nats:4222
       ARGUS_OPENBAO_ADDR: http://openbao:8200
     volumes:
@@ -1515,9 +1525,10 @@ services:
     command: ["node", "src/runner.js"]
     mem_limit: 384m
     depends_on:
-      seaweed-s3: { condition: service_healthy }
-      nats:       { condition: service_healthy }
-      openbao:    { condition: service_started }
+      seaweed-s3:       { condition: service_healthy }
+      nats:             { condition: service_healthy }
+      openbao:          { condition: service_started }
+      parity-reference: { condition: service_healthy }
     healthcheck:
       # HEALTHY MEANS THE PROVER IS WORKING, not that the platform is green. A
       # run where the WORM check FAILED is a SUCCESSFUL run. Conflating the two
@@ -1530,6 +1541,35 @@ services:
       # NOT 20s: the first run does real I/O across four stores on a cold WSL2
       # boot, and an unhealthy container blocks everything gated on it.
       start_period: 180s
+
+  parity-reference:
+    <<: *hardening
+    profiles: [parity]
+    image: localstack/localstack:${LOCALSTACK_TAG:-4.14.0}
+    container_name: argus-parity-reference
+    hostname: localstack
+    networks: [argus]
+    logging: *logging
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      SERVICES: s3
+      DEBUG: ${ARGUS_PARITY_REFERENCE_DEBUG:-0}
+      EAGER_SERVICE_LOADING: "1"
+      LOCALSTACK_HOST: localstack:4566
+      AWS_DEFAULT_REGION: ${ARGUS_S3_REGION:-us-east-1}
+    volumes:
+      - ./services/parity/localstack-init:/etc/localstack/init/ready.d:ro
+    tmpfs:
+      - /var/lib/localstack:size=512m
+      - /tmp:size=256m
+    ports: ["127.0.0.1:4566:4566"]
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4566/_localstack/init/ready | grep -q '\"completed\": *true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
 
   parity-pg:
     <<: *hardening
