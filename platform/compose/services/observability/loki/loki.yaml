@@ -1,0 +1,134 @@
+auth_enabled: false
+
+server:
+  http_listen_address: 0.0.0.0
+  http_listen_port: 3100
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9096
+  log_level: info
+  log_format: logfmt
+  grpc_server_max_concurrent_streams: 100
+  http_server_read_timeout: 60s
+  http_server_write_timeout: 60s
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  replication_factor: 1
+  ring:
+    instance_addr: 127.0.0.1
+    kvstore:
+      store: inmemory
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+
+schema_config:
+  configs:
+    - from: "2025-01-01"
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: argus_index_
+        period: 24h
+
+storage_config:
+  filesystem:
+    directory: /loki/chunks
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
+    cache_ttl: 24h
+    resync_interval: 5m
+
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 30
+  delete_request_store: filesystem
+  delete_request_store_db_type: boltdb
+  delete_request_cancel_period: 24h
+
+limits_config:
+  retention_period: ${LOKI_RETENTION_DEFAULT}
+  allow_structured_metadata: true
+  max_structured_metadata_size: 64KB
+  max_structured_metadata_entries_count: 128
+  volume_enabled: true
+  discover_log_levels: true
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  per_stream_rate_limit: 4MB
+  per_stream_rate_limit_burst: 16MB
+  max_streams_per_user: 0
+  max_global_streams_per_user: 5000
+  max_label_names_per_series: 20
+  max_line_size: 256KB
+  max_line_size_truncate: true
+  max_entries_limit_per_query: 5000
+  max_query_series: 500
+  max_query_length: 721h
+  max_query_parallelism: 8
+  retention_stream:
+    - selector: '{service_name="argus-console"}'
+      priority: 10
+      period: 2160h
+    - selector: '{level="debug"}'
+      priority: 20
+      period: 72h
+
+ingester:
+  chunk_idle_period: 30m
+  chunk_target_size: 1572864
+  chunk_encoding: snappy
+  max_chunk_age: 2h
+  wal:
+    enabled: true
+    dir: /loki/wal
+    flush_on_shutdown: true
+
+query_range:
+  align_queries_with_step: true
+  cache_results: true
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 64
+        ttl: 1h
+
+frontend:
+  encoding: protobuf
+  max_outstanding_per_tenant: 1024
+  compress_responses: true
+
+querier:
+  max_concurrent: 4
+
+pattern_ingester:
+  enabled: false
+
+ruler:
+  alertmanager_url: http://alertmanager:9093
+  enable_alertmanager_v2: true
+  storage:
+    type: local
+    local:
+      directory: /loki/rules
+  rule_path: /loki/rules-temp
+  ring:
+    kvstore:
+      store: inmemory
+
+table_manager:
+  retention_deletes_enabled: false
+  retention_period: 0s
+
+analytics:
+  reporting_enabled: false

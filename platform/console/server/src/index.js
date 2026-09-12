@@ -98,7 +98,8 @@ async function pgTableOptions(q) {
   }
 
   const known = await pg.databases();
-  const visible = known && known.ok === true && Array.isArray(known.databases) ? known.databases : null;
+  const answered = known && known.ok === true && known.stale !== true;
+  const visible = answered && Array.isArray(known.databases) ? known.databases : null;
   if (visible && !visible.some((d) => d && d.name === requested)) {
     throw rejected(`This cluster has no database called "${requested}". ` +
       'GET /api/pg/databases lists the ones it does have.');

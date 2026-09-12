@@ -1,0 +1,129 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  external_labels:
+    site: ${ARGUS_SITE}
+    environment: ${ARGUS_ENVIRONMENT}
+    monitor: argus-compose
+
+runtime:
+  gogc: 60
+
+rule_files:
+  - /etc/prometheus/rules/*.rules.yaml
+  - /etc/prometheus/gitops/apps/caddy/*alerts.yaml
+  - /etc/prometheus/gitops/apps/console/*alerts.yaml
+  - /etc/prometheus/gitops/apps/loan/*alerts.yaml
+  - /etc/prometheus/gitops/apps/mills/*alerts.yaml
+
+alerting:
+  alert_relabel_configs:
+    - source_labels: [severity]
+      regex: debug
+      action: drop
+  alertmanagers:
+    - scheme: http
+      api_version: v2
+      timeout: 10s
+      static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: [prometheus:9090]
+        labels:
+          tier: observability
+          argus_profile: observability
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: [alertmanager:9093]
+        labels:
+          tier: observability
+          argus_profile: observability
+
+  - job_name: loki
+    static_configs:
+      - targets: [loki:3100]
+        labels:
+          tier: observability
+          argus_profile: observability
+
+  - job_name: alloy
+    static_configs:
+      - targets: [alloy:12345]
+        labels:
+          tier: observability
+          argus_profile: observability
+
+  - job_name: grafana
+    static_configs:
+      - targets: [grafana:3000]
+        labels:
+          tier: observability
+          argus_profile: observability
+
+  - job_name: node
+    scrape_interval: 30s
+    static_configs:
+      - targets: [node-exporter:9100]
+        labels:
+          tier: host
+          host: docker-vm
+          argus_profile: observability
+
+  - job_name: postgres
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    static_configs:
+      - targets: [postgres-exporter:9187]
+        labels:
+          tier: data
+          argus_profile: observability
+
+  - job_name: garnet
+    scrape_interval: 30s
+    static_configs:
+      - targets: [garnet-exporter:9121]
+        labels:
+          tier: cache
+          argus_profile: cache
+
+  - job_name: nats
+    scrape_interval: 30s
+    static_configs:
+      - targets: [nats-exporter:7777]
+        labels:
+          tier: queues
+          argus_profile: queues
+
+  - job_name: seaweedfs
+    scrape_interval: 30s
+    static_configs:
+      - targets: [seaweed-master:9324]
+        labels:
+          seaweed_role: master
+          tier: storage
+          argus_profile: core
+      - targets: [seaweed-volume:9325]
+        labels:
+          seaweed_role: volume
+          tier: storage
+          argus_profile: core
+      - targets: [seaweed-filer:9326]
+        labels:
+          seaweed_role: filer
+          tier: storage
+          argus_profile: core
+      - targets: [seaweed-s3:9327]
+        labels:
+          seaweed_role: s3
+          tier: storage
+          argus_profile: core
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: go_memstats_.*|go_gc_.*
+        action: drop

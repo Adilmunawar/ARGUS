@@ -1,0 +1,93 @@
+groups:
+  - name: argus.alerts.seaweedfs
+    rules:
+      - alert: ArgusSeaweedVolumeSlotsLow
+        expr: argus_seaweed:volumes:used_ratio > 0.80
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'seaweed-volume is holding {{ $value | humanizePercentage }} of its -max volume slots'
+          description: 'The volume server was started with -max set from ARGUS_S3_MAX_VOLUMES (60 by default) and each volume caps at ARGUS_S3_VOLUME_SIZE_MB megabytes. When the last slot is allocated the master stops handing out write assignments and uploads fail with "no free volumes", while reads keep working and every healthcheck stays green.'
+          runbook: 'curl -s http://127.0.0.1:9333/dir/status | jq .Topology'
+
+      - alert: ArgusSeaweedVolumeSlotsExhausted
+        expr: argus_seaweed:volumes:used_ratio > 0.95
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: 'seaweed-volume has {{ $value | humanizePercentage }} of its volume slots allocated'
+          description: 'S3 PUT is about to start failing for every bucket. Raise ARGUS_S3_MAX_VOLUMES and restart seaweed-volume, or vacuum to reclaim deleted needles. Reads are unaffected, so this will be reported as an upload bug rather than a storage alert.'
+
+      - alert: ArgusSeaweedNoWritableVolumes
+        expr: argus_seaweed:writable_layouts:min == 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: 'The master reports zero writable volumes for collection {{ $labels.collection }}'
+          description: 'Every /dir/assign for this collection now fails. Causes are volume slot exhaustion, a volume server that has gone read-only on low disk, or no volume server registered with the master at all.'
+
+      - alert: ArgusSeaweedVolumesReadOnly
+        expr: argus_seaweed:volumes:read_only > 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: '{{ $value }} SeaweedFS volumes on {{ $labels.instance }} are read-only'
+          description: 'SeaweedFS marks a volume read-only on isDiskSpaceLow as well as on explicit noWriteOrDelete. On this host that is the same VHDX Postgres and the Prometheus TSDB write to, so treat it as a disk alert first.'
+
+      - alert: ArgusSeaweedMasterNoLeader
+        expr: |
+          max(SeaweedFS_master_is_leader) == 0
+            and on ()
+          max(up{job="seaweedfs", seaweed_role="master"}) == 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: 'No SeaweedFS master is raft leader'
+          description: 'A master that is up with no leader answers 503 on /cluster/healthz and 200 on /dir/status. Volume assignment and topology changes are frozen until a leader is elected.'
+
+      - alert: ArgusSeaweedVolumeAssignmentFailing
+        expr: increase(SeaweedFS_master_pick_for_write_error[15m]) > 0
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: 'The SeaweedFS master failed to pick a volume for write {{ $value }} times in 15m'
+          description: 'This is the direct counter behind a failed upload. It fires before the slot-ratio alerts when the cause is replica placement rather than capacity.'
+
+      - alert: ArgusSeaweedMasterLeaderFlapping
+        expr: increase(SeaweedFS_master_leader_changes[1h]) > 3
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'The SeaweedFS master changed leader {{ $value }} times in the last hour'
+          description: 'With a single master in this compose file, repeated leader changes mean the process is restarting, which points at the mem_limit or a corrupted /data/mdir.'
+
+      - alert: ArgusSeaweedFilerErrors
+        expr: |
+          sum by (instance) (rate(SeaweedFS_filer_request_total{code=~"5.."}[10m]))
+            /
+          sum by (instance) (rate(SeaweedFS_filer_request_total[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $value | humanizePercentage }} of filer requests are returning 5xx'
+          description: 'The filer sits between S3 and the volume servers. A 5xx share this high is usually the leveldb store at /data/filerldb2 or an unreachable volume server, not the filer itself.'
+
+      - alert: ArgusSeaweedS3Errors
+        expr: |
+          sum by (instance) (rate(SeaweedFS_s3_request_total{code=~"5.."}[10m]))
+            /
+          sum by (instance) (rate(SeaweedFS_s3_request_total[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: '{{ $value | humanizePercentage }} of S3 requests are returning 5xx'
+          description: 'Loki chunks, Guacamole recordings and the parity bucket all speak S3 to this gateway. A sustained 5xx share breaks backups silently because the writers retry and then give up.'

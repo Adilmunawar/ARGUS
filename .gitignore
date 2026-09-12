@@ -18,3 +18,6 @@ platform/console/prototype/tests/stress-last-run.json
 platform/compose/secrets/
 platform/compose/.env
 platform/compose/images.lock
+
+.github/scripts/__pycache__/
+__pycache__/

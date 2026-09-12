@@ -1,0 +1,84 @@
+groups:
+  - name: argus.alerts.postgres
+    rules:
+      - alert: ArgusPostgresDown
+        expr: |
+          pg_up == 0
+            and on (job, instance)
+          argus_target:seen_alive:24h == 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: 'postgres-exporter cannot connect to Postgres'
+          description: 'The exporter serves /metrics happily while Postgres is unreachable, so up==1 proves nothing and ArgusTargetDown will never fire for this. pg_up is the real signal. The console, Grafana and Guacamole all share this cluster.'
+          runbook: 'docker compose logs --tail=200 postgres; docker compose exec postgres pg_isready'
+
+      - alert: ArgusPostgresConnectionSaturation
+        expr: argus_postgres:connections:used_ratio > 0.80
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'Postgres is using {{ $value | humanizePercentage }} of max_connections'
+          description: 'max_connections is {{ with query "max(pg_settings_max_connections)" }}{{ . | first | value }}{{ end }}; the compose default is 120 via PG_MAX_CONNECTIONS. The ratio counts background workers too, which max_connections does not govern, so it over-reads by a handful of backends.'
+
+      - alert: ArgusPostgresConnectionExhaustionImminent
+        expr: argus_postgres:connections:used_ratio > 0.92
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: 'Postgres is about to refuse new connections ({{ $value | humanizePercentage }} of max_connections)'
+          description: 'superuser_reserved_connections means ordinary roles start failing before 100% is reached. Grafana loses its session store and the console loses its database in the same minute.'
+
+      - alert: ArgusPostgresIdleInTransaction
+        expr: argus_postgres:connections:idle_in_transaction > 5
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $value }} backends have been idle in transaction for 10m'
+          description: 'An idle-in-transaction backend holds its connection slot and blocks VACUUM from reclaiming any row version newer than its snapshot. It is the usual precursor to both connection exhaustion and table bloat.'
+
+      - alert: ArgusPostgresLongRunningTransaction
+        expr: max by (instance, datname) (pg_stat_activity_max_tx_duration{state="active"}) > 900
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'A transaction on {{ $labels.datname }} has been open for {{ $value | humanizeDuration }}'
+          description: 'Long transactions pin the xmin horizon for the whole cluster, not just this database.'
+
+      - alert: ArgusPostgresDeadlocks
+        expr: increase(pg_stat_database_deadlocks[15m]) > 0
+        for: 5m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $value }} deadlocks on {{ $labels.datname }} in the last 15 minutes'
+          description: 'Postgres resolves a deadlock by aborting one transaction. The application sees a failed write it may not have retried.'
+
+      - alert: ArgusPostgresRollbackRatioHigh
+        expr: |
+          rate(pg_stat_database_xact_rollback[15m])
+            /
+          (rate(pg_stat_database_xact_commit[15m]) + rate(pg_stat_database_xact_rollback[15m])) > 0.1
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $value | humanizePercentage }} of transactions on {{ $labels.datname }} are rolling back'
+          description: 'A sustained rollback share this high is constraint violations or application errors, not contention.'
+
+      - alert: ArgusPostgresCacheHitRatioLow
+        expr: |
+          rate(pg_stat_database_blks_hit[30m])
+            /
+          (rate(pg_stat_database_blks_hit[30m]) + rate(pg_stat_database_blks_read[30m])) < 0.90
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'Shared buffer hit ratio on {{ $labels.datname }} is {{ $value | humanizePercentage }}'
+          description: 'Every miss is a read against the WSL2 VHDX shared with SeaweedFS and the Prometheus TSDB, so a low ratio here shows up as latency everywhere else.'

@@ -1,0 +1,182 @@
+groups:
+  - name: argus.recording.compose_mem_limits
+    interval: 1m
+    rules:
+      - record: argus_service:mem_limit:bytes
+        expr: vector(1610612736)
+        labels:
+          job: prometheus
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(134217728)
+        labels:
+          job: alertmanager
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(805306368)
+        labels:
+          job: loki
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(268435456)
+        labels:
+          job: alloy
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(402653184)
+        labels:
+          job: grafana
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(67108864)
+        labels:
+          job: node
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(100663296)
+        labels:
+          job: postgres
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(100663296)
+        labels:
+          job: garnet
+
+      - record: argus_service:mem_limit:bytes
+        expr: vector(100663296)
+        labels:
+          job: nats
+
+      - record: argus_service:mem_used:ratio_of_limit
+        expr: |
+          max by (job) (process_resident_memory_bytes)
+            / on (job) group_left()
+          argus_service:mem_limit:bytes
+
+  - name: argus.alerts.memory
+    rules:
+      - alert: ArgusServiceApproachingMemLimit
+        expr: argus_service:mem_used:ratio_of_limit > 0.85
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $labels.job }} is using {{ $value | humanizePercentage }} of its compose mem_limit'
+          description: 'There is no cAdvisor in this stack, so this is the Go process RSS measured against the mem_limit docker-compose.yml sets for that service. RSS understates the cgroup total slightly, which means the real figure is worse than this one.'
+
+      - alert: ArgusServiceAtMemLimit
+        expr: argus_service:mem_used:ratio_of_limit > 0.93
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: '{{ $labels.job }} is about to be OOM-killed by its own mem_limit ({{ $value | humanizePercentage }})'
+          description: 'Docker kills the container without warning and without a core dump. For prometheus that means a TSDB truncated mid-write; for loki, the WAL replays on restart. Raise mem_limit or shed load now.'
+
+      - alert: ArgusHostMemoryPressure
+        expr: argus_host:memory_used:ratio > 0.90
+        for: 10m
+        labels:
+          severity: page
+        annotations:
+          summary: 'docker-vm memory is {{ $value | humanizePercentage }} used'
+          description: 'This measures the WSL2 utility VM, not Windows. Raise [wsl2] memory in %UserProfile%\.wslconfig or stop a profile. Core plus observability plus connect does not fit in 9 GB.'
+
+      - alert: ArgusHostSwapping
+        expr: |
+          node_memory_SwapTotal_bytes > 0
+            and
+          rate(node_vmstat_pswpout[5m]) > 0
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'The docker-vm is writing to swap'
+          description: 'Swap inside WSL2 lands in the same VHDX as Postgres and the TSDB. Latency across every service degrades together and the cause does not show up in any per-service metric.'
+
+      - alert: ArgusProcessMemoryGrowth
+        expr: |
+          (
+            process_resident_memory_bytes
+              /
+            process_resident_memory_bytes offset 6h
+          ) > 1.5
+            and
+          process_resident_memory_bytes > 256 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $labels.job }} RSS grew 50% in 6h and now exceeds 256 MiB'
+          description: 'Monotonic growth with steady load is a leak or an unbounded cardinality problem, and it ends in the mem_limit OOM kill rather than in a plateau.'
+
+  - name: argus.alerts.disk
+    rules:
+      - alert: ArgusDiskSpaceLow
+        expr: argus_host:filesystem_used:ratio > 0.85
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full'
+          description: 'A WSL2 ext4 VHDX does not shrink when data is deleted. Reclaiming space on the Windows side needs a manual compact, so acting early is cheaper than acting late.'
+
+      - alert: ArgusDiskSpaceCritical
+        expr: argus_host:filesystem_used:ratio > 0.95
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: '{{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full'
+          description: 'Postgres refuses writes and SeaweedFS volumes go read-only well before 100%. Expect the first symptom to be an application error, not a disk alert.'
+
+      - alert: ArgusDiskWillFillIn24h
+        expr: |
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h], 24 * 3600) < 0
+            and
+          argus_host:filesystem_used:ratio > 0.70
+        for: 30m
+        labels:
+          severity: page
+        annotations:
+          summary: '{{ $labels.mountpoint }} is projected to fill within 24 hours'
+          description: 'Linear projection over the last 6h of free space, gated on being already 70% full so a short burst on an empty disk does not page.'
+
+      - alert: ArgusDiskInodesLow
+        expr: node_filesystem_files_free / node_filesystem_files < 0.10
+        for: 15m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $labels.mountpoint }} has {{ $value | humanizePercentage }} of inodes free'
+          description: 'Inode exhaustion presents as ENOSPC on a disk that shows free bytes. SeaweedFS needle files and the Loki chunk tree are the two inode consumers here.'
+
+      - alert: ArgusFilesystemReadOnly
+        expr: node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|ramfs"} == 1
+        for: 2m
+        labels:
+          severity: page
+        annotations:
+          summary: '{{ $labels.mountpoint }} has been remounted read-only'
+          description: 'ext4 remounts read-only on I/O error. Every stateful service on this mount is now silently failing writes. Nothing recovers without operator action.'
+
+      - alert: ArgusPrometheusTsdbRetentionHit
+        expr: |
+          prometheus_tsdb_storage_blocks_bytes
+            /
+          (prometheus_tsdb_retention_limit_bytes > 0) > 0.9
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'Prometheus TSDB is within 10% of --storage.tsdb.retention.size'
+          description: 'Prometheus will start deleting the oldest blocks to stay inside PROM_RETENTION_SIZE, so the effective history becomes shorter than PROM_RETENTION_TIME without any error being logged.'
+
+      - alert: ArgusPrometheusTsdbCompactionFailing
+        expr: increase(prometheus_tsdb_compactions_failed_total[1h]) > 0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: 'Prometheus TSDB compaction has failed in the last hour'
+          description: 'Uncompacted head blocks grow until memory or disk runs out. This is usually a corrupted block or a full disk, and it does not self-heal.'

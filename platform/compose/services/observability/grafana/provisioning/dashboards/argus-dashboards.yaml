@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: argus
+    orgId: 1
+    folder: Argus
+    folderUid: argus
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false

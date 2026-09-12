@@ -55,7 +55,7 @@ const { positiveInt } = require('./env');
    The value is read once into a module-local, is never returned in a payload,
    never logged, and never interpolated into SQL. */
 const HOST = process.env.ARGUS_PG_HOST || '';
-const PORT = Number(process.env.ARGUS_PG_PORT || 5432);
+const PORT = positiveInt('ARGUS_PG_PORT', 5432);
 const USER = process.env.ARGUS_PG_USER || '';
 const PASSWORD = process.env.ARGUS_PG_PASSWORD;
 
@@ -1508,6 +1508,16 @@ const TABLE_TOTALS_SQL = `
 
 const RELKIND = { r: 'table', p: 'partitioned table', m: 'materialized view' };
 
+function tableTarget(options) {
+  const opts = options || {};
+  return typeof opts.database === 'string' && opts.database ? opts.database : ADMIN_DB;
+}
+
+function tableLimit(options) {
+  const opts = options || {};
+  return Math.min(Math.max(Number(opts.limit) || 50, 1), 500);
+}
+
 /**
  * What is taking up space inside one database.
  *
@@ -1521,16 +1531,6 @@ const RELKIND = { r: 'table', p: 'partitioned table', m: 'materialized view' };
  * grants in 20-grants.sql list six databases by name and no others, so asking
  * for a seventh is a question with an answer, not an error.
  */
-function tableTarget(options) {
-  const opts = options || {};
-  return typeof opts.database === 'string' && opts.database ? opts.database : ADMIN_DB;
-}
-
-function tableLimit(options) {
-  const opts = options || {};
-  return Math.min(Math.max(Number(opts.limit) || 50, 1), 500);
-}
-
 const tables = guarded('pg:tables', 20000, async (options) => {
   const database = tableTarget(options);
   const limit = tableLimit(options);

@@ -317,6 +317,15 @@ function send(method, path) {
     assert.strictEqual(again.length, 0, 'a rejection was reported a second time');
   });
 
+  process.env.SMOKE_INT_SHARED = 'nope';
+  env.positiveInt('SMOKE_INT_SHARED', 10);
+  env.positiveInt('SMOKE_INT_SHARED', 10);
+  const shared = [];
+  env.reportRejections((line) => shared.push(line));
+  check('a variable several modules read is reported once, not once per module', () => {
+    assert.strictEqual(shared.length, 1, shared.join(' | '));
+  });
+
   /* --------------------------------------------------------------- cache --- */
   let upstreamCalls = 0;
   const counted = async () => { upstreamCalls += 1; return { call: upstreamCalls }; };

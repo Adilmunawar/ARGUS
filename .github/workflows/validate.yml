@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: pip install --disable-pip-version-check pyyaml jsonschema
+      - run: pip install --disable-pip-version-check pyyaml jsonschema pglast python-hcl2
 
       - name: Secret scanner passes its own self-test
         run: python3 .github/scripts/scan-secrets.py --self-test
@@ -33,6 +33,9 @@ jobs:
 
       - name: Every YAML and JSON parses
         run: python3 .github/scripts/check-parses.py
+
+      - name: Every SQL and HCL file parses
+        run: python3 .github/scripts/check-syntax.py
 
       - name: GitOps specs validate against their schemas
         run: python3 .github/scripts/check-gitops.py

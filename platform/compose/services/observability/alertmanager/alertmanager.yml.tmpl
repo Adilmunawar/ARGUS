@@ -1,0 +1,150 @@
+global:
+  resolve_timeout: 5m
+  smtp_from: "@@SMTP_FROM@@"
+  smtp_smarthost: "@@SMTP_SMARTHOST@@"
+  smtp_hello: "@@SMTP_HELLO@@"
+  smtp_auth_username: "@@SMTP_USERNAME@@"
+  smtp_auth_password: "@@SMTP_PASSWORD@@"
+  smtp_require_tls: true
+
+route:
+  receiver: argus-console
+  group_by: [alertname, job, instance]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: argus-null
+      matchers:
+        - severity="debug"
+      continue: false
+
+    - receiver: argus-page
+      matchers:
+        - severity="page"
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 1h
+      continue: true
+
+    - receiver: argus-ticket
+      matchers:
+        - severity=~"ticket|warning"
+      group_wait: 2m
+      group_interval: 15m
+      repeat_interval: 12h
+      mute_time_intervals:
+        - offhours
+      continue: true
+
+    - receiver: argus-console
+      matchers:
+        - severity=~"page|ticket|warning"
+      continue: false
+
+receivers:
+  - name: argus-null
+
+  - name: argus-console
+    webhook_configs:
+      - url: "@@CONSOLE_ALERT_WEBHOOK@@"
+        send_resolved: true
+        max_alerts: 64
+        timeout: 10s
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/console_alert_token
+          follow_redirects: false
+          enable_http2: false
+
+  - name: argus-page
+    email_configs:
+      - to: "@@ONCALL_EMAIL@@"
+        send_resolved: true
+        require_tls: true
+        headers:
+          Subject: '[ARGUS {{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .Alerts | len }})'
+    webhook_configs:
+      - url: "@@APPRISE_WEBHOOK@@"
+        send_resolved: true
+        max_alerts: 16
+        timeout: 15s
+
+  - name: argus-ticket
+    email_configs:
+      - to: "@@PLATFORM_EMAIL@@"
+        send_resolved: true
+        require_tls: true
+        headers:
+          Subject: '[ARGUS ticket] {{ .CommonLabels.alertname }} ({{ .Alerts | len }})'
+
+inhibit_rules:
+  - source_matchers:
+      - alertname="ArgusTargetDown"
+      - severity="page"
+    target_matchers:
+      - severity=~"ticket|warning"
+    equal: [instance]
+
+  - source_matchers:
+      - alertname="ArgusPostgresDown"
+    target_matchers:
+      - alertname=~"ArgusPostgres.*"
+    equal: [instance]
+
+  - source_matchers:
+      - alertname="ArgusNatsUnhealthy"
+    target_matchers:
+      - alertname=~"ArgusJetStream.*"
+    equal: [instance]
+
+  - source_matchers:
+      - alertname="ArgusDiskSpaceCritical"
+    target_matchers:
+      - alertname="ArgusDiskSpaceLow"
+    equal: [instance, mountpoint]
+
+  - source_matchers:
+      - alertname="ArgusSeaweedVolumeSlotsExhausted"
+    target_matchers:
+      - alertname=~"ArgusSeaweedVolumeSlotsLow|ArgusSeaweedNoWritableVolumes|ArgusSeaweedVolumeAssignmentFailing"
+    equal: [instance]
+
+  - source_matchers:
+      - alertname="ArgusServiceAtMemLimit"
+    target_matchers:
+      - alertname="ArgusServiceApproachingMemLimit"
+    equal: [job]
+
+  - source_matchers:
+      - alertname="ArgusCertificateExpired"
+    target_matchers:
+      - alertname=~"ArgusCertificateExpiring.*"
+    equal: [subject]
+
+  - source_matchers:
+      - alertname="ArgusTokenExpired"
+    target_matchers:
+      - alertname="ArgusTokenExpiringSoon"
+    equal: [token]
+
+  - source_matchers:
+      - severity="page"
+    target_matchers:
+      - severity="ticket"
+    equal: [alertname, instance]
+
+time_intervals:
+  - name: offhours
+    time_intervals:
+      - times:
+          - start_time: "19:00"
+            end_time: "24:00"
+          - start_time: "00:00"
+            end_time: "08:00"
+        location: Asia/Karachi
+  - name: weekends
+    time_intervals:
+      - weekdays: [saturday, sunday]
+        location: Asia/Karachi

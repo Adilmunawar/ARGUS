@@ -7,7 +7,8 @@ function positiveInt(name, fallback) {
   if (raw === undefined || raw === '') return fallback;
   const n = Number(raw);
   if (Number.isInteger(n) && n > 0) return n;
-  rejected.push(`${name}=${JSON.stringify(raw)} is not a positive integer, so ${fallback} is used instead.`);
+  const line = `${name}=${JSON.stringify(raw)} is not a positive integer, so ${fallback} is used instead.`;
+  if (!rejected.includes(line)) rejected.push(line);
   return fallback;
 }
 

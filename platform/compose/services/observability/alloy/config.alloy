@@ -1,0 +1,193 @@
+logging {
+	level  = "info"
+	format = "logfmt"
+}
+
+discovery.docker "argus_containers" {
+	host                = sys.env("DOCKER_HOST")
+	refresh_interval    = "30s"
+	match_first_network = true
+
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=argus"]
+	}
+}
+
+discovery.relabel "argus_container_logs" {
+	targets = discovery.docker.argus_containers.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "alloy"
+		action        = "drop"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+		action        = "replace"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service_name"
+		action        = "replace"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		target_label  = "compose_project"
+		action        = "replace"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_log_stream"]
+		target_label  = "stream"
+		action        = "replace"
+	}
+
+	rule {
+		action = "labelmap"
+		regex  = "__meta_docker_container_label_argus_(.+)"
+	}
+}
+
+loki.source.docker "argus_containers" {
+	host             = sys.env("DOCKER_HOST")
+	targets          = discovery.relabel.argus_container_logs.output
+	labels           = {job = "argus/containers", site = sys.env("ARGUS_SITE")}
+	refresh_interval = "30s"
+	forward_to       = [loki.process.argus_redact.receiver]
+}
+
+loki.process "argus_redact" {
+	forward_to = [loki.relabel.argus_label_guard.receiver]
+
+	stage.drop {
+		longer_than         = "128KB"
+		drop_counter_reason = "line_too_long"
+	}
+
+	stage.drop {
+		older_than          = "168h"
+		drop_counter_reason = "line_too_old"
+	}
+
+	stage.json {
+		expressions = {
+			level      = "level",
+			msg        = "msg",
+			trace_id   = "trace_id",
+			span_id    = "span_id",
+			request_id = "request_id",
+			ts         = "ts",
+		}
+		drop_malformed = false
+	}
+
+	stage.regex {
+		expression = "(?i)\\btrace[_-]?id[=:\"\\s]+(?P<trace_id>[0-9a-f]{16,32})\\b"
+	}
+
+	stage.regex {
+		expression = "(?i)\\bspan[_-]?id[=:\"\\s]+(?P<span_id>[0-9a-f]{8,16})\\b"
+	}
+
+	stage.replace {
+		expression = "(?i)\\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key|authorization|auth[_-]?token|bearer|session[_-]?id|client[_-]?secret)\\s*[=:]\\s*(\"[^\"]*\"|'[^']*'|\\S+)"
+		replace    = "${1}=***REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)\\bAuthorization:\\s*(Bearer|Basic)\\s+(\\S+)"
+		replace    = "Authorization: ${1} ***REDACTED***"
+	}
+
+	stage.replace {
+		expression = "\\b(\\d{5}-\\d{7}-\\d)\\b"
+		replace    = "***CNIC-REDACTED***"
+	}
+
+	stage.replace {
+		expression = "\\b(\\d{13})\\b"
+		replace    = "***CNIC-REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)\\b(AKIA[0-9A-Z]{16})\\b"
+		replace    = "***AWS-KEY-REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)://([^:@/\\s]+):([^@/\\s]+)@"
+		replace    = "://${1}:***REDACTED***@"
+	}
+
+	stage.replace {
+		expression = "\\b(eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})\\b"
+		replace    = "***JWT-REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)\\b(hvs\\.[A-Za-z0-9_-]{20,}|s\\.[A-Za-z0-9]{24,})\\b"
+		replace    = "***BAO-TOKEN-REDACTED***"
+	}
+
+	stage.labels {
+		values = {level = ""}
+	}
+
+	stage.structured_metadata {
+		values = {
+			trace_id   = "",
+			span_id    = "",
+			request_id = "",
+		}
+	}
+
+	stage.label_keep {
+		values = ["job", "site", "service_name", "container", "compose_project", "stream", "level"]
+	}
+}
+
+loki.relabel "argus_label_guard" {
+	forward_to = [loki.write.argus_loki.receiver]
+
+	rule {
+		source_labels = ["service_name"]
+		regex         = "(.*)-init|storage-init|pg-init|bao-init|guac-init|nats-init|garnet-init|seaweed-config"
+		action        = "drop"
+	}
+
+	rule {
+		action = "labeldrop"
+		regex  = "filename|__.*"
+	}
+
+	rule {
+		source_labels = ["level"]
+		regex         = "(?i)(trace)"
+		action        = "drop"
+	}
+}
+
+loki.write "argus_loki" {
+	external_labels = {
+		site        = sys.env("ARGUS_SITE"),
+		environment = sys.env("ARGUS_ENVIRONMENT"),
+	}
+
+	endpoint {
+		url                 = sys.env("LOKI_URL")
+		name                = "argus-loki"
+		batch_wait          = "1s"
+		batch_size          = "1MiB"
+		remote_timeout      = "10s"
+		min_backoff_period  = "500ms"
+		max_backoff_period  = "5m"
+		max_backoff_retries = 10
+		retry_on_http_429   = true
+	}
+}

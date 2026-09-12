@@ -50,6 +50,8 @@ $EnvFile    = Join-Path $Here '.env'
 $Example    = Join-Path $Here '.env.example'
 $SecretsDir = Join-Path $Here 'secrets'
 
+Set-Location $Here
+
 $script:Warnings = @()
 
 function Say  ([string]$m) { Write-Host "  $m" }
@@ -81,6 +83,14 @@ function New-Base64Secret {
   $b = New-Object byte[] $Bytes
   $script:Rng.GetBytes($b)
   [Convert]::ToBase64String($b)
+}
+
+function Get-EnvValue {
+  param([string]$Key)
+  if (-not (Test-Path $EnvFile)) { return $null }
+  $hit = Select-String -Path $EnvFile -Pattern "^$Key=" -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $hit) { return $null }
+  return (($hit.Line -split '=', 2)[1] -split '#')[0].Trim()
 }
 
 function Write-TextNoBom {
@@ -188,14 +198,30 @@ try {
 
 # Published ports. A collision is a hard bind failure at up time whose message
 # names the port but not what holds it.
-$ports = [ordered]@{ 'console' = 8787; 'postgres' = 5432; 'garnet' = 6379; 'nats' = 4222; 'openbao' = 8200 }
+$ports = [ordered]@{
+  'console'  = @('CONSOLE_PORT', 8787)
+  'postgres' = @('PG_PORT', 5432)
+  'garnet'   = @('GARNET_PORT', 6379)
+  'nats'     = @('NATS_PORT', 4222)
+  'openbao'  = @('OPENBAO_PORT', 8200)
+}
 foreach ($name in $ports.Keys) {
-  $p = $ports[$name]
+  $var = $ports[$name][0]
+  $p   = $ports[$name][1]
+  $override = Get-EnvValue $var
+  if ($override) {
+    $parsed = 0
+    if ([int]::TryParse($override, [ref]$parsed) -and $parsed -gt 0 -and $parsed -lt 65536) {
+      $p = $parsed
+    } else {
+      Warn "$var in .env is '$override', which is not a TCP port. Checking the default $p instead."
+    }
+  }
   $held = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($held) {
     $proc = Get-Process -Id $held.OwningProcess -ErrorAction SilentlyContinue
     $who = if ($proc) { "$($proc.ProcessName) (pid $($proc.Id))" } else { 'an unknown process' }
-    Warn "port $p ($name) is already held by $who. Change the matching *_PORT in .env."
+    Warn "port $p ($name, $var) is already held by $who. Change $var in .env."
   }
 }
 
@@ -280,11 +306,36 @@ $lines    = [IO.File]::ReadAllLines($Example)
 $out      = New-Object 'System.Collections.Generic.List[string]'
 $replaced = @{}
 
+$memLimit = $null
+foreach ($line in $lines) {
+  $mm = [regex]::Match($line, '^GARNET_MEM_LIMIT=(?<v>[^\s#]+)')
+  if ($mm.Success) { $memLimit = $mm.Groups['v'].Value }
+}
+$derived = [ordered]@{}
+if (-not $memLimit) {
+  Warn "GARNET_MEM_LIMIT is not in .env.example, so ARGUS_GARNET_MEM_LIMIT_BYTES could not be derived from it."
+} else {
+  $size = [regex]::Match($memLimit, '^(?<n>\d+)(?<u>[bkmgBKMG]?)$')
+  if (-not $size.Success) {
+    Warn "GARNET_MEM_LIMIT is '$memLimit', which is not a docker size. ARGUS_GARNET_MEM_LIMIT_BYTES is left as .env.example has it and may not match."
+  } else {
+    $scale = switch ($size.Groups['u'].Value.ToLower()) {
+      'k'     { 1024 }
+      'm'     { 1048576 }
+      'g'     { 1073741824 }
+      default { 1 }
+    }
+    $derived['ARGUS_GARNET_MEM_LIMIT_BYTES'] = ([int64]$size.Groups['n'].Value * [int64]$scale).ToString()
+  }
+}
+
 foreach ($line in $lines) {
   $m = [regex]::Match($line, '^(?<key>[A-Z0-9_]+)=(?<val>[^#]*?)\s*(?<rest>#.*)?$')
-  if ($m.Success -and $gen.Contains($m.Groups['key'].Value)) {
-    $key  = $m.Groups['key'].Value
-    $val  = $gen[$key]
+  $key = if ($m.Success) { $m.Groups['key'].Value } else { '' }
+  $val = $null
+  if ($m.Success -and $gen.Contains($key))          { $val = $gen[$key] }
+  elseif ($m.Success -and $derived.Contains($key))  { $val = $derived[$key] }
+  if ($null -ne $val) {
     $rest = $m.Groups['rest'].Value
     if ($rest) {
       $pad = [Math]::Max(1, 37 - ($key.Length + 1 + $val.Length))
@@ -298,13 +349,16 @@ foreach ($line in $lines) {
   }
 }
 
-$missing = @($gen.Keys | Where-Object { -not $replaced.ContainsKey($_) })
+$missing = @(@($gen.Keys) + @($derived.Keys) | Where-Object { -not $replaced.ContainsKey($_) })
 if ($missing.Count) {
   Die "These keys were generated but do not appear in .env.example, so nothing would consume them: $($missing -join ', ')"
 }
 
 Write-TextNoBom -Path $EnvFile -Text (($out -join "`n") + "`n")
 Say "wrote .env       ($($gen.Count) secrets generated, $($lines.Count) lines kept from .env.example)"
+if ($derived.Contains('ARGUS_GARNET_MEM_LIMIT_BYTES')) {
+  Say "garnet budget    GARNET_MEM_LIMIT=$memLimit -> ARGUS_GARNET_MEM_LIMIT_BYTES=$($derived['ARGUS_GARNET_MEM_LIMIT_BYTES'])"
+}
 
 # --- 4. write ./secrets/ ----------------------------------------------------
 
@@ -354,6 +408,43 @@ $consoleAcl = 'user console on >' + $gen['GARNET_CONSOLE_PASSWORD'] +
 # inside the username or the password hash.
 Write-TextNoBom -Path (Join-Path $garnetSecrets 'users.acl') -Text ("user default off`n" + $consoleAcl + "`n")
 Say "wrote secrets/garnet/users.acl  (default OFF, console observe-only)"
+
+$envValues = @{}
+foreach ($l in $out) {
+  $em = [regex]::Match($l, '^(?<k>[A-Z0-9_]+)=(?<v>[^#]*?)\s*(#.*)?$')
+  if ($em.Success) { $envValues[$em.Groups['k'].Value] = $em.Groups['v'].Value }
+}
+$alertKeyFor = @{ 'SMTP_SMARTHOST' = @('SMTP_SMARTHOST', 'SMTP_HOST') }
+$rendered    = [IO.File]::ReadAllText($alertTemplate)
+$unresolved  = @()
+$substituted = 0
+foreach ($token in [regex]::Matches($rendered, '@@(?<k>[A-Z0-9_]+)@@')) {
+  $placeholder = $token.Groups['k'].Value
+  $keys = if ($alertKeyFor.ContainsKey($placeholder)) { $alertKeyFor[$placeholder] } else { @($placeholder) }
+  $v = $null
+  foreach ($key in $keys) {
+    if ($envValues.ContainsKey($key) -and $envValues[$key] -ne '') { $v = $envValues[$key]; break }
+  }
+  if ($null -eq $v) {
+    foreach ($key in $keys) {
+      if ($envValues.ContainsKey($key)) { $v = $envValues[$key]; break }
+    }
+  }
+  if ($null -eq $v) {
+    $unresolved += "@@$placeholder@@ (set $($keys[0]) in .env.example)"
+    continue
+  }
+  $rendered = $rendered.Replace($token.Value, $v)
+  $substituted++
+}
+if ($unresolved.Count) {
+  Die "secrets/alertmanager.yml cannot be rendered: $alertTemplate has placeholders that .env sets no value for -- $((($unresolved | Select-Object -Unique) | Sort-Object) -join '; '). Nothing here may invent them: Alertmanager expands nothing itself, so an unsubstituted placeholder is taken literally, amtool check-config passes, the stack boots green, and the delivery leg that has to survive the console being down fails at send time."
+}
+if ($rendered -match '@@' -or $rendered -match '\$\{') {
+  Die "secrets/alertmanager.yml still holds an unsubstituted placeholder after rendering. Alertmanager would take it literally. Nothing was written."
+}
+Write-TextNoBom -Path $alertRendered -Text $rendered
+Say "wrote secrets/alertmanager.yml  ($substituted placeholders substituted from .env)"
 
 # --- 5. resolve tags to digests --------------------------------------------
 

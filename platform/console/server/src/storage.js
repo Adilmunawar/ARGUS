@@ -45,6 +45,7 @@ const S3_REGION = process.env.ARGUS_S3_REGION || 'us-east-1';
 const BUCKETS_FILE = process.env.ARGUS_BUCKETS_FILE || '/config/buckets.yaml';
 const STATE_DIR = process.env.ARGUS_STATE_DIR || '/state';
 const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
+const VOLUME_SIZE_MB = positiveInt('ARGUS_S3_VOLUME_SIZE_MB', 1024);
 
 /* The master hands out CONTAINER-INTERNAL volume-server URLs (seaweed-volume:8080).
    In network that is exactly right. Running the console on the Windows host for
@@ -424,7 +425,7 @@ const capacity = guarded('storage:capacity', 15000, async () => {
   /* Which ceiling is closer. Both are reported; the UI is told which to lead
      with rather than having to work it out. */
   const slotBytes = topo.slotsFree !== null
-    ? topo.slotsFree * Number(process.env.ARGUS_S3_VOLUME_SIZE_MB || 1024) * 1024 * 1024
+    ? topo.slotsFree * VOLUME_SIZE_MB * 1024 * 1024
     : null;
   let binding = 'unknown';
   if (slotBytes !== null && totals) {
@@ -434,7 +435,7 @@ const capacity = guarded('storage:capacity', 15000, async () => {
   return {
     nodes,
     totals,
-    slots: { max: topo.slotsMax, free: topo.slotsFree, volumeSizeMB: Number(process.env.ARGUS_S3_VOLUME_SIZE_MB || 1024) },
+    slots: { max: topo.slotsMax, free: topo.slotsFree, volumeSizeMB: VOLUME_SIZE_MB },
     available: totals && slotBytes !== null ? Math.min(totals.freeBytes, slotBytes) : (totals ? totals.freeBytes : null),
     binding,
     /* Named so nobody compares this with a figure from a real host. Inside

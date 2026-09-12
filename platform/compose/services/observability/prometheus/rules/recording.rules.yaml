@@ -1,0 +1,63 @@
+groups:
+  - name: argus.recording.availability
+    interval: 30s
+    rules:
+      - record: argus_target:up:ratio_5m
+        expr: avg_over_time(up[5m])
+
+      - record: argus_target:seen_alive:24h
+        expr: max_over_time(up[24h])
+
+  - name: argus.recording.host
+    interval: 30s
+    rules:
+      - record: argus_host:memory_used:ratio
+        expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+
+      - record: argus_host:cpu_busy:ratio_5m
+        expr: 1 - avg without (cpu) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+
+      - record: argus_host:filesystem_used:ratio
+        expr: 1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"})
+
+  - name: argus.recording.postgres
+    interval: 30s
+    rules:
+      - record: argus_postgres:connections:used
+        expr: sum by (instance, server) (pg_stat_activity_count)
+
+      - record: argus_postgres:connections:used_ratio
+        expr: |
+          sum by (instance, server) (pg_stat_activity_count)
+            / on (instance, server) group_left()
+          max by (instance, server) (pg_settings_max_connections)
+
+      - record: argus_postgres:connections:idle_in_transaction
+        expr: sum by (instance, server) (pg_stat_activity_count{state=~"idle in transaction.*"})
+
+  - name: argus.recording.nats
+    interval: 30s
+    rules:
+      - record: argus_nats:consumer_pending:max
+        expr: max by (account, stream_name, consumer_name) (jetstream_consumer_num_pending)
+
+      - record: argus_nats:consumer_delivered:rate_5m
+        expr: sum by (account, stream_name, consumer_name) (rate(jetstream_consumer_delivered_consumer_seq[5m]))
+
+  - name: argus.recording.seaweedfs
+    interval: 30s
+    rules:
+      - record: argus_seaweed:volumes:used
+        expr: sum by (instance) (SeaweedFS_volumeServer_volumes)
+
+      - record: argus_seaweed:volumes:used_ratio
+        expr: |
+          sum by (instance) (SeaweedFS_volumeServer_volumes)
+            / on (instance) group_left()
+          max by (instance) (SeaweedFS_volumeServer_max_volumes)
+
+      - record: argus_seaweed:volumes:read_only
+        expr: sum by (instance) (SeaweedFS_volumeServer_read_only_volumes)
+
+      - record: argus_seaweed:writable_layouts:min
+        expr: min by (collection) (SeaweedFS_master_volume_layout_writable)

@@ -1,0 +1,56 @@
+apiVersion: 1
+
+prune: true
+
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+  - name: Loki
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    uid: argus-prometheus
+    type: prometheus
+    access: proxy
+    orgId: 1
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    version: 1
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: 3.5.0
+      timeInterval: 15s
+      queryTimeout: 30s
+      cacheLevel: Low
+      incrementalQuerying: true
+      incrementalQueryOverlapWindow: 10m
+      manageAlerts: false
+      disableRecordingRules: false
+
+  - name: Loki
+    uid: argus-loki
+    type: loki
+    access: proxy
+    orgId: 1
+    url: http://loki:3100
+    isDefault: false
+    editable: false
+    version: 1
+    jsonData:
+      maxLines: 2000
+      timeout: 60
+      manageAlerts: false
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          url: /explore?left=%7B%22datasource%22:%22argus-prometheus%22%7D
+          urlDisplayLabel: Trace
+        - name: RequestID
+          matcherType: label
+          matcherRegex: request_id
+          url: /explore
+          urlDisplayLabel: Request

@@ -55,16 +55,29 @@ const {
 
 /* ------------------------------------------------------------------ config --- */
 
+function positiveIntMs(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error('[storage-init] !',
+      `${name}=${JSON.stringify(raw)} is not a whole number of milliseconds greater than zero. ` +
+      `Falling back to ${fallback}; a value that parses as NaN would disable the timeout it names.`);
+    return fallback;
+  }
+  return n;
+}
+
 const ENDPOINT    = process.env.ARGUS_S3_ENDPOINT || 'http://seaweed-s3:8333';
 const REGION      = process.env.ARGUS_S3_REGION || 'us-east-1';
 const BUCKETS_FILE = process.env.ARGUS_BUCKETS_FILE || '/config/buckets.yaml';
 const STATE_DIR   = process.env.ARGUS_STATE_DIR || '/state';
 const PROFILE     = (process.env.ARGUS_PROFILE || 'dev').toLowerCase();
 const PROBE_BUCKET = process.env.ARGUS_WORM_PROBE_BUCKET || 'argus-worm-probe';
-const READY_TIMEOUT_MS = Number(process.env.ARGUS_S3_READY_TIMEOUT_MS || 120000);
-const REQUEST_TIMEOUT_MS = Number(process.env.ARGUS_S3_REQUEST_TIMEOUT_MS || 15000);
-const CONNECT_TIMEOUT_MS = Number(process.env.ARGUS_S3_CONNECT_TIMEOUT_MS || 3000);
-const RUN_DEADLINE_MS = Number(process.env.ARGUS_S3_RUN_DEADLINE_MS || 300000);
+const READY_TIMEOUT_MS = positiveIntMs('ARGUS_S3_READY_TIMEOUT_MS', 120000);
+const REQUEST_TIMEOUT_MS = positiveIntMs('ARGUS_S3_REQUEST_TIMEOUT_MS', 15000);
+const CONNECT_TIMEOUT_MS = positiveIntMs('ARGUS_S3_CONNECT_TIMEOUT_MS', 3000);
+const RUN_DEADLINE_MS = positiveIntMs('ARGUS_S3_RUN_DEADLINE_MS', 300000);
 const IDENTITIES_FILE = process.env.ARGUS_S3_IDENTITIES_FILE || '/config/s3.json';
 const IDENTITIES_FILE_PINNED = !!process.env.ARGUS_S3_IDENTITIES_FILE;
 const RUN_STARTED_AT = Date.now();
@@ -119,6 +132,19 @@ function describeLock(state) {
     return `${state.mode || 'unknown mode'}/no default retention`;
   }
   return `${state.mode || 'unknown mode'}/${state.days}d`;
+}
+
+function retentionDays(state) {
+  if (!state || !state.enabled) return 0;
+  if (state.years !== null && state.years !== undefined) return Number(state.years) * 365;
+  if (state.days === null || state.days === undefined) return 0;
+  return Number(state.days);
+}
+
+function weakensLock(state, want) {
+  if (!state || !state.enabled) return false;
+  if (state.mode === 'COMPLIANCE' && want.mode !== 'COMPLIANCE') return true;
+  return retentionDays(state) > Number(want.days);
 }
 
 function lockMatches(state, want) {
@@ -386,6 +412,16 @@ async function applyBucket(spec, problems) {
         `${spec.name}: buckets.yaml declares Object Lock ${spec.declaredLock.mode}/${spec.declaredLock.days}d, ` +
         `but the bucket exists WITHOUT it. Object Lock cannot be enabled after creation. ` +
         `The bucket must be recreated (destroying its contents) or the declaration removed.`);
+    } else if (!lockMatches(lockState, spec.lock) && weakensLock(lockState, spec.lock)) {
+      const before = describeLock(lockState);
+      problems.push(
+        `${spec.name}: the bucket enforces ${before} and ${want} is required, which is WEAKER. ` +
+        `${PROFILE === 'dev' && spec.declaredLock && spec.lock !== spec.declaredLock
+            ? `${want} comes from the dev overrides collapsing the declared ` +
+              `${spec.declaredLock.mode}/${spec.declaredLock.days}d, not from ${BUCKETS_FILE}. `
+            : `${BUCKETS_FILE} declares less retention than the bucket already enforces. `}` +
+        `Retention that already exists is never reduced here, so the bucket was left at ${before}. ` +
+        `Recreate the bucket, or raise the declaration to match what it enforces.`);
     } else if (!lockMatches(lockState, spec.lock)) {
       const before = describeLock(lockState);
       log(`${spec.name}: default retention is ${before}, ${want} is required; re-applying it`);

@@ -1,0 +1,77 @@
+groups:
+  - name: argus.alerts.nats
+    rules:
+      - alert: ArgusNatsUnhealthy
+        expr: gnatsd_healthz_status_value != 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: 'NATS /healthz is not ok on {{ $labels.server_id }}'
+          description: 'The nats-exporter image is FROM scratch and its compose healthcheck is disabled, so this metric and up{job="nats"} are the only liveness signals for the queues profile.'
+
+      - alert: ArgusJetStreamConsumerLag
+        expr: |
+          max by (account, stream_name, consumer_name) (
+            jetstream_consumer_num_pending{is_consumer_leader="true"}
+          ) > 5000
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'Consumer {{ $labels.consumer_name }} on {{ $labels.stream_name }} has {{ $value }} pending messages'
+          description: 'The subscriber is slower than the publisher. Sustained, this ends at the stream limits pinned in nats-server.conf, and JetStream then applies the discard policy rather than growing.'
+
+      - alert: ArgusJetStreamConsumerStalled
+        expr: |
+          jetstream_consumer_num_pending{is_consumer_leader="true"} > 0
+            and on (account, stream_name, consumer_name)
+          increase(jetstream_consumer_delivered_consumer_seq{is_consumer_leader="true"}[15m]) == 0
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: 'Consumer {{ $labels.consumer_name }} has a backlog but has delivered nothing for 15m'
+          description: 'A backlog that never drains is a stopped subscriber, not a slow one. Lag alone would eventually clear; this will not.'
+
+      - alert: ArgusJetStreamAckBacklog
+        expr: jetstream_consumer_num_ack_pending{is_consumer_leader="true"} > 1000
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $value }} unacked messages on {{ $labels.consumer_name }}'
+          description: 'Delivered but unacknowledged messages will all be redelivered when ack_wait expires, turning one slow consumer into a duplicate-delivery storm.'
+
+      - alert: ArgusJetStreamRedeliveryStorm
+        expr: increase(jetstream_consumer_num_redelivered{is_consumer_leader="true"}[15m]) > 100
+        for: 10m
+        labels:
+          severity: ticket
+        annotations:
+          summary: 'Consumer {{ $labels.consumer_name }} redelivered {{ $value }} messages in 15m'
+          description: 'Either the handler is failing and not acking, or ack_wait is shorter than the real processing time. Both are poison-message shaped.'
+
+      - alert: ArgusJetStreamStoreNearLimit
+        expr: |
+          jetstream_server_total_message_bytes
+            /
+          (jetstream_server_max_storage > 0) > 0.85
+        for: 15m
+        labels:
+          severity: page
+        annotations:
+          summary: 'JetStream file store is {{ $value | humanizePercentage }} of max_file_store'
+          description: 'nats-server.conf pins max_file_store on purpose; without it NATS sizes itself against the whole VM and fills the shared VHDX, and a VHDX that fills does not shrink again when the data is deleted.'
+
+      - alert: ArgusJetStreamStreamCountGrowth
+        expr: |
+          jetstream_server_total_streams
+            -
+          jetstream_server_total_streams offset 24h > 20
+        for: 30m
+        labels:
+          severity: ticket
+        annotations:
+          summary: '{{ $value }} more JetStream streams exist than 24 hours ago'
+          description: 'Streams created per-tenant or per-request rather than per-subject exhaust the file store and the server memory budget together. Each stream carries its own index and its own consumers.'

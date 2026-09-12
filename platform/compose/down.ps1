@@ -42,25 +42,46 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 # Every profile, so a `--profile connect up` earlier does not leave orphans that
 # `down` silently ignores and that then hold ports on the next boot.
-$profiles = @(
-  '--profile', 'observability',
-  '--profile', 'connect',
-  '--profile', 'targets',
-  '--profile', 'compute',
-  '--profile', 'parity'
-)
+$knownProfiles = @('cache','queues','secrets','observability','connect','compute','parity','targets')
+$declaredProfiles = @()
+$composeFile = Join-Path $Here 'docker-compose.yml'
+if (Test-Path $composeFile) {
+  foreach ($line in [IO.File]::ReadAllLines($composeFile)) {
+    $m = [regex]::Match($line, '^\s*profiles:\s*\[(?<list>[^\]]*)\]\s*$')
+    if ($m.Success) {
+      foreach ($entry in ($m.Groups['list'].Value -split ',')) {
+        $name = $entry.Trim().Trim('"').Trim("'")
+        if ($name) { $declaredProfiles += $name }
+      }
+    }
+  }
+}
+$profiles = @()
+foreach ($name in (@($knownProfiles) + @($declaredProfiles) | Select-Object -Unique)) {
+  $profiles += '--profile'
+  $profiles += $name
+}
+
+function Remove-StackImages {
+  Write-Host ""
+  Write-Host "  Removing locally built images" -ForegroundColor Cyan
+  docker image ls --format '{{.Repository}}:{{.Tag}}' --filter 'reference=argus/*' |
+    ForEach-Object { docker image rm $_ 2>&1 | Out-Null; Write-Host "    removed $_" }
+}
 
 if (-not $DeleteData) {
   Write-Host ""
   Write-Host "  Stopping the Argus stack. Data is kept." -ForegroundColor Cyan
   Write-Host ""
   docker compose @profiles down --remove-orphans
+  $code = $LASTEXITCODE
+  if ($RemoveImages) { Remove-StackImages }
   Write-Host ""
   Write-Host "  Stopped. Every volume is still here -- `docker compose up -d` resumes where this left off." -ForegroundColor Green
   Write-Host ""
   Write-Host "  To destroy the data too:  pwsh -File ./down.ps1 -DeleteData" -ForegroundColor DarkGray
   Write-Host ""
-  exit $LASTEXITCODE
+  exit $code
 }
 
 # --- the destructive path ---------------------------------------------------
@@ -76,7 +97,9 @@ if (-not $volumes -or $volumes.Count -eq 0) {
   Write-Host "  No argus_* volumes exist. Nothing to destroy." -ForegroundColor Green
   Write-Host ""
   docker compose @profiles down --remove-orphans
-  exit $LASTEXITCODE
+  $code = $LASTEXITCODE
+  if ($RemoveImages) { Remove-StackImages }
+  exit $code
 }
 
 # Show size where the driver reports it, so "it is only a dev stack" is a
@@ -123,12 +146,7 @@ if ($typed -ne 'destroy argus data') {
 Write-Host ""
 docker compose @profiles down --volumes --remove-orphans
 
-if ($RemoveImages) {
-  Write-Host ""
-  Write-Host "  Removing locally built images" -ForegroundColor Cyan
-  docker image ls --format '{{.Repository}}:{{.Tag}}' --filter 'reference=argus/*' |
-    ForEach-Object { docker image rm $_ 2>&1 | Out-Null; Write-Host "    removed $_" }
-}
+if ($RemoveImages) { Remove-StackImages }
 
 Write-Host ""
 Write-Host "  Destroyed. Run bootstrap.ps1 -Rotate before bringing the stack up again:" -ForegroundColor Green
