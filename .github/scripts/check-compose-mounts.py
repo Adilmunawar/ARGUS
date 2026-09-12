@@ -26,6 +26,21 @@ def sources(service):
                 yield source
 
 
+def profile_gaps(services):
+    gaps = []
+    for name, service in services.items():
+        if not isinstance(service, dict):
+            continue
+        mine = set(service.get("profiles") or [])
+        if not mine:
+            continue
+        for dependency in (service.get("depends_on") or {}):
+            theirs = set((services.get(dependency) or {}).get("profiles") or [])
+            if theirs and not mine <= theirs:
+                gaps.append((name, sorted(mine), dependency, sorted(mine - theirs)))
+    return gaps
+
+
 def main():
     compose_path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "platform/compose/docker-compose.yml")
     root = compose_path.parent
@@ -51,11 +66,20 @@ def main():
     for name, source in sorted(set(generated)):
         print(f"  generated at runtime, not checked: {name} -> {source}")
 
+    gaps = profile_gaps(services)
+    for name, mine, dependency, absent in gaps:
+        print(f"::error file={compose_path}::service \"{name}\" is in {mine} and depends on \"{dependency}\", "
+              f"which is not enabled by {absent}, so those profiles cannot start on their own")
+
     if missing:
         print(f"{len(set(missing))} bind mount(s) point at paths that are not in the repository.")
         print("Docker would create an empty directory at each and the service would start unconfigured or crash-loop.")
+    if gaps:
+        print(f"{len(gaps)} dependency(ies) cross a profile boundary without the dependency joining that profile.")
+    if missing or gaps:
         return 1
-    print(f"clean: every bind mount in {len(services)} services resolves to a committed path")
+    print(f"clean: every bind mount in {len(services)} services resolves to a committed path, "
+          f"and every profile can start on its own")
     return 0
 
 

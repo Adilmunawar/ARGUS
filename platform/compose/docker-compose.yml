@@ -540,7 +540,7 @@ services:
 
   nats:
     <<: *hardening
-    profiles: [queues]
+    profiles: [queues, parity]
     # The -alpine suffix is LOAD-BEARING: the default tag is scratch-based with
     # no shell and no busybox, so the wget healthcheck silently becomes a
     # permanently-unhealthy container that blocks everything gated on it.
@@ -613,7 +613,7 @@ services:
 
   openbao:
     <<: *hardening
-    profiles: [secrets]
+    profiles: [secrets, parity]
     image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
     container_name: argus-openbao
     hostname: openbao
