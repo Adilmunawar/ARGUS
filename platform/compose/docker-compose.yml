@@ -624,7 +624,7 @@ services:
     mem_limit: 768m
     stop_grace_period: 60s
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:3100/ready | grep -q ready || exit 1"]
+      test: ["CMD", "/busybox/sh", "-c", "wget -q -O- http://127.0.0.1:3100/ready | grep -q ready"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -651,7 +651,7 @@ services:
       - ./services/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
     mem_limit: 256m
     depends_on:
-      loki: { condition: service_healthy }
+      loki: { condition: service_started }
       docker-socket-proxy: { condition: service_started }
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345; printf \"GET /-/ready HTTP/1.0\\r\\n\\r\\n\" >&3; head -n 1 <&3 | grep -q \" 200 \"'"]
@@ -720,7 +720,7 @@ services:
     mem_limit: 384m
     depends_on:
       prometheus: { condition: service_healthy }
-      loki:       { condition: service_healthy }
+      loki:       { condition: service_started }
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/api/health | grep -q '\"database\": *\"ok\"' || exit 1"]
       interval: 20s
@@ -828,7 +828,7 @@ services:
     depends_on:
       guac-storage-init: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4822 && printf '6.select,3.ssh;' >&3 && timeout 3 head -c 64 <&3 | grep -q args"]
+      test: ["CMD-SHELL", "printf '6.select,3.ssh;' | nc -w 3 127.0.0.1 4822 | grep -q args"]
       interval: 15s
       timeout: 8s
       retries: 4

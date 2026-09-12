@@ -31,8 +31,15 @@ gh auth status >/dev/null 2>&1 || die "Not signed in. Run: gh auth login"
 [[ -z "$(git status --porcelain)" ]] || die "You have uncommitted changes. Commit or stash them first."
 
 say "Checking for credentials before anything leaves this machine"
-if git log -p --all 2>/dev/null | grep -qE 'ghp_[A-Za-z0-9]{30,}|sk-ant-[A-Za-z0-9-]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----'; then
-  die "A credential-shaped string is in the git history. Do not push. Remove it, rewrite the history, and rotate the credential."
+history_hits="$(git log -p --all 2>/dev/null \
+  | grep -cE 'ghp_[A-Za-z0-9]{30,}|sk-ant-[A-Za-z0-9-]{30,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----' || true)"
+if [ "${history_hits:-0}" -gt 0 ]; then
+  die "$history_hits credential-shaped string(s) are in the git history. Do not push. Remove them, rewrite the history, and rotate every credential."
+fi
+
+if command -v python3 >/dev/null && [[ -f .github/scripts/scan-secrets.py ]]; then
+  python3 .github/scripts/scan-secrets.py >/dev/null \
+    || die "The working tree scanner found a credential. Run .github/scripts/scan-secrets.py to see it."
 fi
 echo "  clean: nothing credential-shaped in $(git rev-list --count HEAD) commits"
 
