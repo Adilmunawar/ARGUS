@@ -378,7 +378,7 @@ $alertFilled  = @{}
 foreach ($token in [regex]::Matches($alertText, '@@(?<k>[A-Z0-9_]+)@@')) {
   $placeholder = $token.Groups['k'].Value
   if ($alertFilled.ContainsKey($placeholder)) { continue }
-  $keys = if ($alertKeyFor.ContainsKey($placeholder)) { $alertKeyFor[$placeholder] } else { @($placeholder) }
+  $keys = @(if ($alertKeyFor.ContainsKey($placeholder)) { $alertKeyFor[$placeholder] } else { $placeholder })
   $v = $null
   foreach ($key in $keys) {
     if ($envValues.ContainsKey($key) -and $envValues[$key] -ne '') { $v = $envValues[$key]; break }

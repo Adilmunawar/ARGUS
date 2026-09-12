@@ -6,51 +6,60 @@ groups:
         expr: vector(1610612736)
         labels:
           job: prometheus
+          compose_service: prometheus
 
       - record: argus_service:mem_limit:bytes
         expr: vector(134217728)
         labels:
           job: alertmanager
+          compose_service: alertmanager
 
       - record: argus_service:mem_limit:bytes
         expr: vector(805306368)
         labels:
           job: loki
+          compose_service: loki
 
       - record: argus_service:mem_limit:bytes
         expr: vector(268435456)
         labels:
           job: alloy
+          compose_service: alloy
 
       - record: argus_service:mem_limit:bytes
         expr: vector(402653184)
         labels:
           job: grafana
+          compose_service: grafana
 
       - record: argus_service:mem_limit:bytes
         expr: vector(67108864)
         labels:
           job: node
+          compose_service: node-exporter
 
       - record: argus_service:mem_limit:bytes
         expr: vector(100663296)
         labels:
           job: postgres
+          compose_service: postgres-exporter
 
       - record: argus_service:mem_limit:bytes
         expr: vector(100663296)
         labels:
           job: garnet
+          compose_service: garnet-exporter
 
       - record: argus_service:mem_limit:bytes
         expr: vector(100663296)
         labels:
           job: nats
+          compose_service: nats-exporter
 
       - record: argus_service:mem_used:ratio_of_limit
         expr: |
           max by (job) (process_resident_memory_bytes)
-            / on (job) group_left()
+            / on (job) group_left (compose_service)
           argus_service:mem_limit:bytes
 
   - name: argus.alerts.memory
@@ -61,7 +70,7 @@ groups:
         labels:
           severity: ticket
         annotations:
-          summary: '{{ $labels.job }} is using {{ $value | humanizePercentage }} of its compose mem_limit'
+          summary: 'The {{ $labels.compose_service }} container is using {{ $value | humanizePercentage }} of its compose mem_limit'
           description: 'There is no cAdvisor in this stack, so this is the Go process RSS measured against the mem_limit docker-compose.yml sets for that service. RSS understates the cgroup total slightly, which means the real figure is worse than this one.'
 
       - alert: ArgusServiceAtMemLimit
@@ -70,7 +79,7 @@ groups:
         labels:
           severity: page
         annotations:
-          summary: '{{ $labels.job }} is about to be OOM-killed by its own mem_limit ({{ $value | humanizePercentage }})'
+          summary: 'The {{ $labels.compose_service }} container is about to be OOM-killed by its own mem_limit ({{ $value | humanizePercentage }})'
           description: 'Docker kills the container without warning and without a core dump. For prometheus that means a TSDB truncated mid-write; for loki, the WAL replays on restart. Raise mem_limit or shed load now.'
 
       - alert: ArgusHostMemoryPressure

@@ -2,12 +2,12 @@
 
 const CHECKSUM_MODES = {
   when_supported: {
-    requestChecksumCalculation: 'when_supported',
-    responseChecksumValidation: 'when_supported',
+    requestChecksumCalculation: 'WHEN_SUPPORTED',
+    responseChecksumValidation: 'WHEN_SUPPORTED',
   },
   when_required: {
-    requestChecksumCalculation: 'when_required',
-    responseChecksumValidation: 'when_required',
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   },
 };
 

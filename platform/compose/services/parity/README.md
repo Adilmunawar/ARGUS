@@ -15,8 +15,24 @@ route table, and reports `reference: absent`. A missing reference never fails a 
 
 ```
 docker compose --profile parity up -d
-docker compose exec parity node src/runner.js
+docker compose exec parity node src/runner.js --once
 ```
+
+The container's healthcheck polls `/healthz`, which only exists while the harness is
+serving, and the compose service passes no arguments. It therefore needs one of these two
+lines, which live in a file this directory does not own:
+
+```
+      ARGUS_PARITY_SERVE: "1"
+```
+
+```
+    command: ["node", "src/runner.js", "--serve"]
+```
+
+Without one of them the container performs a single run, exits, and the healthcheck never
+passes. `--once` on the `exec` above is what keeps a manual run from trying to bind 9781 a
+second time.
 
 Or on the Windows host, with the console's dependencies installed
 (`cd platform/console/server && npm ci`):
@@ -37,10 +53,15 @@ node src/runner.js
 | `--serve` | stay up, re-run every `ARGUS_PARITY_INTERVAL_MS`, and answer `/healthz` and `/latest.json` |
 | `--once` | force a single run even when `ARGUS_PARITY_SERVE` is set |
 
+An unrecognised argument, and an `--only` id matching no leg, are reported on stderr. They
+never silently run the whole suite, and never silently run nothing that then passes.
+
 ## Output
 
 A human-readable summary on stdout, and a machine-readable report at
-`ARGUS_PARITY_REPORT` (default `/var/lib/argus/parity/latest.json`). The output directory
+`ARGUS_PARITY_REPORT`, which defaults to `latest.json` inside `ARGUS_PARITY_RESULTS_DIR`
+(itself defaulting to `/var/lib/argus/parity`, the path the compose service mounts
+`argus_parity_results` at). The output directory
 is created recursively before the write, and the write is `.tmp` + `rename()` so the
 console can read `latest.json` while a run is in flight. A report the harness could not
 write is reported on stderr; it never aborts the run.
@@ -77,6 +98,10 @@ Three credentials, each doing as little as it can.
 | deny | `ARGUS_PARITY_DENY_ACCESS_KEY` / `_SECRET_KEY` | negative authorisation only, non-mutating operations only |
 | admin | `ARGUS_PARITY_ADMIN_ACCESS_KEY` / `_SECRET_KEY` | bucket CRUD, bucket encryption, public access block, ownership controls |
 
+Only the first two are configured by the compose service today, so the admin legs report
+`untestable (insufficient privilege)` until an `argus-parity-admin` identity holding global
+`Admin` exists and its key reaches the container.
+
 SeaweedFS 3.97 gates `PutBucketHandler`, `Put/Get/DeleteBucketEncryption`,
 `Put/Get/DeletePublicAccessBlock` and `Put/DeleteBucketOwnershipControls` on **global**
 `Admin`, not on `Admin:bucket`. The existing `argus-parity` identity therefore cannot
@@ -109,6 +134,13 @@ trade:
 A bucket default of COMPLIANCE would instead pile up permanently undeletable objects on
 the very volume the harness exists to prove is durable, with `docker compose down -v` as
 the only exit.
+
+## The recorded SeaweedFS version
+
+`GET /status` on the S3 gateway is a request for a bucket named `status` and answers `403`
+once identities are loaded, so it cannot report a version. The harness still asks, and
+falls back to `ARGUS_PARITY_SUBJECT_VERSION` when it learns nothing. A report that names no
+version is a report whose findings cannot be attributed to a release, so pass the tag in.
 
 ## The checksum axis
 
@@ -159,7 +191,10 @@ authorisation case is subject-only), and `title`.
 
 `ctx.expectAbsent(id, fn)` is for routes the recorded matrix says are not registered on
 SeaweedFS: it runs the subject only, and reports `absent` when the call fails at the route
-level or `diverge` when the subject unexpectedly answers.
+level or `diverge` when the subject unexpectedly answers. A `403` is neither: a refusal
+proves the request reached an authorisation decision, so it can say nothing about whether
+the route exists, and those cases report `untestable` instead of being folded into the
+safe pile.
 
 Return only **stable** values from `fn`. Etags, dates and version ids differ between
 implementations by design; comparing them would make every case diverge. Return shapes and

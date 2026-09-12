@@ -76,7 +76,7 @@ limits_config:
   max_query_length: 721h
   max_query_parallelism: 8
   retention_stream:
-    - selector: '{service_name="argus-console"}'
+    - selector: '{service_name="console"}'
       priority: 10
       period: 2160h
     - selector: '{level="debug"}'

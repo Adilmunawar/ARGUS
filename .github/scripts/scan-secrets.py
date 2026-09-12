@@ -50,6 +50,7 @@ ENV_LOOKUP = re.compile(
 REFERENCE = re.compile(r"\{\{.*\}\}|\$\{.*\}|%[A-Za-z_]+%|<[A-Za-z_][^>]*>")
 IDENTIFIER_ONLY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DOTTED_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)+$")
+EXPRESSION_CHARS = re.compile(r"[\[\]()]")
 HEX_OR_B64 = re.compile(r"^[A-Za-z0-9+/=_-]+$")
 
 LINE_COMMENT = {
@@ -162,6 +163,8 @@ def looks_like_secret(raw_value, in_query=False):
         return False
     if SLUG.match(value):
         return False
+    if not quoted and EXPRESSION_CHARS.search(value):
+        return False
     if value.startswith(("http://", "https://", "/", "./", "../")):
         return False
     if shannon(value) < MIN_ENTROPY:
@@ -235,6 +238,9 @@ SELF_TEST_FLAG = [
     ("a.hcl", 'token_policies = ["argus-console"]'),
     ("a.js", "getJson('/connz?auth=true&limit=64')"),
     ("a.js", "fetch(base + '/jsz?consumers=true&config=true')"),
+    ("a.js", "    const credentials = spec.identities[identity];"),
+    ("a.js", "const token = headers['x-argus-token'];"),
+    ("a.py", "password = config.get('database', 'password')"),
 ]
 
 SELF_TEST_CATCH = [

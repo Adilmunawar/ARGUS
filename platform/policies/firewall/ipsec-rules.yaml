@@ -16,7 +16,7 @@ rules:
   - { to: ca-issuing-01,         port: [80, 443, 135, "49152-65535"], from: [ALL-DOMAIN-MEMBERS] }   # CRL/OCSP, enrolment
   - { to: wef-01,                port: 5986,  from: [ALL-WINDOWS] }
   - { to: siem-01,               port: [1514, 1515], from: [ALL] }
-  - { to: "sf-*",                port: [5140, 5141, 3100, 5200, 3200], from: [gmsa-caddy$] }
+  - { to: "sf-*",                port: [5140, 5141, 3100, 5160, 5200, 3200], from: [gmsa-caddy$] }
   - { to: "sf-*",                port: [19000, 19080, "1025-1027"], from: [gmsa-sf$, gmsa-reconciler$, ADMIN-VPN] }   # SF cluster
   - { to: "hv-*",                port: 5986,  from: ["gmsa-reconciler$:JEA", "ADMIN-VPN:PAW"] }
   - { to: gpu-01,                port: [8265, 10001], from: [gmsa-caddy$, ADMIN-VPN] }   # Ray dashboard/serve via Caddy

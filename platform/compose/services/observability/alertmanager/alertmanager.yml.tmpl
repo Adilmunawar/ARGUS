@@ -2,13 +2,10 @@ global:
   resolve_timeout: 5m
   smtp_from: "@@SMTP_FROM@@"
   smtp_smarthost: "@@SMTP_SMARTHOST@@"
-  smtp_hello: "@@SMTP_HELLO@@"
-  smtp_auth_username: "@@SMTP_USERNAME@@"
-  smtp_auth_password: "@@SMTP_PASSWORD@@"
-  smtp_require_tls: true
+  smtp_require_tls: false
 
 route:
-  receiver: argus-console
+  receiver: argus-ticket
   group_by: [alertname, job, instance]
   group_wait: 30s
   group_interval: 5m
@@ -17,7 +14,6 @@ route:
     - receiver: argus-null
       matchers:
         - severity="debug"
-      continue: false
 
     - receiver: argus-page
       matchers:
@@ -25,7 +21,6 @@ route:
       group_wait: 10s
       group_interval: 5m
       repeat_interval: 1h
-      continue: true
 
     - receiver: argus-ticket
       matchers:
@@ -35,47 +30,22 @@ route:
       repeat_interval: 12h
       mute_time_intervals:
         - offhours
-      continue: true
-
-    - receiver: argus-console
-      matchers:
-        - severity=~"page|ticket|warning"
-      continue: false
+        - weekends
 
 receivers:
   - name: argus-null
-
-  - name: argus-console
-    webhook_configs:
-      - url: "@@CONSOLE_ALERT_WEBHOOK@@"
-        send_resolved: true
-        max_alerts: 64
-        timeout: 10s
-        http_config:
-          authorization:
-            type: Bearer
-            credentials_file: /run/secrets/console_alert_token
-          follow_redirects: false
-          enable_http2: false
 
   - name: argus-page
     email_configs:
       - to: "@@ONCALL_EMAIL@@"
         send_resolved: true
-        require_tls: true
         headers:
           Subject: '[ARGUS {{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .Alerts | len }})'
-    webhook_configs:
-      - url: "@@APPRISE_WEBHOOK@@"
-        send_resolved: true
-        max_alerts: 16
-        timeout: 15s
 
   - name: argus-ticket
     email_configs:
       - to: "@@PLATFORM_EMAIL@@"
         send_resolved: true
-        require_tls: true
         headers:
           Subject: '[ARGUS ticket] {{ .CommonLabels.alertname }} ({{ .Alerts | len }})'
 

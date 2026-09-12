@@ -11,7 +11,7 @@
     "literalSecretFreeValue": {
       "type": "string",
       "not": {
-        "pattern": "([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn])=[^{]"
+        "pattern": "([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee])=[^{]"
       }
     }
   },

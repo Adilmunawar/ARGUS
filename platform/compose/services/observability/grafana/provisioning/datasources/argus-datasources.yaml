@@ -47,10 +47,12 @@ datasources:
         - name: TraceID
           matcherType: label
           matcherRegex: trace_id
-          url: /explore?left=%7B%22datasource%22:%22argus-prometheus%22%7D
-          urlDisplayLabel: Trace
+          datasourceUid: argus-loki
+          url: '{compose_project="argus"} | trace_id="$${__value.raw}"'
+          urlDisplayLabel: Every line in this trace
         - name: RequestID
           matcherType: label
           matcherRegex: request_id
-          url: /explore
-          urlDisplayLabel: Request
+          datasourceUid: argus-loki
+          url: '{compose_project="argus"} | request_id="$${__value.raw}"'
+          urlDisplayLabel: Every line in this request

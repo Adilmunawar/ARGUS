@@ -18,6 +18,7 @@
         "query": { "label": "service_name", "refId": "service", "stream": "", "type": 1 },
         "refresh": 2,
         "includeAll": true,
+        "allValue": ".+",
         "multi": true,
         "current": { "text": "All", "value": "$__all" }
       },
@@ -27,6 +28,7 @@
         "type": "custom",
         "query": "error,warn,info,debug",
         "includeAll": true,
+        "allValue": ".*",
         "multi": true,
         "current": { "text": "All", "value": "$__all" }
       },
