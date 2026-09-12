@@ -1,0 +1,42 @@
+apiVersion: argus/v1
+kind: ServiceFabricApp
+metadata:
+  name: loan
+  display: Farmer Loan API
+  owner: zayan
+  repo: Zarz001/Zaraat-Dost-Loan-By-Zayan
+  tier: 1
+spec:
+  package:
+    bucket: argus-artifacts
+    key: loan/{{ version }}.sfpkg
+    signature: authenticode
+  identity: gmsa-loan$
+  services:
+    - name: LoanApi
+      type: GuestExecutable
+      exe: Loan.Api.exe
+      instances: 2
+      endpoints: [{ name: http, port: 5160 }]
+      env:
+        ASPNETCORE_URLS: http://0.0.0.0:5160
+        ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=FarmerFacilitatorDb;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;Application Name=LoanApi;"
+        Cache__Redis: garnet.argus.local:6379,ssl=true
+        Nats__Url: nats://nats.argus.local:4222
+        SurveyImages__S3Bucket: argus-survey-pictures
+        SurveyImages__S3Prefix: loans/
+        OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.argus.local:4318
+      resources: { cpuCores: 2, memoryMiB: 2048 }
+  ingress:
+    host: loans.zaraatdost.pk
+    upstream: LoanApi
+    waf: owasp-crs
+    rateLimit: { perIpPerMinute: 300 }
+  health:
+    probe: { path: /api/v1/health, upstream: LoanApi, intervalSeconds: 10 }
+    upgradePolicy:
+      failureAction: Rollback
+      healthCheckStableDurationSeconds: 120
+      upgradeDomainTimeoutSeconds: 900
+  egress:
+    allow: []

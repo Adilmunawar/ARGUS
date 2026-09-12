@@ -29,7 +29,37 @@ process.env.AWS_CONFIG_FILE = '/nonexistent/argus-smoke';
 process.env.AWS_EC2_METADATA_DISABLED = 'true';
 process.env.ARGUS_AWS_TIMEOUT_MS = '4000';
 
+const NATS_PORT = Number(process.env.SMOKE_NATS_PORT || 8898);
+process.env.ARGUS_NATS_MONITOR_URL = `http://127.0.0.1:${NATS_PORT}`;
+
 const { server } = require('../src/index.js');
+const cache = require('../src/cache.js');
+const env = require('../src/env.js');
+
+const JSZ_STUB = {
+  account_details: [{
+    name: 'ARGUS',
+    stream_detail: [
+      { name: 'ORDERS', consumer_detail: [{ name: 'packer', stream_name: 'ORDERS', config: {} }] },
+      {
+        name: 'EVENTS',
+        consumer_detail: [
+          { name: 'indexer', stream_name: 'EVENTS', config: {} },
+          { name: 'archiver', stream_name: 'EVENTS', config: {} }
+        ]
+      }
+    ]
+  }]
+};
+
+const natsStub = http.createServer((req, res) => {
+  const text = JSON.stringify(req.url.startsWith('/jsz') ? JSZ_STUB : {});
+  res.writeHead(req.url.startsWith('/jsz') ? 200 : 404, {
+    'content-type': 'application/json',
+    'content-length': Buffer.byteLength(text)
+  });
+  res.end(text);
+});
 
 const results = [];
 const check = (name, fn) => {
@@ -63,6 +93,7 @@ function send(method, path) {
 
 (async () => {
   await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
+  await new Promise((r) => natsStub.listen(NATS_PORT, '127.0.0.1', r));
 
   /* ------------------------------------------------------------- health --- */
   const health = await get('/api/health');
@@ -196,19 +227,143 @@ function send(method, path) {
     assert.strictEqual(health.headers['cache-control'], 'no-store');
   });
 
+  const everyConsumer = JSON.parse((await get('/api/queues/consumers')).body);
+  check('consumers reads every stream when none is named', () => {
+    assert.strictEqual(everyConsumer.ok, true, JSON.stringify(everyConsumer).slice(0, 200));
+    assert.strictEqual(everyConsumer.count, 3, `count ${everyConsumer.count}`);
+    assert.strictEqual(everyConsumer.stream, null);
+  });
+
+  const oneStream = JSON.parse((await get('/api/queues/consumers?stream=EVENTS')).body);
+  check('the consumers stream parameter is honoured, not ignored', () => {
+    assert.strictEqual(oneStream.stream, 'EVENTS');
+    assert.strictEqual(oneStream.count, 2, `count ${oneStream.count}`);
+    assert.ok(oneStream.consumers.every((c) => c.stream === 'EVENTS'), 'another stream leaked through the filter');
+  });
+
+  const noSuchStream = JSON.parse((await get('/api/queues/consumers?stream=NOPE')).body);
+  check('an unknown stream is answered for rather than shown as empty', () => {
+    assert.strictEqual(noSuchStream.consumers, null);
+    assert.match(noSuchStream.message, /NOPE/);
+  });
+
+  const overlongDb = await get('/api/pg/tables?database=' + 'd'.repeat(64));
+  check('a database name too long to exist is a 400', () => {
+    assert.strictEqual(overlongDb.status, 400, `status ${overlongDb.status}`);
+  });
+
+  const controlDb = await get('/api/pg/tables?database=' + encodeURIComponent('main\nmain'));
+  check('a database name carrying a control character is a 400', () => {
+    assert.strictEqual(controlDb.status, 400, `status ${controlDb.status}`);
+  });
+
+  const defaultDb = await get('/api/pg/tables');
+  check('tables with no database parameter still answers as data, not a 500', () => {
+    assert.strictEqual(defaultDb.status, 200, `status ${defaultDb.status}`);
+    assert.ok(JSON.parse(defaultDb.body).ok !== undefined);
+  });
+
+  const logged = [];
+  const realWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk, ...rest) => { logged.push(String(chunk)); return realWrite(chunk, ...rest); };
+  await get('/api/nope%0a2000-01-01T00:00:00.000Z%20error%20forged-entry');
+  process.stdout.write = realWrite;
+  check('a percent-encoded newline in a path cannot forge a log line', () => {
+    assert.ok(logged.length >= 1, 'the request was not logged at all');
+    for (const entry of logged) {
+      assert.strictEqual(entry.indexOf('\n'), entry.length - 1,
+        `a log entry carried an embedded newline: ${JSON.stringify(entry)}`);
+    }
+  });
+
+  process.env.ARGUS_AWS_TIMEOUT_MS = '0';
+  process.env.ARGUS_CACHE_TTL_MS = '-1';
+  delete require.cache[require.resolve('../src/config.js')];
+  const reloadedConfig = require('../src/config.js');
+  check('a zero timeout and a negative ttl fall back to their defaults', () => {
+    assert.strictEqual(reloadedConfig.awsTimeoutMs, 8000);
+    assert.strictEqual(reloadedConfig.cacheTtlMs, 30000);
+  });
+
+  const configRejections = [];
+  env.reportRejections((line) => configRejections.push(line));
+  check('a rejected configuration value is reported and names its variable', () => {
+    assert.strictEqual(configRejections.length, 2, configRejections.join(' | '));
+    assert.ok(configRejections.some((l) => l.includes('ARGUS_AWS_TIMEOUT_MS')), configRejections.join(' | '));
+    assert.ok(configRejections.some((l) => l.includes('ARGUS_CACHE_TTL_MS')), configRejections.join(' | '));
+  });
+
+  process.env.SMOKE_INT_MALFORMED = '8s';
+  process.env.SMOKE_INT_ZERO = '0';
+  process.env.SMOKE_INT_NEGATIVE = '-1';
+  process.env.SMOKE_INT_FRACTION = '1.5';
+  process.env.SMOKE_INT_GOOD = '250';
+  check('a malformed duration falls back rather than becoming NaN', () => {
+    assert.strictEqual(env.positiveInt('SMOKE_INT_MALFORMED', 8000), 8000);
+    assert.strictEqual(env.positiveInt('SMOKE_INT_ZERO', 8000), 8000);
+    assert.strictEqual(env.positiveInt('SMOKE_INT_NEGATIVE', 8000), 8000);
+    assert.strictEqual(env.positiveInt('SMOKE_INT_FRACTION', 8000), 8000);
+    assert.strictEqual(env.positiveInt('SMOKE_INT_UNSET', 8000), 8000);
+    assert.strictEqual(env.positiveInt('SMOKE_INT_GOOD', 8000), 250);
+  });
+
+  const reported = [];
+  env.reportRejections((line) => reported.push(line));
+  check('every rejected value is reported exactly once', () => {
+    assert.strictEqual(reported.length, 4, reported.join(' | '));
+    assert.ok(reported.some((l) => l.includes('SMOKE_INT_MALFORMED')), reported.join(' | '));
+    const again = [];
+    env.reportRejections((line) => again.push(line));
+    assert.strictEqual(again.length, 0, 'a rejection was reported a second time');
+  });
+
   /* --------------------------------------------------------------- cache --- */
-  const t0 = Date.now();
-  await get('/api/aws/instances');
-  const cold = Date.now() - t0;
-  const t1 = Date.now();
-  await get('/api/aws/instances');
-  const warm = Date.now() - t1;
-  check('a repeated read is served without another aws call', () => {
-    assert.ok(warm <= cold + 50, `cold ${cold}ms, warm ${warm}ms`);
+  let upstreamCalls = 0;
+  const counted = async () => { upstreamCalls += 1; return { call: upstreamCalls }; };
+  const cold = await cache.through('smoke:warmth', 60000, counted);
+  const warm = await cache.through('smoke:warmth', 60000, counted);
+  check('a repeated read is served without another upstream call', () => {
+    assert.strictEqual(upstreamCalls, 1, `the upstream was called ${upstreamCalls} times`);
+    assert.deepStrictEqual(warm.value, cold.value);
+    assert.strictEqual(warm.stale, false);
+  });
+
+  let inflightCalls = 0;
+  const slow = async () => { inflightCalls += 1; await new Promise((r) => setTimeout(r, 20)); return 'once'; };
+  const together = await Promise.all([
+    cache.through('smoke:flight', 60000, slow),
+    cache.through('smoke:flight', 60000, slow)
+  ]);
+  check('concurrent readers share one upstream call', () => {
+    assert.strictEqual(inflightCalls, 1, `the upstream was called ${inflightCalls} times`);
+    assert.strictEqual(together[0].value, 'once');
+    assert.strictEqual(together[1].value, 'once');
+  });
+
+  await cache.through('smoke:expiring', 1, async () => 'briefly');
+  await new Promise((r) => setTimeout(r, 40));
+  await cache.through('smoke:sweeper', 60000, async () => 'anything');
+  check('an entry past its retention is swept rather than kept for ever', () => {
+    assert.strictEqual(cache.has('smoke:expiring'), false, 'an expired entry survived a later miss');
+    assert.strictEqual(cache.has('smoke:sweeper'), true);
+  });
+
+  const overflow = cache.MAX_ENTRIES + 50;
+  for (let i = 0; i < overflow; i += 1) {
+    await cache.through('smoke:bound:' + i, 60000, async () => i);
+  }
+  check('distinct keys from a query string cannot grow the cache without bound', () => {
+    assert.ok(cache.size() <= cache.MAX_ENTRIES,
+      `${cache.size()} entries against a cap of ${cache.MAX_ENTRIES}`);
+  });
+  check('eviction takes the least recently used entry first', () => {
+    assert.strictEqual(cache.has('smoke:bound:0'), false, 'the oldest key survived eviction');
+    assert.strictEqual(cache.has('smoke:bound:' + (overflow - 1)), true, 'the newest key was evicted');
   });
 
   /* -------------------------------------------------------------- report --- */
   server.close();
+  natsStub.close();
 
   const failed = results.filter((r) => !r.ok);
   const pad = Math.max(...results.map((r) => r.name.length));

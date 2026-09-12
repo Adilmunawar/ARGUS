@@ -62,6 +62,13 @@ const STATE_DIR   = process.env.ARGUS_STATE_DIR || '/state';
 const PROFILE     = (process.env.ARGUS_PROFILE || 'dev').toLowerCase();
 const PROBE_BUCKET = process.env.ARGUS_WORM_PROBE_BUCKET || 'argus-worm-probe';
 const READY_TIMEOUT_MS = Number(process.env.ARGUS_S3_READY_TIMEOUT_MS || 120000);
+const REQUEST_TIMEOUT_MS = Number(process.env.ARGUS_S3_REQUEST_TIMEOUT_MS || 15000);
+const CONNECT_TIMEOUT_MS = Number(process.env.ARGUS_S3_CONNECT_TIMEOUT_MS || 3000);
+const RUN_DEADLINE_MS = Number(process.env.ARGUS_S3_RUN_DEADLINE_MS || 300000);
+const IDENTITIES_FILE = process.env.ARGUS_S3_IDENTITIES_FILE || '/config/s3.json';
+const IDENTITIES_FILE_PINNED = !!process.env.ARGUS_S3_IDENTITIES_FILE;
+const RUN_STARTED_AT = Date.now();
+const runDeadlineAt = () => RUN_STARTED_AT + RUN_DEADLINE_MS;
 
 /* Dev overrides exist so a developer is not locked out of their own test
    uploads for five weeks, with the only escape being to destroy the volume.
@@ -80,7 +87,8 @@ const s3 = new S3Client({
      which resolves bucket.seaweed-s3 -- a name no DNS in this network answers,
      failing as ENOTFOUND rather than as anything about S3. */
   forcePathStyle: true,
-  maxAttempts: 3
+  maxAttempts: 3,
+  requestHandler: { requestTimeout: REQUEST_TIMEOUT_MS, connectionTimeout: CONNECT_TIMEOUT_MS }
 });
 
 /* ------------------------------------------------------------------- utils --- */
@@ -96,6 +104,66 @@ function isNotFound(err) {
   return s === 404 || /NotFound|NoSuchBucket|NoSuchObjectLockConfiguration|NoSuchLifecycleConfiguration/i.test(errName(err));
 }
 
+const LOCK_MODES = new Set(['GOVERNANCE', 'COMPLIANCE']);
+
+function isRetentionDays(v) {
+  return Number.isInteger(v) && v > 0;
+}
+
+function describeLock(state) {
+  if (!state || !state.enabled) return 'no object lock';
+  if (state.years !== null && state.years !== undefined) {
+    return `${state.mode || 'unknown mode'}/${state.years}y`;
+  }
+  if (state.days === null || state.days === undefined) {
+    return `${state.mode || 'unknown mode'}/no default retention`;
+  }
+  return `${state.mode || 'unknown mode'}/${state.days}d`;
+}
+
+function lockMatches(state, want) {
+  return !!state && state.enabled === true
+    && state.mode === want.mode
+    && (state.years === null || state.years === undefined)
+    && Number(state.days) === Number(want.days);
+}
+
+function readIdentityScopes() {
+  let text;
+  try {
+    text = fs.readFileSync(IDENTITIES_FILE, 'utf8');
+  } catch (err) {
+    return { checked: false, path: IDENTITIES_FILE, reason: `could not be read (${err.code})`, scopes: null };
+  }
+
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch (err) {
+    return { checked: false, path: IDENTITIES_FILE, reason: `is not valid JSON (${err.message})`, scopes: null };
+  }
+
+  if (!doc || !Array.isArray(doc.identities)) {
+    return { checked: false, path: IDENTITIES_FILE, reason: 'has no identities array', scopes: null };
+  }
+
+  const scopes = new Map();
+  for (const identity of doc.identities) {
+    const who = (identity && identity.name) || '(unnamed identity)';
+    const actions = identity && Array.isArray(identity.actions) ? identity.actions : [];
+    for (const action of actions) {
+      const grant = String(action);
+      const colon = grant.indexOf(':');
+      if (colon < 0) continue;
+      const bucket = grant.slice(colon + 1).split('/')[0].trim();
+      if (!bucket) continue;
+      if (!scopes.has(bucket)) scopes.set(bucket, new Set());
+      scopes.get(bucket).add(who);
+    }
+  }
+  return { checked: true, path: IDENTITIES_FILE, reason: null, scopes };
+}
+
 /* --------------------------------------------------------------- readiness --- */
 
 /**
@@ -108,7 +176,7 @@ function isNotFound(err) {
  * gateway is up, has loaded s3.json, and accepts our credential.
  */
 async function waitForS3() {
-  const deadline = Date.now() + READY_TIMEOUT_MS;
+  const deadline = Math.min(Date.now() + READY_TIMEOUT_MS, runDeadlineAt());
   let attempt = 0;
   let last = null;
   while (Date.now() < deadline) {
@@ -125,9 +193,10 @@ async function waitForS3() {
       const status = err && err.$metadata && err.$metadata.httpStatusCode;
       if (status === 403 || /SignatureDoesNotMatch|InvalidAccessKeyId/i.test(errName(err))) {
         throw new Error(
-          `The S3 gateway rejected our credential (${errName(err)}). AWS_ACCESS_KEY_ID is ` +
-          `"${process.env.AWS_ACCESS_KEY_ID}". Check that seaweed-config wrote s3.json with this identity ` +
-          `and that ARGUS_S3_ADMIN_SECRET in .env matches it.`);
+          `The S3 gateway rejected our credential (${errName(err)}). The access key id comes from ` +
+          `AWS_ACCESS_KEY_ID and its secret from ARGUS_S3_ADMIN_SECRET; neither value is logged. ` +
+          `Check that seaweed-config wrote s3.json with that identity and that ARGUS_S3_ADMIN_SECRET ` +
+          `in .env matches the secret it wrote.`);
       }
       if (attempt === 1 || attempt % 5 === 0) {
         log(`waiting for ${ENDPOINT} (${errName(err)})`);
@@ -136,8 +205,8 @@ async function waitForS3() {
     }
   }
   throw new Error(
-    `The S3 gateway at ${ENDPOINT} did not accept a signed request within ${READY_TIMEOUT_MS} ms. ` +
-    `Last error: ${errName(last)} ${last && last.message}`);
+    `The S3 gateway at ${ENDPOINT} did not accept a signed request within ` +
+    `${Math.min(READY_TIMEOUT_MS, RUN_DEADLINE_MS)} ms. Last error: ${errName(last)} ${last && last.message}`);
 }
 
 /* ------------------------------------------------------------- bucket spec --- */
@@ -171,9 +240,29 @@ function readBucketSet() {
     const declaredLock = b.objectLock
       ? { mode: String(b.objectLock.mode || 'COMPLIANCE').toUpperCase(), days: Number(b.objectLock.days) }
       : null;
+    if (declaredLock && !isRetentionDays(declaredLock.days)) {
+      throw new Error(
+        `${b.name}: objectLock in ${BUCKETS_FILE} needs days to be a whole number greater than zero, got ` +
+        `${JSON.stringify(b.objectLock.days)}. Retention that cannot be compared cannot be verified.`);
+    }
+    if (declaredLock && !LOCK_MODES.has(declaredLock.mode)) {
+      throw new Error(
+        `${b.name}: objectLock mode in ${BUCKETS_FILE} must be one of ${[...LOCK_MODES].join(' or ')}, got ` +
+        `${JSON.stringify(b.objectLock.mode)}.`);
+    }
 
     let lock = declaredLock;
     if (declaredLock && PROFILE === 'dev') {
+      if (!isRetentionDays(DEV_LOCK_DAYS)) {
+        throw new Error(
+          `ARGUS_OBJECT_LOCK_DAYS must be a whole number of days greater than zero, got ` +
+          `${JSON.stringify(process.env.ARGUS_OBJECT_LOCK_DAYS)}.`);
+      }
+      if (!LOCK_MODES.has(DEV_LOCK_MODE)) {
+        throw new Error(
+          `ARGUS_DEV_LOCK_MODE must be one of ${[...LOCK_MODES].join(' or ')}, got ` +
+          `${JSON.stringify(process.env.ARGUS_DEV_LOCK_MODE)}.`);
+      }
       lock = { mode: DEV_LOCK_MODE, days: DEV_LOCK_DAYS };
     } else if (declaredLock && (DEV_LOCK_DAYS !== declaredLock.days || DEV_LOCK_MODE !== declaredLock.mode)) {
       /* Outside dev the overrides are ignored, loudly. Silently honouring them
@@ -214,10 +303,20 @@ async function getLockConfig(name) {
     const out = await s3.send(new GetObjectLockConfigurationCommand({ Bucket: name }));
     const rule = out.ObjectLockConfiguration && out.ObjectLockConfiguration.Rule;
     const d = rule && rule.DefaultRetention;
-    if (!d) return { enabled: !!(out.ObjectLockConfiguration && out.ObjectLockConfiguration.ObjectLockEnabled), mode: null, days: null };
-    return { enabled: true, mode: d.Mode || null, days: d.Days === undefined ? null : Number(d.Days) };
+    if (!d) {
+      return {
+        enabled: !!(out.ObjectLockConfiguration && out.ObjectLockConfiguration.ObjectLockEnabled),
+        mode: null, days: null, years: null
+      };
+    }
+    return {
+      enabled: true,
+      mode: d.Mode || null,
+      days: d.Days === undefined || d.Days === null ? null : Number(d.Days),
+      years: d.Years === undefined || d.Years === null ? null : Number(d.Years)
+    };
   } catch (err) {
-    if (isNotFound(err)) return { enabled: false, mode: null, days: null };
+    if (isNotFound(err)) return { enabled: false, mode: null, days: null, years: null };
     throw err;
   }
 }
@@ -232,6 +331,16 @@ async function getVersioning(name) {
   }
 }
 
+async function putLock(name, lock) {
+  await s3.send(new PutObjectLockConfigurationCommand({
+    Bucket: name,
+    ObjectLockConfiguration: {
+      ObjectLockEnabled: 'Enabled',
+      Rule: { DefaultRetention: { Mode: lock.mode, Days: lock.days } }
+    }
+  }));
+}
+
 /**
  * Bring one bucket to its declared state, or report why it cannot be.
  *
@@ -240,6 +349,7 @@ async function getVersioning(name) {
  * every problem at once rather than fixing them one boot at a time.
  */
 async function applyBucket(spec, problems) {
+  const problemsBefore = problems.length;
   const existed = await bucketExists(spec.name);
 
   if (!existed) {
@@ -258,16 +368,12 @@ async function applyBucket(spec, problems) {
     }));
   }
 
-  let lockState = { enabled: false, mode: null, days: null };
+  let lockState = { enabled: false, mode: null, days: null, years: null };
+  let lockRepaired = false;
   if (spec.lock) {
+    const want = `${spec.lock.mode}/${spec.lock.days}d`;
     if (!existed) {
-      await s3.send(new PutObjectLockConfigurationCommand({
-        Bucket: spec.name,
-        ObjectLockConfiguration: {
-          ObjectLockEnabled: 'Enabled',
-          Rule: { DefaultRetention: { Mode: spec.lock.mode, Days: spec.lock.days } }
-        }
-      }));
+      await putLock(spec.name, spec.lock);
     }
     lockState = await getLockConfig(spec.name);
 
@@ -280,9 +386,31 @@ async function applyBucket(spec, problems) {
         `${spec.name}: buckets.yaml declares Object Lock ${spec.declaredLock.mode}/${spec.declaredLock.days}d, ` +
         `but the bucket exists WITHOUT it. Object Lock cannot be enabled after creation. ` +
         `The bucket must be recreated (destroying its contents) or the declaration removed.`);
-    } else if (spec.lock.mode && lockState.mode && lockState.mode !== spec.lock.mode) {
-      problems.push(
-        `${spec.name}: default retention mode is ${lockState.mode}, expected ${spec.lock.mode}.`);
+    } else if (!lockMatches(lockState, spec.lock)) {
+      const before = describeLock(lockState);
+      log(`${spec.name}: default retention is ${before}, ${want} is required; re-applying it`);
+      let reapplyError = null;
+      try {
+        await putLock(spec.name, spec.lock);
+        lockState = await getLockConfig(spec.name);
+      } catch (err) {
+        reapplyError = err;
+      }
+      if (reapplyError) {
+        problems.push(
+          `${spec.name}: default retention is ${before} but ${want} is required` +
+          `${spec.declaredLock ? ` (buckets.yaml declares ${spec.declaredLock.mode}/${spec.declaredLock.days}d)` : ''}, ` +
+          `and re-applying it was refused (${errName(reapplyError)}: ${reapplyError && reapplyError.message}). ` +
+          `Objects written to this bucket are retained for the wrong period.`);
+      } else if (!lockMatches(lockState, spec.lock)) {
+        problems.push(
+          `${spec.name}: default retention is ${describeLock(lockState)} after re-applying ${want}. ` +
+          `The gateway accepted the configuration and did not store it, so the retention this bucket ` +
+          `actually enforces is not the declared one.`);
+      } else {
+        lockRepaired = existed;
+        log(`${spec.name}: default retention repaired from ${before} to ${describeLock(lockState)}`);
+      }
     }
   } else {
     lockState = await getLockConfig(spec.name);
@@ -320,13 +448,22 @@ async function applyBucket(spec, problems) {
     problems.push(`${spec.name}: versioning was requested but the bucket reports it disabled.`);
   }
 
+  const failed = problems.length > problemsBefore;
+  const status = failed ? 'failed'
+    : !existed ? 'created'
+    : lockRepaired ? 'repaired'
+    : 'verified';
+
   return {
     name: spec.name,
+    status,
     created: !existed,
+    repaired: lockRepaired,
     versioning,
     lock: lockState.enabled
-      ? { mode: lockState.mode, days: lockState.days,
-          declared: spec.declaredLock ? `${spec.declaredLock.mode}/${spec.declaredLock.days}d` : null }
+      ? { mode: lockState.mode, days: lockState.days, years: lockState.years,
+          declared: spec.declaredLock ? `${spec.declaredLock.mode}/${spec.declaredLock.days}d` : null,
+          required: spec.lock ? `${spec.lock.mode}/${spec.lock.days}d` : null }
       : null,
     lifecycleDays: spec.lifecycleDays
   };
@@ -425,8 +562,11 @@ function writeState(name, value) {
   }
 }
 
-async function main() {
+async function run() {
   log(`endpoint ${ENDPOINT}, region ${REGION}, profile ${PROFILE}`);
+
+  const problems = [];
+  let runFailures = 0;
 
   const specs = readBucketSet();
   log(`${specs.length} bucket(s) declared in ${BUCKETS_FILE}`);
@@ -438,9 +578,36 @@ async function main() {
     }
   }
 
+  const declaredNames = new Set(specs.map((s) => s.name));
+  const identityScopes = readIdentityScopes();
+  const undeclaredScopes = [];
+  if (identityScopes.checked) {
+    for (const [bucket, identities] of identityScopes.scopes) {
+      if (declaredNames.has(bucket) || bucket === PROBE_BUCKET) continue;
+      undeclaredScopes.push({ bucket, identities: [...identities].sort() });
+    }
+    for (const scope of undeclaredScopes) {
+      runFailures += 1;
+      problems.push(
+        `${scope.bucket}: ${scope.identities.join(', ')} in ${identityScopes.path} ` +
+        `${scope.identities.length === 1 ? 'is' : 'are'} scoped to this bucket, but ${BUCKETS_FILE} does not ` +
+        `declare it, so nothing creates it. Every call those identities make against it fails at runtime. ` +
+        `Declare the bucket in buckets.yaml or drop the grant.`);
+    }
+    log(`${identityScopes.scopes.size} bucket(s) referenced by identities in ${identityScopes.path}`);
+  } else if (IDENTITIES_FILE_PINNED) {
+    runFailures += 1;
+    problems.push(
+      `ARGUS_S3_IDENTITIES_FILE points at ${identityScopes.path}, which ${identityScopes.reason}. ` +
+      `Without it a bucket an identity is scoped to but buckets.yaml does not declare cannot be reported.`);
+  } else {
+    warn(`${identityScopes.path} ${identityScopes.reason}, so buckets that identities are scoped to but ` +
+         `${BUCKETS_FILE} does not declare CANNOT be detected on this run. Mount the gateway's s3.json ` +
+         `read-only at ${identityScopes.path}, or point ARGUS_S3_IDENTITIES_FILE at it.`);
+  }
+
   await waitForS3();
 
-  const problems = [];
   const rows = [];
   for (const spec of specs) {
     rows.push(await applyBucket(spec, problems));
@@ -475,7 +642,6 @@ async function main() {
   }
 
   if (actual) {
-    const declaredNames = new Set(specs.map((s) => s.name));
     const undeclared = actual.map((b) => b.name)
       .filter((n) => !declaredNames.has(n) && n !== PROBE_BUCKET);
     if (undeclared.length) {
@@ -493,39 +659,77 @@ async function main() {
     actual,
     actualError,
     probeBucket: PROBE_BUCKET,
+    identityScopes: {
+      path: identityScopes.path,
+      checked: identityScopes.checked,
+      reason: identityScopes.reason,
+      undeclared: undeclaredScopes
+    },
     problems,
     worm
   };
   writeState('storage-init.json', report);
   writeState('worm-verdict.json', worm);
 
+  const counts = { created: 0, verified: 0, repaired: 0, failed: 0 };
+  for (const r of rows) counts[r.status] += 1;
+
   console.log('');
-  const pad = Math.max(...rows.map((r) => r.name.length));
+  const pad = rows.length ? Math.max(...rows.map((r) => r.name.length)) : 0;
+  const statusPad = rows.length ? Math.max(...rows.map((r) => r.status.length)) : 0;
   for (const r of rows) {
     const bits = [];
     if (r.versioning) bits.push('versioned');
-    if (r.lock) bits.push(`lock ${r.lock.mode}/${r.lock.days}d${r.lock.declared && r.lock.declared !== `${r.lock.mode}/${r.lock.days}d` ? ` (declared ${r.lock.declared})` : ''}`);
+    if (r.lock) bits.push(`lock ${describeLock({ enabled: true, mode: r.lock.mode, days: r.lock.days, years: r.lock.years })}${r.lock.declared && r.lock.declared !== `${r.lock.mode}/${r.lock.days}d` ? ` (declared ${r.lock.declared})` : ''}`);
     if (r.lifecycleDays) bits.push(`expire ${r.lifecycleDays}d`);
-    console.log(`  ${r.created ? '+' : ' '} ${r.name.padEnd(pad)}  ${bits.join(', ') || '-'}`);
+    console.log(`  ${r.status.padEnd(statusPad)}  ${r.name.padEnd(pad)}  ${bits.join(', ') || '-'}`);
   }
   console.log('');
+  console.log(`  ${counts.created} created, ${counts.verified} verified, ${counts.repaired} repaired, ` +
+              `${counts.failed} failed`);
+  console.log('');
+
+  let failureCount = counts.failed + runFailures;
+  if (problems.length && failureCount === 0) failureCount = problems.length;
 
   if (problems.length) {
-    console.error(`  ${problems.length} problem(s) that this script cannot fix:\n`);
+    console.error(`  ${problems.length} problem(s) this script could not resolve:\n`);
     for (const p of problems) console.error(`   - ${p}`);
     console.error('');
     /* Non-zero, so service_completed_successfully holds the console back. A
        dashboard that renders a green shield over an unlocked backup bucket is
        worse than a stack that refuses to start. */
-    process.exit(1);
+    return failureCount;
   }
 
   log('object storage ready');
+  return 0;
 }
 
-main().catch((err) => {
-  console.error('');
-  console.error('[storage-init] FAILED:', err && err.message ? err.message : err);
-  console.error('');
-  process.exit(1);
-});
+async function main() {
+  let timer = null;
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(
+      `The run did not finish within ARGUS_S3_RUN_DEADLINE_MS (${RUN_DEADLINE_MS} ms). Something after the ` +
+      `readiness check stopped answering; the console is gated on this container, so it exits rather than ` +
+      `waiting for ever.`)), RUN_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([run(), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+main()
+  .then((failures) => {
+    try { s3.destroy(); } catch (err) { void err; }
+    process.exitCode = Math.min(failures, 125);
+  })
+  .catch((err) => {
+    console.error('');
+    console.error('[storage-init] FAILED:', err && err.message ? err.message : err);
+    console.error('');
+    try { s3.destroy(); } catch (e) { void e; }
+    process.exit(1);
+  });

@@ -45,6 +45,7 @@
 const fs = require('node:fs');
 
 const cache = require('./cache');
+const { positiveInt } = require('./env');
 
 /* ------------------------------------------------------------------ config --- */
 
@@ -75,7 +76,7 @@ const PASSWORD = process.env.ARGUS_PG_PASSWORD;
 const ADMIN_DB = process.env.ARGUS_PG_DATABASE || 'postgres';
 
 /* Shared with every other upstream in this console so one knob moves them all. */
-const TIMEOUT_MS = Number(process.env.ARGUS_UPSTREAM_TIMEOUT_MS || 8000);
+const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
 
 /* The name this process shows up as in pg_stat_activity, and therefore on its
    own activity screen. Fixed, not derived from a request, so an operator
@@ -389,13 +390,13 @@ function configurationProblem() {
 }
 
 /** A reader that reports why it could not answer instead of throwing. */
-function guarded(key, ttlMs, producer) {
+function guarded(key, ttlMs, producer, keyFor) {
   return async function (...args) {
     const problem = configurationProblem();
     if (problem) return { ok: false, ...problem, at: new Date().toISOString() };
+    const suffix = keyFor ? ':' + keyFor(...args) : (args.length ? ':' + JSON.stringify(args) : '');
     try {
-      const r = await cache.through(key + (args.length ? ':' + JSON.stringify(args) : ''), ttlMs,
-        () => producer(...args));
+      const r = await cache.through(key + suffix, ttlMs, () => producer(...args));
       return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
     } catch (err) {
       return { ok: false, ...classify(err) };
@@ -1520,10 +1521,19 @@ const RELKIND = { r: 'table', p: 'partitioned table', m: 'materialized view' };
  * grants in 20-grants.sql list six databases by name and no others, so asking
  * for a seventh is a question with an answer, not an error.
  */
-const tables = guarded('pg:tables', 20000, async (options) => {
+function tableTarget(options) {
   const opts = options || {};
-  const database = typeof opts.database === 'string' && opts.database ? opts.database : ADMIN_DB;
-  const limit = Math.min(Math.max(Number(opts.limit) || 50, 1), 500);
+  return typeof opts.database === 'string' && opts.database ? opts.database : ADMIN_DB;
+}
+
+function tableLimit(options) {
+  const opts = options || {};
+  return Math.min(Math.max(Number(opts.limit) || 50, 1), 500);
+}
+
+const tables = guarded('pg:tables', 20000, async (options) => {
+  const database = tableTarget(options);
+  const limit = tableLimit(options);
 
   /* Bound as a value against the admin connection. Nothing about the requested
      name reaches a statement anywhere else in this function. */
@@ -1639,7 +1649,7 @@ const tables = guarded('pg:tables', 20000, async (options) => {
       'reports null rather than zero.',
     at: new Date().toISOString()
   };
-});
+}, (options) => `${tableTarget(options)}:${tableLimit(options)}`);
 
 /* -------------------------------------------------------------- health ----- */
 

@@ -34,6 +34,7 @@ const YAML = require('yaml');
 
 const config = require('./config');
 const cache = require('./cache');
+const { positiveInt } = require('./env');
 
 /* ------------------------------------------------------------------ config --- */
 
@@ -43,7 +44,7 @@ const S3_ENDPOINT = process.env.ARGUS_S3_ENDPOINT || 'http://seaweed-s3:8333';
 const S3_REGION = process.env.ARGUS_S3_REGION || 'us-east-1';
 const BUCKETS_FILE = process.env.ARGUS_BUCKETS_FILE || '/config/buckets.yaml';
 const STATE_DIR = process.env.ARGUS_STATE_DIR || '/state';
-const TIMEOUT_MS = Number(process.env.ARGUS_UPSTREAM_TIMEOUT_MS || 8000);
+const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
 
 /* The master hands out CONTAINER-INTERNAL volume-server URLs (seaweed-volume:8080).
    In network that is exactly right. Running the console on the Windows host for
@@ -680,6 +681,21 @@ function decodeMaybe(s) {
  * real", the repair switches itself off, and nothing here needs changing.
  */
 const keyRepairVerdict = new Map();
+const KEY_REPAIR_VERDICT_TTL_MS = 10 * 60 * 1000;
+
+function rememberedVerdict(bucket) {
+  const held = keyRepairVerdict.get(bucket);
+  if (!held) return undefined;
+  if (Date.now() - held.at > KEY_REPAIR_VERDICT_TTL_MS) {
+    keyRepairVerdict.delete(bucket);
+    return undefined;
+  }
+  return held.verdict;
+}
+
+function rememberVerdict(bucket, verdict) {
+  keyRepairVerdict.set(bucket, { verdict, at: Date.now() });
+}
 
 function undoubleKey(listed) {
   const cut = listed.lastIndexOf('/');
@@ -698,28 +714,36 @@ function undoubleKey(listed) {
  * Anything less certain leaves the keys alone: showing a name that is wrong is
  * bad, and silently renaming a name that was right is worse.
  */
-async function needsKeyRepair(bucket, sampleListedKey) {
-  if (keyRepairVerdict.has(bucket)) return keyRepairVerdict.get(bucket);
-
-  const candidate = undoubleKey(sampleListedKey);
-  if (!candidate) { keyRepairVerdict.set(bucket, false); return false; }
-
+async function objectExists(bucket, key) {
   const c = s3();
   const m = s3sdk();
-  let listedExists = true;
-  let candidateExists = false;
   try {
-    await c.send(new m.HeadObjectCommand({ Bucket: bucket, Key: sampleListedKey }));
+    await c.send(new m.HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
   } catch (err) {
-    listedExists = false;
+    if (classify(err).reason === 'not-found') return false;
+    throw err;
   }
+}
+
+async function needsKeyRepair(bucket, sampleListedKey) {
+  const remembered = rememberedVerdict(bucket);
+  if (remembered !== undefined) return remembered;
+
+  const candidate = undoubleKey(sampleListedKey);
+  if (!candidate) { rememberVerdict(bucket, false); return false; }
+
+  let listedExists;
+  let candidateExists;
   try {
-    await c.send(new m.HeadObjectCommand({ Bucket: bucket, Key: candidate }));
-    candidateExists = true;
-  } catch (err) { /* leave false */ }
+    listedExists = await objectExists(bucket, sampleListedKey);
+    candidateExists = await objectExists(bucket, candidate);
+  } catch (err) {
+    return false;
+  }
 
   const verdict = candidateExists && !listedExists;
-  keyRepairVerdict.set(bucket, verdict);
+  rememberVerdict(bucket, verdict);
   return verdict;
 }
 
@@ -736,7 +760,7 @@ async function listObjects({ bucket, prefix, cursor }) {
      It has to be flat: at a nested prefix the buggy server returns only
      CommonPrefixes and no keys at all, so a delimiter listing has nothing in it
      to detect on. */
-  let repaired = keyRepairVerdict.get(bucket);
+  let repaired = rememberedVerdict(bucket);
   if (repaired === undefined) {
     const sniff = await c.send(new m.ListObjectsV2Command({
       Bucket: bucket, Prefix: p || undefined, MaxKeys: 1, EncodingType: 'url'
@@ -960,14 +984,37 @@ async function previewObject({ bucket, key }) {
   const m = s3sdk();
 
   const head = await c.send(new m.HeadObjectCommand({ Bucket: bucket, Key: key }));
-  if (head.ContentLength > PREVIEW_MAX_BYTES) {
-    throw Object.assign(
-      new Error(`That object is ${Math.round(head.ContentLength / 1048576)} MB. Preview is capped at 5 MB.`),
-      { name: 'TooLarge' });
+  const declaredBytes = Number.isFinite(head.ContentLength) ? head.ContentLength : null;
+  if (declaredBytes !== null && declaredBytes > PREVIEW_MAX_BYTES) {
+    throw tooLarge(`That object is ${Math.round(declaredBytes / 1048576)} MB.`);
   }
 
   const out = await c.send(new m.GetObjectCommand({ Bucket: bucket, Key: key }));
-  return { stream: out.Body, contentType: type, contentLength: head.ContentLength };
+  const body = await readCapped(out.Body, PREVIEW_MAX_BYTES);
+  return { body, contentType: type, contentLength: body.length, declaredBytes };
+}
+
+function tooLarge(what) {
+  return Object.assign(
+    new Error(`${what} Preview is capped at ${Math.round(PREVIEW_MAX_BYTES / 1048576)} MB.`),
+    { name: 'TooLarge' });
+}
+
+async function readCapped(source, maxBytes) {
+  if (!source) return Buffer.alloc(0);
+  const chunks = [];
+  let read = 0;
+  try {
+    for await (const chunk of source) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      read += buf.length;
+      if (read > maxBytes) throw tooLarge('That object exceeded the preview cap while it was being read.');
+      chunks.push(buf);
+    }
+  } finally {
+    if (typeof source.destroy === 'function') source.destroy();
+  }
+  return Buffer.concat(chunks, read);
 }
 
 /* ------------------------------------------------------------ prefix size --- */

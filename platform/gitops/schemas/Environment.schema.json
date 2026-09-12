@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Environment",
+  "type": "object",
+  "required": ["apiVersion", "kind", "name", "apps"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "const": "argus/v1" },
+    "kind": { "const": "Environment" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "apps": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9-]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["version", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]*$" },
+          "sha256": { "type": "string", "pattern": "^([0-9a-f]{64}|<[A-Za-z ]+>)$" }
+        }
+      }
+    }
+  }
+}

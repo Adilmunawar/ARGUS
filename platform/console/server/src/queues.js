@@ -57,6 +57,7 @@ const https = require('node:https');
 const { URL } = require('node:url');
 
 const cache = require('./cache');
+const { positiveInt } = require('./env');
 
 /* ------------------------------------------------------------------ config --- */
 
@@ -68,14 +69,14 @@ const MONITOR = (process.env.ARGUS_NATS_MONITOR_URL || 'http://nats:8222').repla
    different fix. Named here so that fault can be told apart from the others. */
 const ACCOUNT = process.env.ARGUS_NATS_ACCOUNT || 'ARGUS';
 
-const TIMEOUT_MS = Number(process.env.ARGUS_UPSTREAM_TIMEOUT_MS || 8000);
+const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
 
 /* Deliberately shorter than the storage TTLs. Capacity moves over hours;
    consumer lag moves over seconds, and a lag figure half a minute old is the
    one number on this screen that can be stale enough to send somebody after
    the wrong problem. The reads it caches are a local HTTP GET against a
    container on the same bridge, so the cost of the shorter window is small. */
-const TTL_MS = Number(process.env.ARGUS_QUEUE_CACHE_TTL_MS || 5000);
+const TTL_MS = positiveInt('ARGUS_QUEUE_CACHE_TTL_MS', 5000);
 
 /* One malformed upstream must not take the console's heap with it. /jsz with
    consumers and config asked for is the largest document here and grows with
@@ -876,13 +877,17 @@ const streams = reader(async () => {
  *                a redelivery does NOT prove the work failed -- the common case
  *                is that the work succeeded and the ack was late or lost.
  */
-const consumers = reader(async () => {
+const consumers = reader(async (options) => {
+  const opts = options || {};
+  const wanted = typeof opts.stream === 'string' && opts.stream.trim() ? opts.stream.trim() : null;
+
   const snap = await jszSnapshot();
   const jsz = snap.value.json || {};
   const resolved = resolveAccount(jsz);
 
   const base = {
     account: ACCOUNT,
+    stream: wanted,
     jetStream: resolved.state,
     cachedAt: snap.cachedAt,
     stale: !!snap.stale,
@@ -893,7 +898,19 @@ const consumers = reader(async () => {
     return { ...base, consumers: null, count: null, message: resolved.message };
   }
 
-  const details = streamDetails(resolved) || [];
+  const all = streamDetails(resolved) || [];
+  const details = wanted ? all.filter((s) => s && s.name === wanted) : all;
+
+  if (wanted && !details.length) {
+    return {
+      ...base,
+      consumers: null,
+      count: null,
+      message: `Account ${ACCOUNT} has no stream called "${wanted}". Its streams are ` +
+        `${all.map((s) => s && s.name).filter(Boolean).join(', ') || '(none)'}.`
+    };
+  }
+
   const rows = [];
   const streamsWithoutConsumers = [];
 

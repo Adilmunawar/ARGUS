@@ -27,6 +27,7 @@ const fs = require('fs');
 const path = require('path');
 
 const config = require('./config');
+const env = require('./env');
 const host = require('./host');
 const aws = require('./aws');
 const storage = require('./storage');
@@ -34,6 +35,8 @@ const pg = require('./pg');
 const garnet = require('./garnet');
 const queues = require('./queues');
 const secrets = require('./secrets');
+
+env.reportRejections();
 
 const STARTED = new Date();
 
@@ -75,6 +78,32 @@ function statusForError(err) {
    "%zz". A request for one of those must be a 404, not an unhandled throw. */
 function safeDecode(s) {
   try { return decodeURIComponent(s); } catch (err) { return s; }
+}
+
+const PG_NAME_MAX_BYTES = 63;
+
+function rejected(message) {
+  return Object.assign(new Error(message), { name: 'ValidationError' });
+}
+
+async function pgTableOptions(q) {
+  const requested = q && typeof q.database === 'string' ? q.database.trim() : '';
+  if (!requested) return {};
+
+  if (Buffer.byteLength(requested) > PG_NAME_MAX_BYTES) {
+    throw rejected(`A PostgreSQL database name is at most ${PG_NAME_MAX_BYTES} bytes, so this one names nothing.`);
+  }
+  if (/[\u0000-\u001f\u007f]/.test(requested)) {
+    throw rejected('A PostgreSQL database name cannot contain control characters.');
+  }
+
+  const known = await pg.databases();
+  const visible = known && known.ok === true && Array.isArray(known.databases) ? known.databases : null;
+  if (visible && !visible.some((d) => d && d.name === requested)) {
+    throw rejected(`This cluster has no database called "${requested}". ` +
+      'GET /api/pg/databases lists the ones it does have.');
+  }
+  return { database: requested };
 }
 
 /* ------------------------------------------------------------------ routes --- */
@@ -137,7 +166,7 @@ const routes = {
      the uploader, an .html in a bucket is stored XSS against the control
      plane. */
   'GET /api/storage/preview': async (q) => {
-    const { stream, contentType, contentLength } = await storage.previewObject({ bucket: q.bucket, key: q.key });
+    const { body, contentType, contentLength } = await storage.previewObject({ bucket: q.bucket, key: q.key });
     return new RawResponse({
       status: 200,
       headers: {
@@ -149,7 +178,7 @@ const routes = {
         'cache-control': 'private, max-age=60',
         'referrer-policy': 'no-referrer'
       },
-      stream
+      body
     });
   },
 
@@ -165,7 +194,7 @@ const routes = {
   'GET /api/pg/activity': async () => pg.activity(),
   'GET /api/pg/statements': async () => pg.statements(),
   'GET /api/pg/replication': async () => pg.replication(),
-  'GET /api/pg/tables': async (q) => pg.tables(q && q.database),
+  'GET /api/pg/tables': async (q) => pg.tables(await pgTableOptions(q)),
   'GET /api/pg/health': async () => pg.health(),
 
   'GET /api/cache/server': async () => garnet.serverInfo(),
@@ -177,7 +206,7 @@ const routes = {
   'GET /api/queues/server': async () => queues.server(),
   'GET /api/queues/account': async () => queues.account(),
   'GET /api/queues/streams': async () => queues.streams(),
-  'GET /api/queues/consumers': async (q) => queues.consumers(q && q.stream),
+  'GET /api/queues/consumers': async (q) => queues.consumers({ stream: q && q.stream }),
   'GET /api/queues/health': async () => queues.health(),
 
   'GET /api/secrets/health': async () => secrets.health(),
@@ -316,9 +345,16 @@ const server = http.createServer(async (req, res) => {
 });
 
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 };
+
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
+
+function escapeControl(ch) {
+  return '\\x' + ch.charCodeAt(0).toString(16).padStart(2, '0');
+}
+
 function log(level, msg) {
   if ((LEVELS[level] ?? 2) > (LEVELS[config.logLevel] ?? 2)) return;
-  process.stdout.write(`${new Date().toISOString()} ${level.padEnd(5)} ${msg}\n`);
+  process.stdout.write(`${new Date().toISOString()} ${level.padEnd(5)} ${String(msg).replace(CONTROL_CHARS, escapeControl)}\n`);
 }
 
 /* Shut down on a signal rather than being killed mid-response, so a rolling

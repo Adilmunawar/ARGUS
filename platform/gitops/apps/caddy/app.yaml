@@ -1,0 +1,34 @@
+apiVersion: argus/v1
+kind: ServiceFabricApp
+metadata:
+  name: caddy
+  display: Caddy edge
+  owner: platform
+  tier: 1
+spec:
+  package:
+    bucket: argus-artifacts
+    key: caddy/{{ version }}.sfpkg
+    signature: authenticode
+  identity: gmsa-caddy$
+  services:
+    - name: Caddy
+      type: GuestExecutable
+      exe: caddy.exe
+      args: run --config Caddyfile
+      instances: 2
+      endpoints:
+        - { name: https, port: 443 }
+        - { name: http, port: 80 }
+      env:
+        XDG_DATA_HOME: D:\caddy\data
+        HTTPS_PROXY: http://egress.argus.local:3128
+      resources: { cpuCores: 2, memoryMiB: 2048 }
+  health:
+    probe: { path: /healthz, upstream: Caddy, intervalSeconds: 10 }
+    upgradePolicy:
+      failureAction: Rollback
+      healthCheckStableDurationSeconds: 120
+      upgradeDomainTimeoutSeconds: 900
+  egress:
+    allow: [acme-v02.api.letsencrypt.org]

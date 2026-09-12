@@ -3,6 +3,18 @@
   "title": "ServiceFabricApp",
   "type": "object",
   "required": ["apiVersion", "kind", "metadata", "spec"],
+  "$defs": {
+    "openbaoReference": {
+      "type": "string",
+      "pattern": "^\\{\\{ *openbao:[A-Za-z0-9/_.:-]+ *\\}\\}$"
+    },
+    "literalSecretFreeValue": {
+      "type": "string",
+      "not": {
+        "pattern": "([Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn])=[^{]"
+      }
+    }
+  },
   "properties": {
     "apiVersion": { "const": "argus/v1" },
     "kind": { "const": "ServiceFabricApp" },
@@ -15,8 +27,16 @@
         "services": { "type": "array", "minItems": 1, "items": {
           "type": "object", "required": ["name", "type", "exe", "instances", "endpoints"],
           "properties": {
-            "env": { "type": "object", "additionalProperties": { "type": "string",
-              "not": { "pattern": "(?i)(password|secret|key)=[^{]" } } }
+            "env": {
+              "type": "object",
+              "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+              "patternProperties": {
+                "[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Kk][Ee][Yy]|[Tt][Oo][Kk][Ee][Nn]|[Cc][Rr][Ee][Dd][Ee][Nn][Tt][Ii][Aa][Ll]|[Pp][Aa][Ss][Ss][Pp][Hh][Rr][Aa][Ss][Ee]": {
+                  "$ref": "#/$defs/openbaoReference"
+                }
+              },
+              "additionalProperties": { "$ref": "#/$defs/literalSecretFreeValue" }
+            }
           }
         }}
       }

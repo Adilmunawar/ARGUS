@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IpsecRules",
+  "type": "object",
+  "required": ["apiVersion", "kind", "default", "authentication", "encryption", "rules"],
+  "additionalProperties": false,
+  "$defs": {
+    "port": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 65535 },
+        { "type": "string", "pattern": "^[0-9]{1,5}-[0-9]{1,5}$" }
+      ]
+    }
+  },
+  "properties": {
+    "apiVersion": { "const": "argus/v1" },
+    "kind": { "const": "IpsecRules" },
+    "default": { "enum": ["deny-unauthenticated-inbound", "deny-all"] },
+    "authentication": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "pattern": "^[a-z0-9-]+(:[A-Za-z0-9-]+)?$" }
+    },
+    "encryption": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["to", "port", "from"],
+        "additionalProperties": false,
+        "properties": {
+          "to": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.*-]*(,[a-z0-9][a-z0-9.*-]*)*$" },
+          "port": {
+            "oneOf": [
+              { "$ref": "#/$defs/port" },
+              { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/port" } }
+            ]
+          },
+          "from": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*\\$?(:[A-Za-z0-9-]+)?$" }
+          }
+        }
+      }
+    }
+  }
+}

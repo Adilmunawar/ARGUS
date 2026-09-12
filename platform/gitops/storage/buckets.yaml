@@ -37,3 +37,12 @@ buckets:
     readers: [gmsa-console$, Argus-Console-Security]
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }
+  - name: argus-parity
+    owner: argus-parity
+    readers: [argus-parity-deny]
+  - name: argus-parity-worm
+    owner: argus-parity
+    objectLock: { mode: GOVERNANCE, days: 1 }
+  - name: argus-parity-forbidden
+    owner: argus-admin
+    denied: [argus-parity, argus-parity-deny]

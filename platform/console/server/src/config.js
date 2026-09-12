@@ -13,12 +13,7 @@
  */
 'use strict';
 
-function int(name, fallback) {
-  const raw = process.env[name];
-  if (raw === undefined || raw === '') return fallback;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : fallback;
-}
+const int = require('./env').positiveInt;
 
 function bool(name, fallback) {
   const raw = process.env[name];

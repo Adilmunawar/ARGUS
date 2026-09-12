@@ -70,6 +70,7 @@ const https = require('node:https');
 const { URL } = require('node:url');
 
 const cache = require('./cache');
+const { positiveInt } = require('./env');
 
 /* ------------------------------------------------------------------ config --- */
 
@@ -77,10 +78,7 @@ const cache = require('./cache');
    address is the only configuration, and an address is not a secret. */
 const ADDR = (process.env.ARGUS_OPENBAO_ADDR || '').trim();
 
-function msFromEnv(name, fallback) {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
+const msFromEnv = positiveInt;
 
 const TIMEOUT_MS = msFromEnv('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
 

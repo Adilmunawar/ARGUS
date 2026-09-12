@@ -57,6 +57,7 @@
 const net = require('node:net');
 
 const cache = require('./cache');
+const { positiveInt } = require('./env');
 
 /* ------------------------------------------------------------------ config --- */
 
@@ -66,10 +67,7 @@ const cache = require('./cache');
    arrive as a bare ENOTFOUND. */
 /* A bad number in the environment must not become NaN three layers down, where
    it presents as a connection to port NaN or a timeout that never fires. */
-function int(name, fallback) {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
-}
+const int = positiveInt;
 
 const HOST = process.env.ARGUS_GARNET_HOST || 'garnet';
 const PORT = int('ARGUS_GARNET_PORT', 6379);

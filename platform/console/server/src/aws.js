@@ -46,8 +46,8 @@ function load() {
 }
 
 const clients = new Map();
-function client(kind, Ctor) {
-  if (!clients.has(kind)) clients.set(kind, new Ctor({ region: config.region }));
+function client(kind, Ctor, region) {
+  if (!clients.has(kind)) clients.set(kind, new Ctor({ region: region || config.region }));
   return clients.get(kind);
 }
 
@@ -214,23 +214,41 @@ const databases = guarded('rds:instances', config.cacheTtlMs, async () => {
 
 /* -------------------------------------------------------------- cloudwatch --- */
 
+const ALARM_PAGE_LIMIT = 20;
+
 const alarms = guarded('cw:alarms', config.cacheTtlMs, async () => {
   const { CloudWatchClient, DescribeAlarmsCommand } = load().CW;
-  const out = await call((signal) =>
-    client('cw', CloudWatchClient).send(
-      new DescribeAlarmsCommand({ MaxRecords: 100, StateValue: undefined }), { abortSignal: signal }));
-  const rows = (out.MetricAlarms || []).map((a) => ({
-    name: a.AlarmName,
-    state: a.StateValue,
-    reason: a.StateReason,
-    metric: a.MetricName,
-    namespace: a.Namespace,
-    updatedAt: a.StateUpdatedTimestamp ? new Date(a.StateUpdatedTimestamp).toISOString() : null
-  }));
+  const c = client('cw', CloudWatchClient);
+  const rows = [];
+  let token;
+  let pagesRead = 0;
+  let complete = true;
+  do {
+    const out = await call((signal) =>
+      c.send(new DescribeAlarmsCommand({ MaxRecords: 100, NextToken: token }), { abortSignal: signal }));
+    for (const a of out.MetricAlarms || []) {
+      rows.push({
+        name: a.AlarmName,
+        state: a.StateValue,
+        reason: a.StateReason,
+        metric: a.MetricName,
+        namespace: a.Namespace,
+        updatedAt: a.StateUpdatedTimestamp ? new Date(a.StateUpdatedTimestamp).toISOString() : null
+      });
+    }
+    token = out.NextToken;
+    pagesRead += 1;
+    if (token && pagesRead >= ALARM_PAGE_LIMIT) complete = false;
+  } while (token && complete);
   return {
     alarms: rows,
     count: rows.length,
-    inAlarm: rows.filter((r) => r.state === 'ALARM').length
+    inAlarm: rows.filter((r) => r.state === 'ALARM').length,
+    pagesRead,
+    complete,
+    incompleteBecause: complete ? null
+      : `DescribeAlarms was stopped after ${ALARM_PAGE_LIMIT} pages of 100. The counts above are a floor, ` +
+        'not a total, and this account has more alarms than a dashboard should be reading on every load.'
   };
 });
 
@@ -248,7 +266,7 @@ const cost = guarded('ce:month', config.costCacheTtlMs, async () => {
   const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
   const out = await call((signal) =>
     // Cost Explorer is only available in us-east-1, whatever the estate region.
-    new (load().CE.CostExplorerClient)({ region: 'us-east-1' }).send(
+    client('ce', CostExplorerClient, 'us-east-1').send(
       new GetCostAndUsageCommand({
         TimePeriod: { Start: start, End: end },
         Granularity: 'MONTHLY',

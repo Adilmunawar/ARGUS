@@ -16,3 +16,6 @@ accounts:
   - { name: gmsa-ci$,          hosts: [runner-01, runner-02], tier: 1, s3: [argus-artifacts:put-only], codesign: true }
   - { name: gmsa-guacamole$,   hosts: [guac-01], tier: 1, kind: linux-sssd, s3: [argus-sessions:put-only], notes: "receives one-time VM credentials from OpenBao; never stores them" }
   - { name: svc-ml,            hosts: [gpu-01], tier: 1, kind: linux-sssd, s3: [argus-sentinel:rw, argus-ml:rw, argus-rasters:rw] }
+  - { name: gmsa-loki$,        hosts: [sf-*], tier: 1, s3: [argus-logs:rw] }
+  - { name: gmsa-geo$,         hosts: [sf-*], tier: 1, sql: [argus_geo, pgstac], s3: [argus-rasters:r, argus-sentinel:r] }
+  - { name: gmsa-agis$,        hosts: [sf-*], tier: 1, sql: [argus_geo], s3: [argus-rasters:r] }

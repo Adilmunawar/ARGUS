@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BucketSet",
+  "type": "object",
+  "required": ["apiVersion", "kind", "buckets"],
+  "additionalProperties": false,
+  "$defs": {
+    "principal": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*\\$?$" }
+  },
+  "properties": {
+    "apiVersion": { "const": "argus/v1" },
+    "kind": { "const": "BucketSet" },
+    "buckets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "owner"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,62}$" },
+          "owner": { "$ref": "#/$defs/principal" },
+          "readers": { "type": "array", "items": { "$ref": "#/$defs/principal" } },
+          "denied": { "type": "array", "items": { "$ref": "#/$defs/principal" } },
+          "versioning": { "type": "boolean" },
+          "objectLock": {
+            "type": "object",
+            "required": ["mode", "days"],
+            "additionalProperties": false,
+            "properties": {
+              "mode": { "enum": ["COMPLIANCE", "GOVERNANCE"] },
+              "days": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "lifecycle": {
+            "type": "object",
+            "required": ["expireDays"],
+            "additionalProperties": false,
+            "properties": { "expireDays": { "type": "integer", "minimum": 1 } }
+          },
+          "replication": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "siteB": { "type": "boolean" },
+              "siteBObjectLockDays": { "type": "integer", "minimum": 1 }
+            }
+          },
+          "backup": {
+            "oneOf": [
+              { "const": "none" },
+              {
+                "type": "object",
+                "required": ["tool", "schedule", "target"],
+                "additionalProperties": false,
+                "properties": {
+                  "tool": { "enum": ["kopia"] },
+                  "schedule": { "enum": ["daily", "weekly", "monthly"] },
+                  "target": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]*/[A-Za-z0-9/_.-]+$" }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
