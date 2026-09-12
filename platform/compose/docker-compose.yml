@@ -66,6 +66,7 @@ volumes:
   argus_openbao_seal:      { name: argus_openbao_seal }
   argus_console_state:     { name: argus_console_state }
   argus_prometheus_data:   { name: argus_prometheus_data }
+  argus_mailpit_data:
   argus_alertmanager_data: { name: argus_alertmanager_data }
   argus_loki_data:         { name: argus_loki_data }
   argus_alloy_data:        { name: argus_alloy_data }
@@ -880,12 +881,40 @@ services:
     secrets: [console_alert_token]
     ports: ["127.0.0.1:9093:9093"]
     mem_limit: 128m
+    depends_on:
+      mailpit: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9093/-/ready >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  mailpit:
+    <<: *hardening
+    profiles: [observability]
+    image: axllent/mailpit:${MAILPIT_TAG:-v1.27}
+    container_name: argus-mailpit
+    networks: [argus]
+    logging: *logging
+    environment:
+      TZ: ${TZ:-Asia/Karachi}
+      MP_SMTP_BIND_ADDR: 0.0.0.0:1025
+      MP_UI_BIND_ADDR: 0.0.0.0:8025
+      MP_MAX_MESSAGES: "2000"
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    volumes:
+      - argus_mailpit_data:/data
+    ports: ["127.0.0.1:8025:8025"]
+    mem_limit: 128m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8025/readyz >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   loki:
     <<: *hardening
