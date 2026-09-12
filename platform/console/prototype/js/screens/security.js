@@ -299,6 +299,157 @@
     });
   }
 
+  /* ------------------------------------------------------- alert inbox --- */
+
+  /*
+   * The live inbox.
+   *
+   * Alertmanager is the single alert engine in this stack by an explicit
+   * decision -- Grafana ships with unified alerting disabled -- so the ranked
+   * list of what is firing right now belongs here rather than being inferred
+   * from a dozen health panels. Nothing below is computed from the fixtures:
+   * when the reader does not answer, the panel says which reader and why, and
+   * the fixture table underneath keeps its own label.
+   */
+  var AM_RANK = { critical: 0, page: 1, high: 2, warning: 3, warn: 3, medium: 4, info: 5, low: 6, none: 7 };
+
+  function amRank(sev) {
+    var key = String(sev || 'none').toLowerCase();
+    return Object.prototype.hasOwnProperty.call(AM_RANK, key) ? AM_RANK[key] : 8;
+  }
+
+  function amTone(sev) {
+    var key = String(sev || '').toLowerCase();
+    if (key === 'critical' || key === 'page' || key === 'high') return 'bad';
+    if (key === 'warning' || key === 'warn' || key === 'medium') return 'warn';
+    if (key === 'info' || key === 'low') return 'info';
+    return 'idle';
+  }
+
+  function amSuppression(alert) {
+    var st = alert.status || {};
+    var silenced = (st.silencedBy || []).length;
+    var inhibited = (st.inhibitedBy || []).length;
+    if (silenced) return ui.pill('silenced', 'idle', { title: 'Silenced by ' + st.silencedBy.join(', ') });
+    if (inhibited) return ui.pill('inhibited', 'idle', { title: 'Inhibited by ' + st.inhibitedBy.join(', ') });
+    if (st.state === 'unprocessed') return ui.pill('unprocessed', 'warn');
+    return ui.pill('firing', 'bad');
+  }
+
+  function amRow(alert) {
+    var labels = alert.labels || {};
+    var annotations = alert.annotations || {};
+    var started = alert.startsAt ? new Date(alert.startsAt) : null;
+    var name = labels.alertname || 'unnamed rule';
+    var where = labels.instance || labels.job || labels.service || labels.namespace || null;
+
+    return el('div.row', [
+      ui.pill(labels.severity || 'unlabelled', amTone(labels.severity)),
+      el('div.col', [
+        el('strong', { text: name + (where ? ' on ' + where : '') }),
+        el('span.muted', {
+          text: annotations.summary || annotations.description ||
+            'The rule carries no summary annotation, so there is nothing to quote here.'
+        })
+      ]),
+      amSuppression(alert),
+      started && isFinite(started.getTime())
+        ? el('span.num', { text: 'since ' + fmt.stamp(started) })
+        : el('span.muted', { text: 'no start time' })
+    ]);
+  }
+
+  function alertInbox() {
+    var body = el('div', [ui.skeleton(3)]);
+    var card = ui.card('Alert inbox', body);
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+
+    A.probe().then(function () {
+      if (!alive) return;
+      if (A.storeMode() !== A.MODE.LIVE) {
+        ui.clear(body);
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'Alertmanager has not been read.' }),
+          el('p', {
+            text: 'The console API is not answering, so nothing here is firing or not firing -- it is ' +
+              'unknown. The table below is the bundled sample dataset and is not a reading of this estate.'
+          })
+        ]));
+        return;
+      }
+
+      A.read('/api/alerts/active', { ttlMs: 10000 }).then(function (env) {
+        if (!alive) return;
+        ui.clear(body);
+
+        if (!env.ok) {
+          var e = env.error || {};
+          body.appendChild(ui.errorState(
+            'Alertmanager could not be read',
+            (e.message || 'The console API gave no reason.') +
+              ' Until it answers, this console cannot say what is firing. Nothing has been substituted.',
+            function () { A.forget('/api/alerts/active'); A.go('security', ['alerts']); }));
+          return;
+        }
+
+        var payload = env.data || {};
+        if (payload.ok === false) {
+          body.appendChild(el('div.callout.warn', [
+            el('strong', { text: 'Alertmanager is not reachable from the console.' }),
+            el('p', { text: payload.message || 'The reader answered without a reason.' })
+          ]));
+          return;
+        }
+
+        var alerts = Array.isArray(payload) ? payload : (payload.alerts || []);
+        if (!alerts.length) {
+          body.appendChild(ui.emptyState(
+            'Nothing is firing',
+            'Alertmanager answered and is holding no active alert. That is a real answer, not a failure ' +
+              'to load.'));
+          return;
+        }
+
+        if (env.stale) {
+          body.appendChild(el('div.callout.warn', [
+            el('strong', { text: 'Showing the last list that could be read.' }),
+            el('p', {
+              text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
+                ' An alert raised since then would not appear below.'
+            })
+          ]));
+        }
+
+        var ranked = alerts.slice().sort(function (a, b) {
+          var byRank = amRank((a.labels || {}).severity) - amRank((b.labels || {}).severity);
+          if (byRank !== 0) return byRank;
+          return String(b.startsAt || '').localeCompare(String(a.startsAt || ''));
+        });
+
+        var firing = ranked.filter(function (a) {
+          var st = a.status || {};
+          return !(st.silencedBy || []).length && !(st.inhibitedBy || []).length;
+        });
+
+        body.appendChild(el('p.hint', {
+          text: fmt.num(ranked.length) + ' alert' + (ranked.length === 1 ? '' : 's') + ' held by ' +
+            'Alertmanager, ' + fmt.num(firing.length) + ' of them neither silenced nor inhibited, worst ' +
+            'severity first.'
+        }));
+        body.appendChild(el('div.stack', ranked.slice(0, 40).map(amRow)));
+        if (ranked.length > 40) {
+          body.appendChild(el('p.hint', {
+            text: 'The remaining ' + fmt.num(ranked.length - 40) + ' are not listed. Silence or group them ' +
+              'in Alertmanager rather than reading past forty rows here.'
+          }));
+        }
+      });
+    });
+
+    return card;
+  }
+
   function alertsTab() {
     var d = A.data;
 
@@ -375,6 +526,8 @@
     paint([]);
 
     return el('div.stack', [
+      alertInbox(),
+      el('div.sectiontitle', { text: 'Console alert history' }),
       filter,
       el('p.hint', {
         text: 'Filters combine with AND, so severity high and host gpu-01 narrows to the intersection. '
