@@ -51,6 +51,7 @@ secrets:
   pg_superuser_password:  { file: ./secrets/pg_superuser_password }
   pg_exporter_password:   { file: ./secrets/pg_exporter_password }
   grafana_admin_password: { file: ./secrets/grafana_admin_password }
+  grafana_db_password:    { file: ./secrets/grafana_db_password }
   console_alert_token:    { file: ./secrets/console_alert_token }
 
 volumes:
@@ -1041,9 +1042,9 @@ services:
       GF_DATABASE_HOST: postgres:5432
       GF_DATABASE_NAME: grafana
       GF_DATABASE_USER: grafana
-      GF_DATABASE_PASSWORD: ${ARGUS_PG_GRAFANA_PASSWORD:?run bootstrap.ps1}
+      GF_DATABASE_PASSWORD__FILE: /run/secrets/grafana_db_password
       GF_DATABASE_SSL_MODE: disable
-    secrets: [grafana_admin_password]
+    secrets: [grafana_admin_password, grafana_db_password]
     volumes:
       - argus_grafana_data:/var/lib/grafana
       - ./services/observability/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -1252,7 +1253,7 @@ services:
       # itself. A raw byte pipe cannot, and then every session is audited as
       # coming from the console -- the exact thing this prevents.
       REMOTE_IP_VALVE_ENABLED: "true"
-      PROXY_ALLOWED_IPS_REGEX: ^172\.28\..*$$
+      PROXY_ALLOWED_IPS_REGEX: ${ARGUS_SUBNET_REGEX:?run bootstrap.ps1}
       # RECORDING_SEARCH_PATH is deliberately ABSENT and /recordings is
       # deliberately NOT mounted here: the webapp's history player finds
       # recordings by connection-history UUID, and JSON-minted sessions write no

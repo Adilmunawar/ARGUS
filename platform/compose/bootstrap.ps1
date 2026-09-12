@@ -329,6 +329,13 @@ if (-not $memLimit) {
   }
 }
 
+$octets = ($subnet -split '/')[0] -split '\.'
+$maskBits = 16
+if ($subnet -match '/(?<bits>\d+)$') { $maskBits = [int]$Matches['bits'] }
+$keptOctets = [Math]::Max(1, [Math]::Floor($maskBits / 8))
+$derived['ARGUS_SUBNET_REGEX'] =
+  '^' + (($octets[0..($keptOctets - 1)] | ForEach-Object { $_ }) -join '\.') + '\..*$'
+
 foreach ($line in $lines) {
   $m = [regex]::Match($line, '^(?<key>[A-Z0-9_]+)=(?<val>[^#]*?)\s*(?<rest>#.*)?$')
   $key = if ($m.Success) { $m.Groups['key'].Value } else { '' }
@@ -354,6 +361,47 @@ if ($missing.Count) {
   Die "These keys were generated but do not appear in .env.example, so nothing would consume them: $($missing -join ', ')"
 }
 
+$alertTemplate = Join-Path $Here 'services/observability/alertmanager/alertmanager.yml.tmpl'
+$alertRendered = Join-Path $SecretsDir 'alertmanager.yml'
+if (-not (Test-Path $alertTemplate)) {
+  Die "The Alertmanager template is missing: $alertTemplate. docker-compose.yml bind-mounts ./secrets/alertmanager.yml and Alertmanager expands no environment variable of its own, so this script is the only thing that can render it. No .env and no secret were written. Restore the template, then run this again."
+}
+$envValues = @{}
+foreach ($l in $out) {
+  $em = [regex]::Match($l, '^(?<k>[A-Z0-9_]+)=(?<v>[^#]*?)\s*(#.*)?$')
+  if ($em.Success) { $envValues[$em.Groups['k'].Value] = $em.Groups['v'].Value }
+}
+$alertKeyFor  = @{ 'SMTP_SMARTHOST' = @('SMTP_SMARTHOST', 'SMTP_HOST') }
+$alertText    = [IO.File]::ReadAllText($alertTemplate)
+$alertMissing = @()
+$alertFilled  = @{}
+foreach ($token in [regex]::Matches($alertText, '@@(?<k>[A-Z0-9_]+)@@')) {
+  $placeholder = $token.Groups['k'].Value
+  if ($alertFilled.ContainsKey($placeholder)) { continue }
+  $keys = if ($alertKeyFor.ContainsKey($placeholder)) { $alertKeyFor[$placeholder] } else { @($placeholder) }
+  $v = $null
+  foreach ($key in $keys) {
+    if ($envValues.ContainsKey($key) -and $envValues[$key] -ne '') { $v = $envValues[$key]; break }
+  }
+  if ($null -eq $v) {
+    foreach ($key in $keys) {
+      if ($envValues.ContainsKey($key)) { $v = $envValues[$key]; break }
+    }
+  }
+  if ($null -eq $v) {
+    if ($alertMissing -notcontains $keys[0]) { $alertMissing += $keys[0] }
+    continue
+  }
+  $alertText = $alertText.Replace($token.Value, $v)
+  $alertFilled[$placeholder] = $true
+}
+if ($alertMissing.Count) {
+  Die "secrets/alertmanager.yml cannot be rendered: .env.example carries no $(($alertMissing | Sort-Object) -join ', '), and $alertTemplate needs every one of them. Nothing here may invent them -- Alertmanager takes an unsubstituted placeholder literally, amtool check-config still passes, the stack boots green, and the delivery leg that has to survive the console being down fails at send time. No .env and no secret were written: add those keys to .env.example, then run this again."
+}
+if ($alertText -match '@@' -or $alertText -match '\$\{') {
+  Die "A placeholder survived rendering $alertTemplate, and Alertmanager would take it literally. No .env and no secret were written."
+}
+
 Write-TextNoBom -Path $EnvFile -Text (($out -join "`n") + "`n")
 Say "wrote .env       ($($gen.Count) secrets generated, $($lines.Count) lines kept from .env.example)"
 if ($derived.Contains('ARGUS_GARNET_MEM_LIMIT_BYTES')) {
@@ -370,7 +418,8 @@ Write-FileSecret 'pg_superuser_password'   (New-HexSecret 24)
 Write-FileSecret 'pg_exporter_password'    $gen['ARGUS_PG_EXPORTER_PASSWORD']
 Write-FileSecret 'grafana_admin_password'  (New-HexSecret 16)
 Write-FileSecret 'console_alert_token'     (New-HexSecret 24)
-Say "wrote secrets/   (4 file-secrets)"
+Write-FileSecret 'grafana_db_password'     $gen['ARGUS_PG_GRAFANA_PASSWORD']
+Say "wrote secrets/   (5 file-secrets)"
 
 # The break-glass password is the one plaintext an operator genuinely needs to
 # keep. Writing it beside the others is honest about where it lives, rather than
@@ -409,42 +458,8 @@ $consoleAcl = 'user console on >' + $gen['GARNET_CONSOLE_PASSWORD'] +
 Write-TextNoBom -Path (Join-Path $garnetSecrets 'users.acl') -Text ("user default off`n" + $consoleAcl + "`n")
 Say "wrote secrets/garnet/users.acl  (default OFF, console observe-only)"
 
-$envValues = @{}
-foreach ($l in $out) {
-  $em = [regex]::Match($l, '^(?<k>[A-Z0-9_]+)=(?<v>[^#]*?)\s*(#.*)?$')
-  if ($em.Success) { $envValues[$em.Groups['k'].Value] = $em.Groups['v'].Value }
-}
-$alertKeyFor = @{ 'SMTP_SMARTHOST' = @('SMTP_SMARTHOST', 'SMTP_HOST') }
-$rendered    = [IO.File]::ReadAllText($alertTemplate)
-$unresolved  = @()
-$substituted = 0
-foreach ($token in [regex]::Matches($rendered, '@@(?<k>[A-Z0-9_]+)@@')) {
-  $placeholder = $token.Groups['k'].Value
-  $keys = if ($alertKeyFor.ContainsKey($placeholder)) { $alertKeyFor[$placeholder] } else { @($placeholder) }
-  $v = $null
-  foreach ($key in $keys) {
-    if ($envValues.ContainsKey($key) -and $envValues[$key] -ne '') { $v = $envValues[$key]; break }
-  }
-  if ($null -eq $v) {
-    foreach ($key in $keys) {
-      if ($envValues.ContainsKey($key)) { $v = $envValues[$key]; break }
-    }
-  }
-  if ($null -eq $v) {
-    $unresolved += "@@$placeholder@@ (set $($keys[0]) in .env.example)"
-    continue
-  }
-  $rendered = $rendered.Replace($token.Value, $v)
-  $substituted++
-}
-if ($unresolved.Count) {
-  Die "secrets/alertmanager.yml cannot be rendered: $alertTemplate has placeholders that .env sets no value for -- $((($unresolved | Select-Object -Unique) | Sort-Object) -join '; '). Nothing here may invent them: Alertmanager expands nothing itself, so an unsubstituted placeholder is taken literally, amtool check-config passes, the stack boots green, and the delivery leg that has to survive the console being down fails at send time."
-}
-if ($rendered -match '@@' -or $rendered -match '\$\{') {
-  Die "secrets/alertmanager.yml still holds an unsubstituted placeholder after rendering. Alertmanager would take it literally. Nothing was written."
-}
-Write-TextNoBom -Path $alertRendered -Text $rendered
-Say "wrote secrets/alertmanager.yml  ($substituted placeholders substituted from .env)"
+Write-TextNoBom -Path $alertRendered -Text $alertText
+Say "wrote secrets/alertmanager.yml  ($($alertFilled.Count) placeholders substituted from .env)"
 
 # --- 5. resolve tags to digests --------------------------------------------
 
