@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import pathlib
 import re
 import subprocess
 import sys
@@ -184,11 +185,14 @@ def scan_line(path, number, line):
     return findings
 
 
+SELF = "/".join(pathlib.Path(__file__).parts[-3:])
+
+
 def tracked_files():
     output = subprocess.run(
         ["git", "ls-files", "-z"], capture_output=True, text=True, check=True
     ).stdout
-    return [name for name in output.split("\0") if name]
+    return [name for name in output.split("\0") if name and not name.endswith(SELF)]
 
 
 def scan(paths):
