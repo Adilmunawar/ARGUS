@@ -1077,7 +1077,7 @@
     "suite": "LOGS",
     "id": "the view stays bounded at its cap through five thousand lines",
     "pass": true,
-    "detail": "{\"n\":60,\"last\":\"2026-09-12 06:20Z INFO  probe line 4999\"}"
+    "detail": "{\"n\":60,\"last\":\"2026-09-12 06:26Z INFO  probe line 4999\"}"
   },
   {
     "suite": "LOGS",
