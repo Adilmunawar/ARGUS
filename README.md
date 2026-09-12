@@ -5,7 +5,7 @@
 **A sovereign, Windows-first private cloud: the complete design record for replacing AWS with hardware you own.**
 
 [![validate](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml/badge.svg)](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml)
-[![console tests](https://img.shields.io/badge/console%20tests-163%2F163-046c4e)](platform/console/prototype/tests/run-tests.js)
+[![console tests](https://img.shields.io/badge/console%20tests-295%2F295-046c4e)](platform/console/prototype/tests/run-tests.js)
 [![ADRs](https://img.shields.io/badge/ADRs-34-1e6f4a)](docs/01-DECISIONS.md)
 [![licence](https://img.shields.io/badge/licence-MIT-113a2b)](LICENSE)
 [![status](https://img.shields.io/badge/status-planning%20%C2%B7%20v0.6.1-b07f23)](CHANGELOG.md)
@@ -44,7 +44,7 @@ It also says plainly what has **not** been proven. `docs/09-VALIDATION-STATUS.md
 9. [`docs/08-OPEN-QUESTIONS.md`](docs/08-OPEN-QUESTIONS.md): decisions still needed from the owner.
 10. **[`docs/09-VALIDATION-STATUS.md`](docs/09-VALIDATION-STATUS.md): what is actually tested and what is not. Read this before trusting any of the above.**
 11. [`docs/10-CONSOLE-DESIGN.md`](docs/10-CONSOLE-DESIGN.md): the web console, every screen including browser RDP. Open [`platform/console/prototype/index.html`](platform/console/prototype/index.html) in a browser to see it.
-12. [`docs/11-CONSOLE-UX-BENCHMARK-AND-BUGS.md`](docs/11-CONSOLE-UX-BENCHMARK-AND-BUGS.md): AWS/GCP/Azure benchmark, the test suite, every bug found and the fix plan. `node platform/console/prototype/tests/run-tests.js`: currently 163/163.
+12. [`docs/11-CONSOLE-UX-BENCHMARK-AND-BUGS.md`](docs/11-CONSOLE-UX-BENCHMARK-AND-BUGS.md): AWS/GCP/Azure benchmark, the test suite, every bug found and the fix plan. `node platform/console/prototype/tests/run-tests.js`: currently 295/295, with 125 sandbox checks and 178 stress budgets alongside it.
 
 ## Before you buy anything
 
@@ -74,10 +74,10 @@ Nothing about this platform changes without a commit here. A new component, a re
 open platform/console/prototype/index.html          # no build, no server, no network
 
 npm ci && npx playwright install chromium           # once
-node platform/console/prototype/tests/run-tests.js  # 163 assertions in headless Chromium
+node platform/console/prototype/tests/run-tests.js  # 295 assertions in headless Chromium
 ```
 
-The console is static, but it works: ten sections, a command palette, sortable and token-filtered tables, recorded browser RDP in a drawer that survives navigation, just-in-time elevation with a countdown, and the reconciler's plan and blast radius shown before any change is approved.
+The console is static, but it works: thirteen screens, a command palette, sortable and token-filtered tables, recorded browser RDP in a drawer that survives navigation, just-in-time elevation with a countdown, and the reconciler's plan and blast radius shown before any change is approved.
 
 The tests are real too. 19 suites in headless Chromium against the rendered DOM: axe-core WCAG 2.1 A/AA on every screen and every overlay, keyboard traversal with actual `Tab` presses including focus trapping and restoration, contrast computed from rendered pixels, six viewport widths, WCAG 1.4.10 reflow at 200% and 400% zoom, a density suite that asserts a 1366×768 laptop does not spend more than 55% of its screen on chrome, a layout suite that catches a stylesheet rule leaking into a table cell, and a security pass that reads the source to prove `innerHTML` appears nowhere.
 
