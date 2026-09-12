@@ -525,39 +525,45 @@ async function reset(page) {
   rec('FUZZ', 'an unknown route fails honestly and offers a way back',
     unknown.honest && unknown.hasWayBack, JSON.stringify(unknown));
 
-  const tamper = await page.evaluate(async () => {
-    const shapes = [
-      '{"density":"</style><script>","theme":"x"}', '[]', 'null', 'not json at all',
-      '{"rail":{"toString":"boom"}}', '{"__proto__":{"polluted":true}}'
-    ];
-    const out = [];
-    for (const s of shapes) {
-      try { localStorage.setItem('argus.prefs', s); } catch (e) { /* blocked */ }
-      out.push(s.slice(0, 22));
+  const SHAPES = [
+    '{"density":"</style><script>","theme":"x"}', '[]', 'null', 'not json at all',
+    '{"rail":{"toString":"boom"}}', '{"__proto__":{"polluted":true}}',
+    '{"theme":"dark","density":42}', '{"tz":"../../etc/passwd"}'
+  ];
+  const tamperFails = [], notRecovered = [], pollutedBy = [], leakedToClass = [];
+  for (const shape of SHAPES) {
+    await page.evaluate((s) => { try { localStorage.setItem('argus.prefs', s); } catch (e) {} }, shape);
+    await page.reload({ waitUntil: 'load' });
+    await settle(page, 220);
+    const state = await page.evaluate(() => ({
+      booted: !!window.ARGUS,
+      prefs: window.ARGUS ? window.ARGUS.prefs() : null,
+      polluted: {}.polluted === true,
+      bodyClass: document.body.className,
+      painted: document.getElementById('main').textContent.trim().length
+    }));
+    const label = shape.slice(0, 34);
+    if (!state.booted || state.painted <= 50) tamperFails.push(`${label} -> ${JSON.stringify(state).slice(0, 120)}`);
+    const prefs = state.prefs || {};
+    if (prefs.density !== 'comfortable' || ['light', 'dark', 'system'].indexOf(prefs.theme) === -1) {
+      notRecovered.push(`${label} -> ${JSON.stringify(prefs)}`);
     }
-    return out;
-  });
-  await page.reload({ waitUntil: 'load' });
-  await settle(page, 250);
-  const afterTamper = await page.evaluate(() => ({
-    booted: !!window.ARGUS,
-    prefs: window.ARGUS ? window.ARGUS.prefs() : null,
-    polluted: {}.polluted === true,
-    bodyClass: document.body.className,
-    painted: document.getElementById('main').textContent.trim().length
-  }));
-  rec('FUZZ', 'tampered preferences do not stop the console booting',
-    afterTamper.booted && afterTamper.painted > 50, JSON.stringify(afterTamper).slice(0, 160));
-  rec('FUZZ', 'tampered preferences fall back to known-good values',
-    afterTamper.prefs && afterTamper.prefs.density === 'comfortable' &&
-    ['light', 'dark', 'system'].indexOf(afterTamper.prefs.theme) !== -1,
-    JSON.stringify(afterTamper.prefs));
-  rec('FUZZ', 'a prototype-pollution payload in storage does not pollute',
-    !afterTamper.polluted, String(afterTamper.polluted));
-  rec('FUZZ', 'nothing from storage reaches a class name',
-    !/[<>"]/.test(afterTamper.bodyClass), afterTamper.bodyClass);
+    if (state.polluted) pollutedBy.push(label);
+    if (/[<>"]/.test(state.bodyClass)) leakedToClass.push(`${label} -> ${state.bodyClass}`);
+  }
   await page.evaluate(() => { try { localStorage.clear(); } catch (e) {} });
-  rec('FUZZ', `${tamper.length} tampered preference shapes were survived`, true, tamper.join(' | '));
+  rec('FUZZ', 'the console boots with any tampered preference blob in storage',
+    tamperFails.length === 0, tamperFails.slice(0, 3).join(' | '));
+  rec('FUZZ', 'tampered preferences fall back to known-good values',
+    notRecovered.length === 0, notRecovered.slice(0, 3).join(' | '));
+  rec('FUZZ', 'a prototype-pollution payload in storage does not pollute',
+    pollutedBy.length === 0, pollutedBy.join(' '));
+  rec('FUZZ', 'nothing from storage reaches a class name',
+    leakedToClass.length === 0, leakedToClass.slice(0, 3).join(' | '));
+  rec('FUZZ', `each of the ${SHAPES.length} tampered preference shapes was survived on its own reload`,
+    tamperFails.length === 0 && notRecovered.length === 0 &&
+    pollutedBy.length === 0 && leakedToClass.length === 0,
+    `${tamperFails.length + notRecovered.length + pollutedBy.length + leakedToClass.length} failures`);
 
   // A browser with storage switched off entirely.
   const noStore = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -596,9 +602,10 @@ async function reset(page) {
   const leak = await page.evaluate(async () => {
     let live = 0, peak = 0;
     const rs = window.setInterval, rc = window.clearInterval;
-    window.setInterval = function () { live++; peak = Math.max(peak, live); return rs.apply(window, arguments); };
-    window.clearInterval = function (id) { if (id !== undefined && id !== null) live--; return rc.call(window, id); };
-    const tour = ['identity', 'security', 'ops', 'compute', 'data', 'ml', 'deploys', 'audit', 'apps', 'overview'];
+    const mine = new Set();
+    window.setInterval = function () { const id = rs.apply(window, arguments); mine.add(id); live++; peak = Math.max(peak, live); return id; };
+    window.clearInterval = function (id) { if (mine.delete(id)) live--; return rc.call(window, id); };
+    const tour = ['identity', 'security', 'ops', 'compute', 'data', 'ml', 'deploys', 'audit', 'apps', 'stack', 'system', 'storage', 'overview'];
     for (let pass = 0; pass < 3; pass++) {
       for (const r of tour) {
         window.location.hash = '#/' + r;
@@ -612,14 +619,14 @@ async function reset(page) {
     return { net, peak, nodes: document.getElementsByTagName('*').length };
   });
   rec('LEAK', 'thirty screen changes leave no timer running',
-    leak.net <= 1, `net=${leak.net} peak=${leak.peak}`);
+    leak.net === 0, `net=${leak.net} peak=${leak.peak}`);
   rec('LEAK', 'the DOM does not grow without bound across a long tour',
     leak.nodes < 6000, `${leak.nodes} nodes`);
 
   const liveRegions = await page.evaluate(() =>
     document.querySelectorAll('[aria-live]').length);
   rec('LEAK', 'exactly one live region survives a long tour',
-    liveRegions <= 2, `${liveRegions} live regions`);
+    liveRegions === 1, `${liveRegions} live regions`);
 
   /* ============================================================== QUIET === */
 

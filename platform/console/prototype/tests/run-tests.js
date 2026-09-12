@@ -326,7 +326,7 @@ async function axeOn(page, label) {
     inp.value = 'zzzzzznotathing';
     inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     const txt = document.getElementById('main').textContent;
-    return { ok: /no.*match|matches/i.test(txt), txt: txt.slice(0, 0) };
+    return { ok: /(?:no|zero|0)\s+\S*\s*match/i.test(txt), txt: txt.slice(0, 160) };
   });
   rec('STATE', 'a filter that excludes everything says "no match", not "empty"', states.ok, states.why || '');
 
@@ -1423,10 +1423,11 @@ async function axeOn(page, label) {
   // console accumulates one live timer per visit for the length of a shift.
   const timers = await page.evaluate(async () => {
     let live = 0;
+    const mine = new Set();
     const realSet = window.setInterval, realClear = window.clearInterval;
-    window.setInterval = function () { live++; return realSet.apply(window, arguments); };
-    window.clearInterval = function (id) { if (id !== undefined && id !== null) live--; return realClear.call(window, id); };
-    for (const r of ['identity', 'security', 'ops', 'overview']) {
+    window.setInterval = function () { const id = realSet.apply(window, arguments); mine.add(id); live++; return id; };
+    window.clearInterval = function (id) { if (mine.delete(id)) live--; return realClear.call(window, id); };
+    for (const r of ['identity', 'security', 'ops', 'stack', 'system', 'storage', 'overview']) {
       window.location.hash = '#/' + r;
       await new Promise(res => setTimeout(res, 260));
     }
@@ -1437,7 +1438,7 @@ async function axeOn(page, label) {
     return net;
   });
   rec('TIMER', 'navigating across every ticking screen leaves no timer behind',
-    timers <= 1, `net live intervals after the tour: ${timers}`);
+    timers === 0, `net live intervals after the tour: ${timers}`);
 
   /* ----------------------------------------------------------------- DET */
 

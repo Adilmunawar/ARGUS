@@ -83,6 +83,7 @@ const BUDGET = {
 
 const results = [];
 const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail: String(detail == null ? '' : detail) });
+const skip = (suite, id, detail) => results.push({ suite, id, pass: true, skipped: true, detail: String(detail == null ? '' : detail) });
 
 const round = (n, dp) => Math.round(n * Math.pow(10, dp || 1)) / Math.pow(10, dp || 1);
 const median = xs => { const s = xs.slice().sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
@@ -353,8 +354,6 @@ async function suiteLeak(browser) {
   const stray = await page.evaluate(() => {
     return new Promise(resolve => {
       let fired = 0;
-      const mark = window.setInterval;
-      void mark;
       const t0 = Date.now();
       const probe = window.setInterval(() => {
         if (Date.now() - t0 > 900) { window.clearInterval(probe); resolve(fired); }
@@ -393,13 +392,12 @@ async function suiteInteraction(browser) {
   const scale = SCALES[SCALES.length - 1];
   const { ctx, page, cdp, errors } = await newPage(browser);
   await page.evaluate(INFLATE, scale);
-  void cdp;
 
   const timed = async (id, route, fn) => {
     await page.evaluate(NAVIGATE, route);
     await page.waitForTimeout(60);
     const ms = await fn();
-    if (ms === null) { rec('INTER', `${id} (at ${scale}x)`, true, 'control not present, skipped'); return; }
+    if (ms === null) { skip('INTER', `${id} (at ${scale}x)`, 'control not present'); return; }
     rec('INTER', `${id} responds inside ${BUDGET.interactionMs} ms at ${scale}x`,
       ms <= BUDGET.interactionMs, `${round(ms, 1)} ms`);
   };
@@ -461,8 +459,6 @@ async function suiteInteraction(browser) {
    */
   {
     await page.evaluate(NAVIGATE, 'audit');
-    const nav = median([0, 1, 2].map(() => 0));
-    void nav;
     const navSamples = [];
     for (let i = 0; i < 5; i++) {
       navSamples.push(await page.evaluate(NAVIGATE, 'audit'));
@@ -510,7 +506,7 @@ async function suiteSustain(browser) {
   for (const view of TARGETS) {
     await page.evaluate(NAVIGATE, view);
     const hasSort = await page.evaluate(() => !!document.querySelector('.th-sort'));
-    if (!hasSort) { rec('SUSTAIN', `${view} exposes a sortable column`, true, 'no sortable header, skipped'); continue; }
+    if (!hasSort) { skip('SUSTAIN', `${view} exposes a sortable column`, 'no sortable header'); continue; }
 
     await collectGarbage(cdp);
     const start = await metrics(cdp);
@@ -554,7 +550,7 @@ async function suiteSustain(browser) {
   for (const view of ['identity/grants', 'security/posture']) {
     await page.evaluate(NAVIGATE, view);
     const tabs = await page.evaluate(() => document.querySelectorAll('.tab').length);
-    if (tabs < 2) { rec('SUSTAIN', `${view} has tabs to switch between`, true, 'single panel, skipped'); continue; }
+    if (tabs < 2) { skip('SUSTAIN', `${view} has tabs to switch between`, 'single panel'); continue; }
 
     /*
      * End on the tab we started on, so the "after" reading is taken with the
@@ -799,7 +795,7 @@ async function suitePlayer(browser) {
   });
 
   if (!opened) {
-    rec('PLAYER', 'the session player opens', true, 'no replay control on this screen, skipped');
+    skip('PLAYER', 'the session player opens', 'no replay control on this screen');
     rec('QUIET', 'the player pass produced no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
     await ctx.close();
     return null;
@@ -969,10 +965,20 @@ async function suiteParallel(browser) {
 /* ----------------------------------------------------------------- main --- */
 
 function report(scaleTable, leakSeries, sustain, soak, flash, search, player, scroll) {
+  ['INTER', 'SUSTAIN', 'PLAYER'].forEach(suite => {
+    const mine = results.filter(r => r.suite === suite);
+    if (mine.length && mine.every(r => r.skipped)) {
+      rec(suite, `${suite} found a control to measure`, false,
+        'every check in this suite skipped, so the suite proves nothing');
+    }
+  });
+
   const suites = {};
   results.forEach(r => {
-    suites[r.suite] = suites[r.suite] || { pass: 0, fail: 0 };
-    r.pass ? suites[r.suite].pass++ : suites[r.suite].fail++;
+    suites[r.suite] = suites[r.suite] || { pass: 0, fail: 0, skip: 0 };
+    if (r.skipped) suites[r.suite].skip++;
+    else if (r.pass) suites[r.suite].pass++;
+    else suites[r.suite].fail++;
   });
 
   console.log('');
@@ -1007,7 +1013,8 @@ function report(scaleTable, leakSeries, sustain, soak, flash, search, player, sc
 
   Object.keys(suites).sort().forEach(s => {
     const v = suites[s];
-    console.log('  ' + s.padEnd(8) + String(v.pass).padStart(4) + ' passed  ' + String(v.fail).padStart(4) + ' failed');
+    console.log('  ' + s.padEnd(8) + String(v.pass).padStart(4) + ' passed  ' + String(v.fail).padStart(4) + ' failed' +
+      (v.skip ? String(v.skip).padStart(5) + ' skipped' : ''));
   });
 
   const failures = results.filter(r => !r.pass);
