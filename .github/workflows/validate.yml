@@ -2,90 +2,83 @@ name: validate
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  gitops:
-    name: GitOps schema and secret scan
+  repo:
+    name: Repository invariants
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
-      - run: pip install pyyaml jsonschema
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install --disable-pip-version-check pyyaml jsonschema
+
+      - name: Secret scanner passes its own self-test
+        run: python3 .github/scripts/scan-secrets.py --self-test
+
+      - name: No credentials committed
+        run: python3 .github/scripts/scan-secrets.py
+
       - name: Every YAML and JSON parses
+        run: python3 .github/scripts/check-parses.py
+
+      - name: GitOps specs validate against their schemas
+        run: python3 .github/scripts/check-gitops.py
+
+      - name: Every compose bind mount exists in the repository
+        run: python3 .github/scripts/check-compose-mounts.py
+
+      - name: Compose file resolves
         run: |
-          python - <<'PY'
-          import sys, json, pathlib, yaml
-          bad = 0
-          for p in pathlib.Path('platform').rglob('*'):
-              try:
-                  if p.suffix in ('.yaml', '.yml'):
-                      list(yaml.safe_load_all(p.read_text()))
-                  elif p.suffix == '.json':
-                      json.loads(p.read_text())
-                  else:
-                      continue
-              except Exception as e:
-                  print(f'FAIL {p}: {e}'); bad += 1
-              else:
-                  print(f'  ok {p}')
-          sys.exit(bad)
-          PY
-      - name: Application specs validate against the schema
-        run: |
-          python - <<'PY'
-          import sys, json, pathlib, yaml, jsonschema
-          schema = json.load(open('platform/gitops/schemas/app.schema.json'))
-          bad = 0
-          for p in pathlib.Path('platform/gitops/apps').rglob('app.yaml'):
-              try:
-                  jsonschema.validate(yaml.safe_load(p.read_text()), schema)
-                  print(f'  ok {p}')
-              except jsonschema.ValidationError as e:
-                  print(f'FAIL {p}: {e.message}'); bad += 1
-          sys.exit(bad)
-          PY
-      - name: No secrets committed
-        run: |
-          if grep -rInE '(ghp_[A-Za-z0-9]{20,}|sk-ant-[A-Za-z0-9-]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|[Pp]assword\s*=\s*[^{$"< `][^;"`]{5,})' \
-              --exclude-dir=.git --exclude='validate.yml' . ; then
-            echo "::error::A credential-shaped string is present. Remove it and rotate the credential."
-            exit 1
-          fi
-          echo "clean"
+          cp platform/compose/.env.example platform/compose/.env
+          docker compose -f platform/compose/docker-compose.yml \
+            --profile cache --profile queues --profile secrets --profile observability \
+            --profile connect --profile compute --profile parity --profile targets \
+            config -q
+          rm platform/compose/.env
 
   console:
     name: Console prototype tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'npm' }
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
       - run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - run: npx playwright install --with-deps chromium
+
       - name: No external requests in the console bundle
-        run: |
-          if grep -nE 'https?://(fonts\.googleapis|fonts\.gstatic|cdn\.|unpkg|jsdelivr)' platform/console/prototype/index.html; then
-            echo "::error::The console runs behind an egress allow-list (ADR-0027) and must not fetch anything."
-            exit 1
-          fi
-          echo "clean"
+        run: python3 .github/scripts/check-egress.py
+
       - name: Accessibility, responsive, density and keyboard suite
         run: node platform/console/prototype/tests/run-tests.js
 
-      # The property suite navigates by assigning location.hash, so it cannot
-      # find a control that was never wired to anything. The sandbox presses
-      # every control in nine environments instead.
       - name: Full-scale sandbox
         run: node platform/console/prototype/tests/sandbox.js
 
-      # Neither suite above ever inflates the dataset or reads a performance
-      # counter, so a screen that costs 5 ms against seven fixture rows and
-      # 500 ms against five thousand real ones passes both identically. The
-      # stress harness asserts budgets for render cost, retention across a long
-      # tour, sustained use of one screen, and interaction latency.
       - name: Stress and performance budgets
         run: node platform/console/prototype/tests/stress.js
         env:
@@ -96,16 +89,16 @@ jobs:
 
       - name: Keep the last stress report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: console-stress-report
           path: platform/console/prototype/tests/stress-last-run.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 14
 
       - name: Keep the screenshots from both suites
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: console-screenshots
           path: |
@@ -113,3 +106,19 @@ jobs:
             /tmp/argus-sandbox-shots
           if-no-files-found: ignore
           retention-days: 14
+
+  server:
+    name: Console server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: platform/console/server/package-lock.json
+      - run: npm ci
+        working-directory: platform/console/server
+      - run: npm test
+        working-directory: platform/console/server

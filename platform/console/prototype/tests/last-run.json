@@ -66,6 +66,30 @@
     "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
   },
   {
+    "suite": "BOOT",
+    "id": "screen \"stack\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"system\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "screen \"storage\" is registered",
+    "pass": true,
+    "detail": "overview,apps,deploys,compute,data,storage,stack,identity,security,ml,ops,system,audit"
+  },
+  {
+    "suite": "BOOT",
+    "id": "every registered screen is covered by this suite",
+    "pass": true,
+    "detail": "none unlisted"
+  },
+  {
     "suite": "NAV",
     "id": "nav target \"overview\" has a screen",
     "pass": true,
@@ -92,6 +116,12 @@
   {
     "suite": "NAV",
     "id": "nav target \"data\" has a screen",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "nav target \"storage\" has a screen",
     "pass": true,
     "detail": ""
   },
@@ -196,6 +226,18 @@
     "id": "the \"data\" sidebar button is marked current once open",
     "pass": true,
     "detail": "{\"go\":\"data\"}"
+  },
+  {
+    "suite": "NAV",
+    "id": "clicking the \"storage\" sidebar button navigates to it",
+    "pass": true,
+    "detail": "{\"route\":\"storage\",\"painted\":541}"
+  },
+  {
+    "suite": "NAV",
+    "id": "the \"storage\" sidebar button is marked current once open",
+    "pass": true,
+    "detail": "{\"go\":\"storage\"}"
   },
   {
     "suite": "NAV",
@@ -583,6 +625,96 @@
   },
   {
     "suite": "NAV",
+    "id": "\"stack\" routes and renders",
+    "pass": true,
+    "detail": "route=stack children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"stack\" sets a document title",
+    "pass": true,
+    "detail": "Stack operations - Argus Console"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"stack\" updates the breadcrumb",
+    "pass": true,
+    "detail": "crumb=\"Operations\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"stack\" marks the nav item current",
+    "pass": true,
+    "detail": "current=stack"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"stack\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"system\" routes and renders",
+    "pass": true,
+    "detail": "route=system children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"system\" sets a document title",
+    "pass": true,
+    "detail": "System - Argus Console"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"system\" updates the breadcrumb",
+    "pass": true,
+    "detail": "crumb=\"System\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"system\" marks the nav item current",
+    "pass": true,
+    "detail": "current=system"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"system\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"storage\" routes and renders",
+    "pass": true,
+    "detail": "route=storage children=2"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"storage\" sets a document title",
+    "pass": true,
+    "detail": "Object storage - Argus Console"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"storage\" updates the breadcrumb",
+    "pass": true,
+    "detail": "crumb=\"Object storage\""
+  },
+  {
+    "suite": "NAV",
+    "id": "\"storage\" marks the nav item current",
+    "pass": true,
+    "detail": "current=storage"
+  },
+  {
+    "suite": "NAV",
+    "id": "\"storage\" renders exactly one h1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "NAV",
     "id": "deep link \"apps/mills\" renders",
     "pass": true,
     "detail": ""
@@ -709,6 +841,24 @@
   },
   {
     "suite": "A11Y",
+    "id": "stack: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "system: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
+    "id": "storage: no WCAG A/AA violations",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "suite": "A11Y",
     "id": "apps/mills: no WCAG A/AA violations",
     "pass": true,
     "detail": ""
@@ -765,7 +915,7 @@
     "suite": "KBD",
     "id": "the overview has focusable controls",
     "pass": true,
-    "detail": "32 found"
+    "detail": "33 found"
   },
   {
     "suite": "KBD",
@@ -1029,7 +1179,7 @@
     "suite": "DENS",
     "id": "laptop-1366 overview stays under two screens",
     "pass": true,
-    "detail": "1302px = 1.7 screens"
+    "detail": "1319px = 1.7 screens"
   },
   {
     "suite": "RESP",
@@ -1047,13 +1197,13 @@
     "suite": "DENS",
     "id": "laptop-1280 every stat tile clears the fold",
     "pass": true,
-    "detail": "tiles end at 332px of 800px"
+    "detail": "tiles end at 365px of 800px"
   },
   {
     "suite": "DENS",
     "id": "laptop-1280 overview stays under two screens",
     "pass": true,
-    "detail": "1321px = 1.7 screens"
+    "detail": "1352px = 1.7 screens"
   },
   {
     "suite": "RESP",
@@ -1071,13 +1221,13 @@
     "suite": "DENS",
     "id": "small-laptop every stat tile clears the fold",
     "pass": true,
-    "detail": "tiles end at 424px of 768px"
+    "detail": "tiles end at 443px of 768px"
   },
   {
     "suite": "DENS",
     "id": "small-laptop overview stays under two screens",
     "pass": true,
-    "detail": "1414px = 1.8 screens"
+    "detail": "1506px = 2.0 screens"
   },
   {
     "suite": "RESP",
@@ -1335,13 +1485,13 @@
     "suite": "PREFS",
     "id": "local timestamps carry their offset",
     "pass": true,
-    "detail": "2026-09-08 14:30 +05:00"
+    "detail": "2026-09-08 09:30 +00:00"
   },
   {
     "suite": "PREFS",
     "id": "the timezone preference actually changes what is rendered",
     "pass": true,
-    "detail": "2026-09-08 09:30Z vs 2026-09-08 14:30 +05:00 (offset -300)"
+    "detail": "2026-09-08 09:30Z vs 2026-09-08 09:30 +00:00 (offset 0)"
   },
   {
     "suite": "PREFS",

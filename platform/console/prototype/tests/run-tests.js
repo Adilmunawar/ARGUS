@@ -40,7 +40,7 @@ const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-console-shots')
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage'];
 // Detail routes matter more than list routes: they are where the hard layout
 // and the destructive actions live.
 const DEEP = [
@@ -101,6 +101,9 @@ async function axeOn(page, label) {
     rec('BOOT', `screen "${r}" is registered`, globals.screens.indexOf(r) !== -1,
       globals.screens.join(',') || 'none registered');
   }
+  rec('BOOT', 'every registered screen is covered by this suite',
+    globals.screens.every(s => ROUTES.indexOf(s) !== -1),
+    globals.screens.filter(s => ROUTES.indexOf(s) === -1).join(',') || 'none unlisted');
 
   /* ----------------------------------------------------------------- NAV */
 
@@ -474,7 +477,7 @@ async function axeOn(page, label) {
     await page.evaluate(() => {
       const names = [...document.querySelectorAll('.side .nav')]
         .map(n => (n.textContent || '').trim() || n.getAttribute('aria-label') || '');
-      return names.length >= 10 && names.every(Boolean);
+      return names.length === document.querySelectorAll('.side .nav[data-go]').length && names.every(Boolean);
     }));
   await page.setViewportSize({ width: 1440, height: 900 });
 

@@ -36,7 +36,7 @@ const URL = pathToFileURL(path.resolve(FILE)).href;
 const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-sandbox-shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage'];
 const DEEP = [
   'apps/mills', 'apps/agis', 'apps/console',
   'deploys/1847', 'deploys/1843',
@@ -128,13 +128,16 @@ async function reset(page) {
 
     const boot = await page.evaluate(() => ({
       argus: !!window.ARGUS,
-      screens: Object.keys(window.ARGUS.screens).length,
+      screens: Object.keys(window.ARGUS.screens),
       theme: document.documentElement.getAttribute('data-theme'),
       painted: document.getElementById('main').textContent.trim().length,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
     }));
+    const missing = ROUTES.filter(r => boot.screens.indexOf(r) === -1);
+    const unlisted = boot.screens.filter(r => ROUTES.indexOf(r) === -1);
     rec('ENV', `${env.id}: the console boots with every screen registered`,
-      boot.argus && boot.screens === 10 && boot.painted > 50, JSON.stringify(boot));
+      boot.argus && !missing.length && !unlisted.length && boot.painted > 50,
+      JSON.stringify({ ...boot, screens: boot.screens.length, missing, unlisted }));
     rec('ENV', `${env.id}: the requested theme is the one applied`,
       boot.theme === env.theme, `${boot.theme} != ${env.theme}`);
     rec('ENV', `${env.id}: the shell does not scroll sideways`,

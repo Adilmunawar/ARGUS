@@ -1233,6 +1233,10 @@
                when the thing being refreshed is halfway down a listing. */
             A.forget();
             rebuild(body, params);
+            if (A.storeMode() !== A.MODE.LIVE) {
+              A.flash('info', 'There is nothing to re-read',
+                'The console API is not answering, so this screen has no source to refresh from.');
+            }
           }
         })]));
 

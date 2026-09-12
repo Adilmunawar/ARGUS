@@ -49,7 +49,7 @@ const SCALES = (process.env.STRESS_SCALES || '1,10,50').split(',').map(Number).f
 const WORKERS = Number(process.env.STRESS_WORKERS || 4);
 const JSON_OUT = process.env.STRESS_JSON || path.join(__dirname, 'stress-last-run.json');
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage'];
 
 /**
  * The views that actually cost something.
@@ -194,7 +194,7 @@ async function newPage(browser, viewport) {
   const cdp = await ctx.newCDPSession(page);
   await cdp.send('Performance.enable');
   await page.goto(URL);
-  await page.waitForFunction(() => window.ARGUS && window.ARGUS.data && Object.keys(window.ARGUS.screens || {}).length >= 10, null, { timeout: 15000 });
+  await page.waitForFunction((n) => window.ARGUS && window.ARGUS.data && Object.keys(window.ARGUS.screens || {}).length >= n, ROUTES.length, { timeout: 15000 });
   return { ctx, page, cdp, errors };
 }
 

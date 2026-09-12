@@ -185,21 +185,34 @@
     title: 'System',
     crumb: 'System',
     render: function (mount) {
+      var alive = true;
+      var body = el('div');
+
+      function repaint() {
+        body.textContent = '';
+        A.probe().then(function () { if (alive) build(body); });
+      }
+
       mount.appendChild(ui.pageHeader(
         'System',
         'The machine this console runs on, and the cloud account it can see. Everything here is read live.',
         [ui.btn('Refresh', {
-          onClick: function () { A.forget(); A.go('system'); }
+          onClick: function () {
+            A.forget();
+            repaint();
+            if (A.storeMode() !== A.MODE.LIVE) {
+              A.flash('info', 'There is nothing to re-read',
+                'The console API is not answering, so this screen has no source to refresh from.');
+            }
+          }
         })]));
 
       /* Whether there is an API to read is itself something that has to be
          found out, so the screen is built after the probe rather than guessing
          from a mode that may still be 'unknown' on the first paint. */
-      var body = el('div');
       mount.appendChild(body);
-      var alive = true;
       A.onLeave(function () { alive = false; });
-      A.probe().then(function () { if (alive) build(body); });
+      repaint();
     }
   });
 

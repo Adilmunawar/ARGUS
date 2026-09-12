@@ -77,8 +77,9 @@ gh repo edit "$OWNER/$NAME" --description "$DESCRIPTION" --homepage "$WEBSITE" \
   --enable-issues --enable-wiki=false --enable-projects=false
 gh repo edit "$OWNER/$NAME" --add-topic "$TOPICS"
 
+BRANCH="$(git symbolic-ref --short HEAD)"
 say "Pushing $(git rev-list --count HEAD) commits and $(git tag | wc -l | tr -d ' ') tags"
-git push -u origin main
+git push -u origin "$BRANCH"
 git push --tags
 
 # ── Release ──────────────────────────────────────────────────────────────────
@@ -97,17 +98,31 @@ fi
 # signing key configured locks the owner out of their own repository. Configure
 # signing first, then enable it in Settings -> Branches. ADR-0023 has the
 # reconciler verify signatures regardless of what GitHub enforces.
-say "Protecting main: pull request required, validate check required"
-gh api -X PUT "repos/$OWNER/$NAME/branches/main/protection" \
-  -H "Accept: application/vnd.github+json" \
-  -f 'required_status_checks[strict]=true' \
-  -f 'required_status_checks[contexts][]=GitOps schema and secret scan' \
-  -f 'required_status_checks[contexts][]=Console prototype tests' \
-  -f 'enforce_admins=false' \
-  -f 'required_pull_request_reviews[required_approving_review_count]=1' \
-  -f 'restrictions=' 2>/dev/null \
-  && echo "  protected" \
-  || echo "  Skipped: branch protection needs a paid plan on private repos. Set it in Settings → Branches."
+BRANCH="$(git symbolic-ref --short HEAD)"
+
+say "Protecting $BRANCH: pull request required, validate checks required"
+protection_payload() {
+  cat <<JSON
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": ["Repository invariants", "Console prototype tests", "Console server tests"]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": { "required_approving_review_count": 1 },
+  "restrictions": null
+}
+JSON
+}
+
+if protect_err="$(protection_payload | gh api -X PUT \
+    "repos/$OWNER/$NAME/branches/$BRANCH/protection" \
+    -H "Accept: application/vnd.github+json" --input - 2>&1 >/dev/null)"; then
+  echo "  protected"
+else
+  echo "  Branch protection was NOT applied:"
+  printf '    %s\n' "$protect_err" | head -3
+fi
 
 # Free for public repositories.
 gh api -X PATCH "repos/$OWNER/$NAME" \
