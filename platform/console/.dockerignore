@@ -11,6 +11,7 @@
 
 # Test output written by the three harnesses. Regenerated, machine-specific,
 # and one of them records absolute paths from the machine that ran it.
+prototype/tests/last-run.json
 prototype/tests/sandbox-last-run.json
 prototype/tests/stress-last-run.json
 prototype/tests/*.png

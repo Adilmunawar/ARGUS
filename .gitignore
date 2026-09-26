@@ -11,6 +11,7 @@ obj/
 .next/
 
 # test output
+platform/console/prototype/tests/last-run.json
 platform/console/prototype/tests/sandbox-last-run.json
 platform/console/prototype/tests/stress-last-run.json
 
