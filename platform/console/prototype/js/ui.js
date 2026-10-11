@@ -199,6 +199,27 @@
     var state = { key: opts.sortKey || null, dir: opts.sortDir || 'asc' };
     var announceNext = false;
     var current = rows.slice();
+    var selectable = !!(opts.selectable && opts.rowKey);
+    var selected = Object.create(null);
+    var headCheck = null;
+
+    function selectedKeys() {
+      return Object.keys(selected);
+    }
+
+    function selectionChanged() {
+      if (headCheck) {
+        var keysShown = current.map(function (r) { return opts.rowKey(r); });
+        var n = keysShown.filter(function (k) { return selected[k]; }).length;
+        headCheck.checked = keysShown.length > 0 && n === keysShown.length;
+        headCheck.indeterminate = n > 0 && n < keysShown.length;
+      }
+      if (opts.onSelect) opts.onSelect(selectedKeys());
+    }
+
+    function setSelected(key, on) {
+      if (on) selected[key] = true; else delete selected[key];
+    }
 
     var wrap = el('div.tablewrap', { tabindex: '0', role: 'region', 'aria-label': opts.caption });
     var t = el('table');
@@ -253,6 +274,23 @@
       tr.dataset.rowIndex = String(absoluteIndex);
       tr.setAttribute('aria-rowindex', String(absoluteIndex + 2));
       if (opts.rowKey) tr.dataset.key = opts.rowKey(row);
+      if (selectable) {
+        var key = opts.rowKey(row);
+        var box = el('input.rowcheck', {
+          type: 'checkbox',
+          'aria-label': 'Select ' + ((opts.selectLabel && opts.selectLabel(row)) || key),
+          checked: selected[key] ? true : null,
+          on: {
+            change: function () {
+              setSelected(key, box.checked);
+              tr.classList.toggle('is-selected', box.checked);
+              selectionChanged();
+            }
+          }
+        });
+        tr.classList.toggle('is-selected', !!selected[key]);
+        tr.appendChild(el('td.sel', box));
+      }
       cols.forEach(function (c) {
         var td = el('td' + (c.align === 'right' ? '.num' : '') + (c.status ? '.st' : ''));
         var v = c.render ? c.render(row) : row[c.key];
@@ -268,7 +306,7 @@
 
     function spacer(height) {
       return el('tr.vspacer', { 'aria-hidden': 'true' },
-        el('td', { colspan: String(cols.length), style: { height: height + 'px', padding: '0' } }));
+        el('td', { colspan: String(cols.length + (selectable ? 1 : 0)), style: { height: height + 'px', padding: '0' } }));
     }
 
     function focusedRowKey() {
@@ -294,7 +332,7 @@
       clear(tbody);
 
       if (!list.length) {
-        tbody.appendChild(el('tr', el('td', { colspan: String(cols.length) },
+        tbody.appendChild(el('tr', el('td', { colspan: String(cols.length + (selectable ? 1 : 0)) },
           el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
         restoreRowFocus(keepFocus);
         return;
@@ -366,6 +404,26 @@
       }
     }
 
+    if (selectable) {
+      headCheck = el('input.rowcheck', {
+        type: 'checkbox', 'aria-label': 'Select every row shown',
+        on: {
+          change: function () {
+            var on = headCheck.checked;
+            current.forEach(function (r) { setSelected(opts.rowKey(r), on); });
+            Array.prototype.forEach.call(tbody.querySelectorAll('tr[data-key]'), function (tr) {
+              var box = tr.querySelector('.rowcheck');
+              if (box) box.checked = on;
+              tr.classList.toggle('is-selected', on);
+            });
+            selectionChanged();
+            A.announce(on ? current.length + ' rows selected' : 'Selection cleared');
+          }
+        }
+      });
+      headRow.appendChild(el('th.sel', { scope: 'col' }, headCheck));
+    }
+
     cols.forEach(function (c) {
       var th = el('th', { scope: 'col', style: c.width ? { width: c.width } : null });
       if (c.align === 'right') th.classList.add('num');
@@ -401,8 +459,110 @@
     paint();
     wrap.repaint = paint;
     wrap.currentRows = function () { return current.slice(); };
-    wrap.setRows = function (next) { rows = next || []; paint(); };
+    wrap.setRows = function (next) { rows = next || []; paint(); if (selectable) selectionChanged(); };
+    wrap.columns = cols;
+    wrap.selectedKeys = selectedKeys;
+    wrap.selectedRows = function () {
+      return rows.filter(function (r) { return selected[opts.rowKey(r)]; });
+    };
+    wrap.clearSelection = function () {
+      selected = Object.create(null);
+      Array.prototype.forEach.call(tbody.querySelectorAll('tr.is-selected'), function (tr) {
+        tr.classList.remove('is-selected');
+        var box = tr.querySelector('.rowcheck');
+        if (box) box.checked = false;
+      });
+      selectionChanged();
+    };
     return wrap;
+  }
+
+  function csvField(v) {
+    if (v instanceof Date) v = v.toISOString();
+    var s = v === null || v === undefined ? '' : String(v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function csvOf(cols, rows) {
+    var used = cols.filter(function (c) { return c.csv || c.sort || (c.key && c.sortable !== false); });
+    var lines = [used.map(function (c) { return csvField(c.label); }).join(',')];
+    rows.forEach(function (r) {
+      lines.push(used.map(function (c) {
+        var v;
+        if (c.csv) v = c.csv(r);
+        else if (c.key && r[c.key] !== undefined) v = r[c.key];
+        else if (c.sort) v = c.sort(r);
+        if (Array.isArray(v)) v = v.join('; ');
+        else if (v && typeof v === 'object' && !(v instanceof Date)) v = JSON.stringify(v);
+        return csvField(v);
+      }).join(','));
+    });
+    return lines.join('\n');
+  }
+
+  function csvDialog(text, title, name) {
+    var rows = text.split('\n').length - 1;
+    A.dialog({
+      wide: true,
+      title: title || ('Export ' + fmt.num(rows) + ' rows as CSV'),
+      body: function () {
+        var area = el('textarea.field.mono', {
+          id: 'csv-export', rows: '14', readonly: true, spellcheck: 'false',
+          'aria-label': (name || 'Table') + ' as CSV, read only',
+          'aria-describedby': 'csv-export-note'
+        });
+        area.value = text;
+        return [
+          el('p', { text: 'Exactly what the table holds, in the order it is sorted, ' + fmt.num(rows) + ' row' + (rows === 1 ? '' : 's') + '.' }),
+          area,
+          el('p.hint', {
+            id: 'csv-export-note',
+            text: 'Shown rather than downloaded because the prototype opens from file:// with downloads blocked. A real deployment streams the same rows from the API, signed.'
+          })
+        ];
+      },
+      actions: function (close) {
+        return [
+          btn('Copy the CSV', {
+            variant: 'ghost',
+            onClick: function () {
+              var area = document.getElementById('csv-export');
+              if (!area) return;
+              var done = function () { A.flash('ok', 'CSV copied', fmt.num(rows) + ' rows are on the clipboard.', { timeout: 5000 }); };
+              var fallback = function () { area.focus(); area.select(); A.announce('The clipboard refused the copy, so the text is selected instead. Press Ctrl C.'); };
+              try {
+                if (window.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(area.value).then(done, fallback);
+                  return;
+                }
+              } catch (e) {  }
+              fallback();
+            }
+          }),
+          btn('Select the CSV text', {
+            variant: 'ghost',
+            onClick: function () {
+              var area = document.getElementById('csv-export');
+              if (area) { area.focus(); area.select(); A.announce('CSV text selected, ready to copy'); }
+            }
+          }),
+          btn('Close', { variant: 'primary', onClick: close })
+        ];
+      }
+    });
+  }
+
+  function exportButton(getTable, name) {
+    return btn('Export CSV', {
+      variant: 'ghost',
+      title: 'Show ' + name + ' as CSV text, filtered and sorted as it is now',
+      onClick: function () {
+        var t = typeof getTable === 'function' ? getTable() : getTable;
+        if (!t || !t.currentRows) { A.flash('info', 'Nothing to export', 'The table is empty.'); return; }
+        var rows = t.currentRows();
+        csvDialog(csvOf(t.columns, rows), 'Export ' + fmt.num(rows.length) + ' ' + name + ' as CSV', name);
+      }
+    });
   }
 
   function emptyState(title, detail, action) {
@@ -941,8 +1101,13 @@
       }));
   }
 
-  function propertyFilter(fields, onChange) {
+  function propertyFilter(fields, onChange, opts) {
+    opts = opts || {};
     var tokens = [];
+    (opts.initial || []).forEach(function (t) {
+      var f = fields.filter(function (x) { return x.key === t.key; })[0];
+      if (f && t.value) tokens.push({ key: f.key, label: f.label, value: String(t.value) });
+    });
     var input = el('input.pf-input', {
       type: 'text', 'aria-label': 'Filter', placeholder: 'Filter by property, then press Enter',
       autocomplete: 'off', spellcheck: 'false'
@@ -991,10 +1156,33 @@
       }
     });
 
-    return el('div.pf', [
+    repaintTokens();
+    var node = el('div.pf', [
       el('div.pf-row', [fieldSel, input, btn('Add filter', { variant: 'ghost', onClick: add })]),
       tokenBox
     ]);
+    node.tokens = function () { return tokens.slice(); };
+    return node;
+  }
+
+  function encodeTokens(tokens) {
+    if (!tokens || !tokens.length) return null;
+    return tokens.map(function (t) {
+      return encodeURIComponent(t.key) + ':' + encodeURIComponent(t.value);
+    }).join(',');
+  }
+
+  function decodeTokens(raw) {
+    if (!raw) return [];
+    var out = [];
+    String(raw).split(',').forEach(function (part) {
+      var at = part.indexOf(':');
+      if (at <= 0) return;
+      try {
+        out.push({ key: decodeURIComponent(part.slice(0, at)), value: decodeURIComponent(part.slice(at + 1)) });
+      } catch (e) {  }
+    });
+    return out;
   }
 
   function applyTokens(rows, tokens, accessors) {
@@ -1162,6 +1350,8 @@
   UI.logView = logView; UI.logLevel = logLevel; UI.LOG_LEVELS = LOG_LEVELS; UI.LOG_LEVEL_LABEL = LOG_LEVEL_LABEL;
   UI.heartbeatSentence = heartbeatSentence; UI.BEAT = BEAT;
   UI.propertyFilter = propertyFilter; UI.applyTokens = applyTokens; UI.menu = menu;
+  UI.csvOf = csvOf; UI.csvDialog = csvDialog; UI.exportButton = exportButton;
+  UI.encodeTokens = encodeTokens; UI.decodeTokens = decodeTokens;
 
   A.ui = UI;
 })();

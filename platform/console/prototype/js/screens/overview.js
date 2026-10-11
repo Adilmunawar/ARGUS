@@ -63,6 +63,7 @@
       case 'grant.revoke': return who + ' revoked ' + row.target + '.';
       case 'elevation.request': return who + ' elevated ' + row.target + '.';
       case 'elevation.release': return who + ' released the elevation of ' + row.target + '.';
+      case 'elevation.extend': return who + ' extended an elevation: ' + row.target + '.';
       case 'secret.revoke-leases': return who + ' revoked every lease on ' + row.target + '.';
       case 'vuln.waive': return who + ' waived ' + row.target + '.';
       case 'model.promote': return who + ' promoted model ' + row.target + '.';

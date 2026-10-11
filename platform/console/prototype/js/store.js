@@ -17,6 +17,43 @@
 
   function now() { return Date.now(); }
 
+  var health = { lastOkAt: null, lastFailAt: null, lastError: null, reads: 0, failures: 0 };
+  var watchers = [];
+
+  function summary() {
+    var stale = health.lastFailAt !== null && (health.lastOkAt === null || health.lastFailAt > health.lastOkAt);
+    return {
+      mode: state.mode,
+      probedAt: state.probedAt,
+      probeError: state.probeError,
+      lastOkAt: health.lastOkAt,
+      lastFailAt: health.lastFailAt,
+      lastError: health.lastError,
+      reads: health.reads,
+      failures: health.failures,
+      stale: stale
+    };
+  }
+
+  function notify() {
+    var snap = summary();
+    watchers.slice().forEach(function (fn) {
+      try { fn(snap); } catch (e) { if (window.console) window.console.warn('store watcher failed', e); }
+    });
+  }
+
+  A.watchStore = function (fn) {
+    if (typeof fn !== 'function') return function () {};
+    watchers.push(fn);
+    fn(summary());
+    return function () {
+      var at = watchers.indexOf(fn);
+      if (at !== -1) watchers.splice(at, 1);
+    };
+  };
+
+  A.storeHealth = summary;
+
   function routeSignal() {
     return typeof A.routeSignal === 'function' ? A.routeSignal() : null;
   }
@@ -87,6 +124,7 @@
       state.mode = MODE.SAMPLE;
       state.probedAt = now();
       state.probeError = { reason: 'file-url', message: 'Opened from the filesystem, so there is no console API to reach.' };
+      notify();
       return Promise.resolve(state);
     }
     if (!state.probing) {
@@ -94,11 +132,14 @@
         state.mode = MODE.LIVE;
         state.capabilities = caps;
         state.probedAt = now();
+        health.lastOkAt = now();
+        notify();
         return state;
       }, function (err) {
         state.mode = MODE.SAMPLE;
         state.probeError = err;
         state.probedAt = now();
+        notify();
         return state;
       });
     }
@@ -133,10 +174,19 @@
       };
       cached[path] = { at: now(), envelope: envelope };
       delete inflight[ik];
+      health.reads += 1;
+      health.lastOkAt = now();
+      notify();
       return envelope;
     }, function (err) {
       delete inflight[ik];
       if (err && err.reason === 'cancelled' && hit) return hit.envelope;
+      if (!(err && err.reason === 'cancelled')) {
+        health.failures += 1;
+        health.lastFailAt = now();
+        health.lastError = err || null;
+        notify();
+      }
       if (hit) {
         var stale = {};
         for (var k in hit.envelope) if (Object.prototype.hasOwnProperty.call(hit.envelope, k)) stale[k] = hit.envelope[k];

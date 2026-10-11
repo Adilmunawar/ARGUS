@@ -255,21 +255,67 @@
 
   A.state = { env: 'production', route: 'overview', params: {} };
 
+  var RECENT_MAX = 8;
+  var recents = [];
+  function loadRecents() {
+    try {
+      var raw = window.localStorage.getItem('argus.recent');
+      var list = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(list)) return;
+      recents = list.filter(function (r) {
+        return r && typeof r === 'object' && typeof r.hash === 'string' && /^#\//.test(r.hash) &&
+          typeof r.label === 'string' && r.label.length < 120;
+      }).slice(0, RECENT_MAX);
+    } catch (e) { recents = []; }
+  }
+  function saveRecents() {
+    try { window.localStorage.setItem('argus.recent', JSON.stringify(recents)); } catch (e) {  }
+  }
+  function remember(hash, label, kind) {
+    if (!hash || !label) return;
+    recents = recents.filter(function (r) { return r.hash !== hash; });
+    recents.unshift({ hash: hash, label: label, kind: kind || 'Screen', at: Date.now() });
+    if (recents.length > RECENT_MAX) recents.length = RECENT_MAX;
+    saveRecents();
+  }
+  A.recents = function () { return recents.slice(); };
+  A.forgetRecents = function () { recents = []; saveRecents(); };
+
   A.me = function () { return String(A.data.me.upn || '').split('@')[0]; };
 
-  A.record = function (action, target, pr) {
+  A.record = function (action, target, pr, actor, role) {
     var me = A.data.me;
+    var system = actor && actor !== A.me();
     var row = {
       at: new Date(A.data.now.getTime()),
-      actor: A.me(),
-      role: me.elevation ? 'Admin' : (me.role || 'Operator'),
+      actor: actor || A.me(),
+      role: role || (system ? 'System' : (me.elevation ? 'Admin' : (me.role || 'Operator'))),
       action: action,
       target: target,
       pr: pr === undefined ? null : pr,
-      ip: '10.99.0.14'
+      ip: system ? '10.30.0.31' : '10.99.0.14'
     };
     A.data.audit.unshift(row);
     return row;
+  };
+
+  A.undoable = function (label, undo) {
+    var used = false;
+    return ui.btn(label || 'Undo', {
+      variant: 'ghost',
+      onClick: function (e) {
+        if (used) return;
+        used = true;
+        var flash = e && e.target && e.target.closest ? e.target.closest('.flash') : null;
+        if (flash) flash.remove();
+        undo();
+      }
+    });
+  };
+
+  A.unrecord = function (row) {
+    var at = A.data.audit.indexOf(row);
+    if (at !== -1) A.data.audit.splice(at, 1);
   };
 
   A.refreshBadges = function () {
@@ -451,6 +497,9 @@
     window.scrollTo(0, 0);
     A.announce(pageTitle + ' loaded');
     closeDrawerNav();
+    remember(A.href(r.route, r.rest),
+      r.rest.length ? (def.title || r.route) + ' / ' + r.rest.join(' / ') : (def.title || r.route),
+      r.rest.length ? 'Resource' : 'Screen');
   }
 
   function paletteItems() {
@@ -581,10 +630,37 @@
       text: 'Screens and actions only. Bundled sample resources until the console API answers.'
     });
 
+    var recentItems = A.recents().map(function (r) {
+      return indexItem({
+        kind: 'Recent', label: r.label, hint: r.kind,
+        run: function () { if (window.location.hash === r.hash) render(); else window.location.hash = r.hash; }
+      });
+    });
+
     function paint() {
       var q = input.value.trim();
       var LIMIT = 40;
       var best = [];
+      if (!q && recentItems.length) {
+        results = recentItems.concat(items.filter(function (it) { return it.kind === 'Go to' || it.kind === 'Action'; })).slice(0, LIMIT);
+        active = 0;
+        clear(list);
+        var recFrag = document.createDocumentFragment();
+        results.forEach(function (it, i) {
+          recFrag.appendChild(el('li.pal-item', {
+            role: 'option', id: 'pal-opt-' + i, 'aria-selected': i === 0 ? 'true' : 'false',
+            on: { click: function () { run(i); }, mousemove: function () { setActive(i); } }
+          }, [
+            el('span.pal-kind', { text: it.kind }),
+            el('span.pal-label', { text: it.label }),
+            it.hint ? el('span.pal-hint', { text: it.hint }) : null
+          ]));
+        });
+        list.appendChild(recFrag);
+        count.textContent = recentItems.length + ' recent, then screens and actions. Type to search everything.';
+        setActive(0);
+        return;
+      }
       var lowest = -Infinity;
       for (var ix = 0; ix < items.length; ix++) {
         var sc = q ? fuzzy(q, items[ix].hay) : 0;
@@ -716,6 +792,7 @@
     A.stepUp('Elevating to ' + group + ' needs a second factor.', function () {
       A.data.me.elevation = {
         group: group, reason: reason,
+        grantedAt: Date.now(),
         expires: new Date(Date.now() + hours * 3600000)
       };
       var who = A.data.personByUpn(A.me());
@@ -748,16 +825,44 @@
     if (!e) { host.hidden = true; if (elevationTimer) { clearInterval(elevationTimer); elevationTimer = null; } return; }
     host.hidden = false;
 
+    var ENDING_S = 300;
+    var MAX_MS = 4 * 3600000;
     function tick() {
       var left = Math.max(0, Math.round((e.expires - new Date()) / 1000));
       var t = host.querySelector('.elev-time');
       if (t) t.textContent = ui.fmt.dur(left) + ' left';
+      var ending = left > 0 && left <= ENDING_S;
+      if (ending && !e.warned) {
+        e.warned = true;
+        host.classList.add('is-ending');
+        A.flash('warn', 'Elevation ends in ' + ui.fmt.dur(left),
+          'Anything still running under ' + e.group + ' fails at the next authorisation check. Extend it or finish up.',
+          { timeout: 15000 });
+      }
+      if (!ending) host.classList.remove('is-ending');
       if (left <= 0) A.dropElevation();
+    }
+
+    function extend() {
+      var grantedAt = e.grantedAt || (e.expires.getTime() - 2 * 3600000);
+      var cap = grantedAt + MAX_MS;
+      if (e.expires.getTime() >= cap) {
+        A.flash('info', 'Already at the four hour maximum', 'Release this elevation and request a new one with a fresh reason.');
+        return;
+      }
+      A.stepUp('Extending the elevation to ' + e.group + ' needs a second factor.', function () {
+        e.expires = new Date(Math.min(cap, e.expires.getTime() + 3600000));
+        e.warned = false;
+        A.record('elevation.extend', A.me() + ' in ' + e.group + ' until ' + ui.fmt.stamp(e.expires));
+        A.flash('ok', 'Elevation extended', 'Now ends ' + ui.fmt.stamp(e.expires) + '. The extension is in the audit.', { timeout: 6000 });
+        paintElevation();
+      });
     }
 
     host.appendChild(el('span.elev-glyph', { 'aria-hidden': 'true', text: '▲' }));
     host.appendChild(el('span', [el('strong', { text: e.group }), ' · ', e.reason]));
     host.appendChild(el('span.elev-time', { text: '', 'aria-hidden': 'true' }));
+    host.appendChild(ui.btn('Extend 1 h', { variant: 'ghost', title: 'Add an hour, up to four in total, with a second factor', onClick: extend }));
     host.appendChild(ui.btn('Release now', { variant: 'ghost', onClick: A.dropElevation }));
 
     if (elevationTimer) { clearInterval(elevationTimer); elevationTimer = null; }
@@ -956,6 +1061,80 @@
     if (first) first.focus();
   }
 
+  var MODE_WORD = { live: 'Live', sample: 'Sample data', stale: 'Stale', down: 'API down', unknown: 'Connecting' };
+
+  function paintMode(snap) {
+    var pill = document.getElementById('modepill');
+    if (!pill) return;
+    var key, detail;
+    if (snap.mode === 'live' && snap.stale) {
+      key = snap.lastOkAt ? 'stale' : 'down';
+      detail = 'The console API answered at first but the last read failed' +
+        (snap.lastError && snap.lastError.message ? ': ' + snap.lastError.message : '.') +
+        (snap.lastOkAt ? ' Last good read ' + ui.fmt.stamp(new Date(snap.lastOkAt)) + '.' : '');
+    } else if (snap.mode === 'live') {
+      key = 'live';
+      detail = 'Reading the console API. ' + snap.reads + ' read' + (snap.reads === 1 ? '' : 's') + ' this session' +
+        (snap.lastOkAt ? ', last at ' + ui.fmt.stamp(new Date(snap.lastOkAt)) : '') + '.';
+    } else if (snap.mode === 'sample') {
+      key = 'sample';
+      detail = (snap.probeError && snap.probeError.message) || 'Bundled sample data. Nothing here has been measured.';
+    } else {
+      key = 'unknown';
+      detail = 'Asking the console API whether it is there.';
+    }
+    pill.className = 'modepill is-' + key;
+    clear(pill);
+    pill.appendChild(el('span.mode-dot', { 'aria-hidden': 'true' }));
+    pill.appendChild(el('span', { text: MODE_WORD[key] }));
+    pill.title = detail;
+    pill.setAttribute('aria-label', 'Data source: ' + MODE_WORD[key] + '. ' + detail + ' Activate for the detail.');
+    lastSnap = snap;
+    lastKey = key;
+    lastDetail = detail;
+  }
+
+  var lastSnap = null, lastKey = 'unknown', lastDetail = '';
+
+  A.dataSource = function () {
+    var snap = lastSnap || (typeof A.storeHealth === 'function' ? A.storeHealth() : null) || {};
+    var stampOf = function (t) { return t ? ui.fmt.stamp(new Date(t)) : 'never'; };
+    A.dialog({
+      title: 'Data source: ' + MODE_WORD[lastKey],
+      body: function () {
+        return [
+          el('p', { text: lastDetail }),
+          ui.dl([
+            ['Mode', snap.mode || 'unknown'],
+            ['Probed', stampOf(snap.probedAt)],
+            ['Last good read', stampOf(snap.lastOkAt)],
+            ['Last failed read', stampOf(snap.lastFailAt)],
+            ['Reads this session', ui.fmt.num(snap.reads || 0)],
+            ['Failures this session', ui.fmt.num(snap.failures || 0)],
+            ['Last error', snap.lastError && snap.lastError.message ? snap.lastError.message : (snap.probeError && snap.probeError.message) || 'none']
+          ]),
+          el('p.hint', {
+            text: snap.mode === 'live'
+              ? 'Every figure on a live screen was read from the console API at the time shown on that screen. A stale read is shown with a warning on the panel it belongs to.'
+              : 'Nothing on a sample screen has been measured. Start the console API and open the console it serves to read the estate.'
+          })
+        ];
+      },
+      actions: function (close) {
+        var out = [ui.btn('Close', { variant: 'ghost', onClick: close })];
+        if (A.state.route !== 'system') {
+          out.push(ui.btn('Open the System screen', { variant: 'primary', onClick: function () { close(); A.go('system'); } }));
+        } else {
+          out.push(ui.btn('Re-read everything', {
+            variant: 'primary',
+            onClick: function () { close(); if (typeof A.forget === 'function') A.forget(); render(); }
+          }));
+        }
+        return out;
+      }
+    });
+  };
+
   var narrowQuery = window.matchMedia ? window.matchMedia('(max-width: 1200px)') : null;
 
   function paintNavTitles() {
@@ -990,6 +1169,7 @@
 
   function boot() {
     loadPrefs();
+    loadRecents();
     applyTheme();
     if (darkQuery) {
       var onSchemeChange = function () { if (prefs.theme === 'system') applyTheme(); };
@@ -1037,6 +1217,12 @@
     document.getElementById('helpbtn').addEventListener('click', A.shortcuts);
     document.getElementById('prefsbtn').addEventListener('click', A.settings);
     document.getElementById('bell').addEventListener('click', function () { A.go('security', ['alerts']); });
+    var modePill = document.getElementById('modepill');
+    if (modePill) {
+      modePill.addEventListener('click', function () { A.dataSource(); });
+      if (typeof A.watchStore === 'function') A.watchStore(paintMode);
+      if (typeof A.probe === 'function') A.probe();
+    }
     document.getElementById('whobtn').addEventListener('click', function () { A.go('identity', ['people']); });
 
     document.addEventListener('keydown', function (e) {

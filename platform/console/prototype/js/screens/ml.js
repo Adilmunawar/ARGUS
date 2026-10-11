@@ -124,13 +124,22 @@
       blast: 'Serving ' + m.metric + ' ' + fmt.num(m.value, 3) + ', trained on '
         + fmt.num(m.rows) + ' rows ' + fmt.ago(m.trained) + '.',
       onConfirm: function () {
-        A.data.models.forEach(function (other) { if (other.metric === m.metric) other.promoted = false; });
+        var previous = A.data.models.filter(function (other) { return other.metric === m.metric && other.promoted; });
+        previous.forEach(function (other) { other.promoted = false; });
         m.promoted = true;
-        A.record('model.promote', m.run + ' (' + m.metric + ' ' + fmt.num(m.value, 3) + ')');
+        var row = A.record('model.promote', m.run + ' (' + m.metric + ' ' + fmt.num(m.value, 3) + ')');
+        var undo = A.undoable('Undo', function () {
+          m.promoted = false;
+          previous.forEach(function (other) { other.promoted = true; });
+          A.unrecord(row);
+          A.flash('info', 'Promotion undone', (previous[0] ? previous[0].run : 'The previous run') + ' is serving again.', { timeout: 6000 });
+          A.refresh();
+        });
         A.replaceHash(A.href('ml', ['models']));
         A.refresh();
         A.flash('warn', m.run + ' promoted',
-          'Ray Serve is draining the previous replica set. Watch p95 on the Endpoints tab for the next ten minutes.');
+          'Ray Serve is draining the previous replica set. Watch p95 on the Endpoints tab for the next ten minutes.',
+          { action: undo });
       }
     });
   }

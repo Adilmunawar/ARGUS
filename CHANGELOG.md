@@ -2,6 +2,26 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.9.0] - 2026-10-11
+
+Features an operator reaches for once the basics work. Every one of them is built on the state-carrying actions of 0.8.0, tested in the ACT suite, and leaves nothing running when the screen is left.
+
+### Added
+- **A data-source indicator in the header.** Live, Stale, API down or Sample data, with the last good read and the reason in its tooltip, driven by the store rather than guessed from the screen. It opens a detail with the probe time, the last good and failed reads and the last error, with a way to the System screen or a full re-read. Below 900 pixels it yields to the search box; the System screen carries the same facts.
+- **Recent items in the palette.** With nothing typed, `Ctrl`+`K` offers the last eight resources and screens you were on, then the screens and actions; typing searches everything as before. Kept per browser, validated on load like the preferences.
+- **Filters in the address.** The property filter on Applications, Alerts and Audit writes its tokens into the URL, so a filtered view can be reloaded, sent as a link, or opened from a runbook. Acknowledging from a filtered list keeps the filter.
+- **Bulk selection.** Tables can select rows, with a header checkbox for everything shown, keyboard and screen-reader labels per row, and the selection surviving a sort. The alerts table uses it: select, then acknowledge every open alert among the selected ones with one note. Alerts that are already acknowledged or resolved are counted and skipped, not refused.
+- **Undo on the flash** for acknowledging alerts, denying a grant and promoting a model: one press puts the data back and withdraws the audit rows the action wrote. The undo button disappears with the flash, so it cannot be pressed twice.
+- **CSV export on every major table**: applications, alerts, vulnerabilities, sessions, hosts, virtual machines, people, secret paths, backup stores and drills, as well as the audit. Each exports exactly the rows it shows, filtered and sorted as they are, without its action column, with a copy button.
+- **A rolling upgrade you can watch.** An in-flight deployment advances one upgrade domain every few seconds on the deployment screen and on the queue, the bar and its sentence following, and finishes into Recent with its duration, the application's version updated and a `reconcile.apply` audit row from the reconciler. The clock stops when the screen is left and is proved to leave no interval behind.
+- **Elevation expiry warning.** Five minutes before a grant lapses the bar turns red and warns once; an Extend button adds an hour with a second factor, capped at four hours from the grant, and records the extension.
+
+### Changed
+- Audit rows can now carry a system actor, which is how the reconciler's apply is recorded with its own address.
+
+### Note
+- 369 property checks, 125 sandbox checks and every stress budget pass.
+
 ## [0.8.0] - 2026-10-11
 
 The console looked finished and was not usable for real work: every action ended in a flash message and changed nothing, so an operator who acknowledged an alert saw it still open, with the same badge, on the next screen. Two audits ran alongside the console work, one over the API server and one over the compose stack and its scripts, each verified by executing the code rather than reading it. Everything they found is fixed below.

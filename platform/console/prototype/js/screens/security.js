@@ -222,16 +222,20 @@
     ]);
   }
 
-  function acknowledgeDialog(alert) {
+  function acknowledgeDialog(alert, many) {
+    var targets = many && many.length ? many : [alert];
+    var plural = !!(many && many.length);
     A.dialog({
-      title: 'Acknowledge ' + alert.id,
+      title: plural ? 'Acknowledge ' + fmt.num(targets.length) + ' alert' + (targets.length === 1 ? '' : 's') : 'Acknowledge ' + alert.id,
       body: function () {
         var note = el('textarea.field', {
           id: 'ack-note', rows: '4', spellcheck: 'false',
           'aria-describedby': 'ack-help'
         });
         return [
-          el('p', { text: alert.rule + ' on ' + alert.host + ', raised by ' + alert.source + '.' }),
+          plural
+            ? el('ul', targets.map(function (a) { return el('li', { text: a.id + ' · ' + a.rule + ' on ' + a.host }); }))
+            : el('p', { text: alert.rule + ' on ' + alert.host + ', raised by ' + alert.source + '.' }),
           el('label.fieldlabel', { for: 'ack-note', text: 'Why are you acknowledging it?' }),
           note,
           el('p.hint', {
@@ -243,18 +247,28 @@
       actions: function (close) {
         return [
           ui.btn('Cancel', { variant: 'ghost', onClick: close }),
-          ui.btn('Acknowledge alert ' + alert.id, {
+          ui.btn(plural ? 'Acknowledge ' + fmt.num(targets.length) + ' alert' + (targets.length === 1 ? '' : 's') : 'Acknowledge alert ' + alert.id, {
             variant: 'primary',
             onClick: function () {
               var field = document.getElementById('ack-note');
               var note = field && field.value.trim();
               close();
-              alert.state = 'ack';
-              A.record('alert.acknowledge', alert.id + ' ' + alert.rule + ' on ' + alert.host + (note ? ': ' + note : ''));
-              A.flash('ok', 'Alert ' + alert.id + ' acknowledged',
+              var rows = targets.map(function (a) {
+                a.state = 'ack';
+                return A.record('alert.acknowledge', a.id + ' ' + a.rule + ' on ' + a.host + (note ? ': ' + note : ''));
+              });
+              var undo = A.undoable('Undo', function () {
+                targets.forEach(function (a) { a.state = 'open'; });
+                rows.forEach(A.unrecord);
+                A.flash('info', plural ? 'Acknowledgements undone' : 'Acknowledgement undone',
+                  (plural ? fmt.num(targets.length) + ' alerts are' : alert.id + ' is') + ' open again and the audit rows are withdrawn.', { timeout: 6000 });
+                A.refresh();
+              });
+              A.flash('ok', plural ? fmt.num(targets.length) + ' alert' + (targets.length === 1 ? '' : 's') + ' acknowledged' : 'Alert ' + alert.id + ' acknowledged',
                 (note ? 'Note recorded: ' + note : 'No note was recorded, so the audit shows an empty reason.') +
-                ' Pages for it have stopped; the alert stays listed until it is resolved at the source.');
-              A.replaceHash(A.href('security', ['alerts'], { id: alert.id }));
+                ' Pages have stopped; the alerts stay listed until they are resolved at the source.', { action: undo });
+              var keep = { f: (A.state.params || {}).f || null, id: plural ? null : alert.id };
+              A.replaceHash(A.href('security', ['alerts'], keep));
               A.refresh();
             }
           })
@@ -420,6 +434,13 @@
     return card;
   }
 
+  var ALERT_FIELDS = [
+    { key: 'severity', label: 'Severity' },
+    { key: 'source', label: 'Source' },
+    { key: 'host', label: 'Host' },
+    { key: 'state', label: 'State' }
+  ];
+
   function alertsTab() {
     var d = A.data;
 
@@ -480,6 +501,33 @@
 
     var tableHost = el('div');
     var alertTable = null;
+    var countNode = el('span.count', { text: 'Nothing selected' });
+    var bulkBtn = ui.btn('Acknowledge selected', {
+      variant: 'primary', disabled: true,
+      title: 'Select one or more open alerts first',
+      onClick: function () {
+        if (!alertTable) return;
+        var open = alertTable.selectedRows().filter(function (a) { return a.state === 'open'; });
+        if (!open.length) { A.flash('info', 'Nothing to acknowledge', 'None of the selected alerts is open.'); return; }
+        acknowledgeDialog(open[0], open);
+      }
+    });
+
+    function onSelect(keys) {
+      var open = alertTable ? alertTable.selectedRows().filter(function (a) { return a.state === 'open'; }).length : 0;
+      countNode.textContent = keys.length
+        ? fmt.num(keys.length) + ' selected, ' + fmt.num(open) + ' of them open'
+        : 'Nothing selected';
+      bulkBtn.setDisabled(!open);
+      bulkBtn.title = open ? 'Acknowledge the ' + fmt.num(open) + ' open alerts selected with one note' : 'Select one or more open alerts first';
+    }
+
+    function syncUrl(tokens) {
+      var params = {};
+      Object.keys(A.state.params || {}).forEach(function (k) { if (k !== 'f' && k !== 'id') params[k] = A.state.params[k]; });
+      params.f = ui.encodeTokens(tokens);
+      A.replaceHash(A.href('security', ['alerts'], params));
+    }
 
     function paint(tokens) {
       var rows = ui.applyTokens(d.alerts, tokens || [], accessors);
@@ -488,19 +536,19 @@
         caption: 'Open and recent security alerts, by severity, source, host and state',
         empty: 'No alert matches every filter. Remove a token to widen the search.',
         sortKey: 'severity', sortDir: 'asc',
-        rowKey: function (r) { return r.id; }
+        rowKey: function (r) { return r.id; },
+        selectable: true,
+        selectLabel: function (r) { return r.id + ', ' + r.rule + ' on ' + r.host; },
+        onSelect: onSelect
       });
       tableHost.appendChild(alertTable);
     }
 
-    var filter = ui.propertyFilter([
-      { key: 'severity', label: 'Severity' },
-      { key: 'source', label: 'Source' },
-      { key: 'host', label: 'Host' },
-      { key: 'state', label: 'State' }
-    ], paint);
+    var filter = ui.propertyFilter(ALERT_FIELDS, function (tokens) { paint(tokens); syncUrl(tokens); }, {
+      initial: ui.decodeTokens(A.state.params && A.state.params.f)
+    });
 
-    paint([]);
+    paint(filter.tokens());
 
     return el('div.stack', [
       alertInbox(),
@@ -508,8 +556,14 @@
       filter,
       el('p.hint', {
         text: 'Filters combine with AND, so severity high and host gpu-01 narrows to the intersection. '
-          + 'Only the table repaints; the filter keeps its focus.'
+          + 'The filter is part of the address, so a shared link opens the same view. Only the table repaints; the filter keeps its focus.'
       }),
+      el('div.bulkbar', [
+        countNode,
+        bulkBtn,
+        el('span.spacer'),
+        ui.exportButton(function () { return alertTable; }, 'alerts')
+      ]),
       tableHost
     ]);
   }
@@ -601,6 +655,21 @@
   function vulnsTab() {
     var d = A.data;
     var expired = d.vulns.filter(function (v) { return v.waiver && v.waiver.until < d.now; });
+    var vulnTable = null;
+    function vulnCard() {
+      vulnTable = ui.table(cols, d.vulns, {
+        caption: 'Vulnerabilities found by Trivy in deployed components, with waiver owner and expiry',
+        empty: 'No vulnerabilities are open against a deployed component.',
+        sortKey: 'severity', sortDir: 'asc',
+        rowKey: function (v) { return v.id; }
+      });
+      return ui.card('Known vulnerabilities', vulnTable, {
+        actions: [
+          ui.exportButton(function () { return vulnTable; }, 'vulnerabilities'),
+          ui.btn('Add waiver', { variant: 'ghost', onClick: function () { addWaiverDialog(null); } })
+        ]
+      });
+    }
 
     var cols = [
       { key: 'id', label: 'CVE', render: function (v) { return el('span.mono', { text: v.id }); } },
@@ -613,7 +682,10 @@
       { key: 'app', label: 'Application' },
       { key: 'fixedIn', label: 'Fixed in', render: function (v) { return el('span.mono', { text: v.fixedIn }); } },
       { key: 'found', label: 'Found', sort: function (v) { return v.found.getTime(); }, render: function (v) { return fmt.time(v.found); } },
-      { key: 'waiver', label: 'Waiver', status: true, sortable: false, render: waiverCell },
+      {
+        key: 'waiver', label: 'Waiver', status: true, sortable: false, render: waiverCell,
+        csv: function (v) { return v.waiver ? v.waiver.owner + ' until ' + v.waiver.until.toISOString().slice(0, 10) : ''; }
+      },
       {
         key: 'actions', label: 'Actions', sortable: false,
         render: function (v) {
@@ -636,14 +708,7 @@
             + '. Either patch the component or have somebody sign for the risk again.'
         })
       ]) : null,
-      ui.card('Known vulnerabilities', ui.table(cols, d.vulns, {
-        caption: 'Vulnerabilities found by Trivy in deployed components, with waiver owner and expiry',
-        empty: 'No vulnerabilities are open against a deployed component.',
-        sortKey: 'severity', sortDir: 'asc',
-        rowKey: function (v) { return v.id; }
-      }), {
-        actions: [ui.btn('Add waiver', { variant: 'ghost', onClick: function () { addWaiverDialog(null); } })]
-      })
+      vulnCard()
     ]);
   }
 
@@ -850,18 +915,21 @@
       'No recording selected',
       'Choose a session to scrub through its recording and read what was typed.'));
 
+    var sessionTable = ui.table(cols, d.sessions, {
+      caption: 'Recorded gateway sessions, with the reason given and the person who approved them',
+      empty: 'No session has been recorded.',
+      sortKey: 'started', sortDir: 'desc',
+      rowKey: function (s) { return s.id; },
+      onRow: show
+    });
+
     return el('div.stack', [
       el('div.callout.info', {
         text: 'Every interactive session through the gateway is recorded to argus-sessions, which is '
           + 'write-once for 400 days. Nobody, including an administrator, can delete a recording from the console.'
       }),
-      ui.table(cols, d.sessions, {
-        caption: 'Recorded gateway sessions, with the reason given and the person who approved them',
-        empty: 'No session has been recorded.',
-        sortKey: 'started', sortDir: 'desc',
-        rowKey: function (s) { return s.id; },
-        onRow: show
-      }),
+      el('div.row', [el('span.spacer'), ui.exportButton(sessionTable, 'sessions')]),
+      sessionTable,
       detail
     ]);
   }

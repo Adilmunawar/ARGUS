@@ -1996,6 +1996,147 @@ async function axeOn(page, label, suite, opts) {
   rec('ACT', 'Enter in a matching confirm field runs the action and the lock explanation is gone',
     confirmed.fired && confirmed.titleGone && confirmed.closed, JSON.stringify(confirmed));
 
+  await goto(page, 'overview');
+  const modePill = await page.evaluate(() => {
+    const p = document.getElementById('modepill');
+    return { text: p.textContent.trim(), cls: p.className, title: p.title, label: p.getAttribute('aria-label') };
+  });
+  rec('ACT', 'the header says where the data comes from, and why, rather than implying it is live',
+    /Sample data/.test(modePill.text) && /is-sample/.test(modePill.cls) && /filesystem/.test(modePill.title) && /detail/.test(modePill.label),
+    JSON.stringify(modePill));
+
+  await goto(page, 'compute/vm/sql-01');
+  await goto(page, 'apps/mills');
+  await page.keyboard.press('Control+K');
+  await page.waitForTimeout(120);
+  const recentFirst = await page.evaluate(() => {
+    const items = [...document.querySelectorAll('.pal-item')].map(n => n.querySelector('.pal-kind').textContent + ':' + n.querySelector('.pal-label').textContent);
+    return items.slice(0, 3);
+  });
+  rec('ACT', 'with nothing typed the palette offers what you were just looking at',
+    recentFirst[0] === 'Recent:Applications / mills' && recentFirst[1] === 'Recent:Compute / vm / sql-01', recentFirst.join(' | '));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(80);
+
+  await goto(page, 'security/alerts');
+  const filteredView = await page.evaluate(async () => {
+    const input = document.querySelector('.pf-input');
+    input.value = 'high';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 80));
+    return { hash: location.hash, rows: document.querySelectorAll('#main tbody tr[data-key]').length };
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(AXE);
+  await page.waitForTimeout(200);
+  const reloaded = await page.evaluate(() => ({
+    tokens: document.querySelectorAll('.pf-token').length,
+    rows: document.querySelectorAll('#main tbody tr[data-key]').length,
+    text: document.querySelector('.pf-token-text') && document.querySelector('.pf-token-text').textContent
+  }));
+  rec('ACT', 'a property filter is part of the address and survives a reload',
+    /\?f=severity%3Ahigh$/.test(filteredView.hash) && filteredView.rows === 2 && reloaded.tokens === 1 && reloaded.rows === 2 && reloaded.text === 'Severity: high',
+    JSON.stringify({ filteredView, reloaded }));
+  await axeOn(page, 'alerts with a selectable table', 'A11Y');
+
+  const bulk = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const openBefore = d.alerts.filter(a => a.state === 'open').length;
+    const auditBefore = d.audit.length;
+    document.querySelector('th.sel .rowcheck').click();
+    await new Promise(r => setTimeout(r, 60));
+    const count = document.querySelector('.bulkbar .count').textContent;
+    const go = [...document.querySelectorAll('.bulkbar .btn')].find(b => /Acknowledge selected/.test(b.textContent));
+    if (!go || go.getAttribute('aria-disabled') !== 'false') return { reason: 'bulk button not enabled', count };
+    go.click();
+    await new Promise(r => setTimeout(r, 120));
+    const listed = document.querySelectorAll('.dialog li').length;
+    const confirm = [...document.querySelectorAll('.dialog-foot button')].find(b => /^Acknowledge/.test(b.textContent));
+    confirm.click();
+    await new Promise(r => setTimeout(r, 250));
+    const afterAck = { open: d.alerts.filter(a => a.state === 'open').length, audit: d.audit.length, badge: document.getElementById('nav-alert-badge').textContent };
+    const undo = document.querySelector('#flashes .flash .btn');
+    if (!undo) return { reason: 'no undo offered', afterAck };
+    undo.click();
+    await new Promise(r => setTimeout(r, 250));
+    return {
+      count, listed, openBefore, auditBefore, afterAck,
+      afterUndo: { open: d.alerts.filter(a => a.state === 'open').length, audit: d.audit.length, badge: document.getElementById('nav-alert-badge').textContent }
+    };
+  });
+  rec('ACT', 'selecting rows and acknowledging in bulk acknowledges only the open ones, with one note',
+    bulk.listed === 1 && bulk.afterAck && bulk.afterAck.open === bulk.openBefore - 1 && bulk.afterAck.audit === bulk.auditBefore + 1
+      && bulk.afterAck.badge === String(bulk.openBefore - 1),
+    JSON.stringify(bulk));
+  rec('ACT', 'undo on the flash puts the alerts back and withdraws the audit rows',
+    bulk.afterUndo && bulk.afterUndo.open === bulk.openBefore && bulk.afterUndo.audit === bulk.auditBefore
+      && bulk.afterUndo.badge === String(bulk.openBefore),
+    JSON.stringify(bulk.afterUndo));
+
+  const exported = await page.evaluate(async () => {
+    const b = [...document.querySelectorAll('#main .btn')].find(x => x.textContent.trim() === 'Export CSV');
+    if (!b) return { reason: 'no export button' };
+    b.click();
+    await new Promise(r => setTimeout(r, 120));
+    const area = document.getElementById('csv-export');
+    const lines = area ? area.value.split('\n') : [];
+    return { head: lines[0], rows: lines.length - 1, shown: document.querySelectorAll('#main tbody tr[data-key]').length };
+  });
+  rec('ACT', 'any table exports exactly the rows it shows as CSV, without its action column',
+    exported.head === 'Severity,Source,Rule,Host,First seen,Last seen,Count,State' && exported.rows === exported.shown && exported.rows === 2,
+    JSON.stringify(exported));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(80);
+
+  await goto(page, 'deploys');
+  const rolling = await page.evaluate(async () => {
+    const dep = window.ARGUS.data.deployments.find(x => x.id === 1846);
+    const before = dep.progress ? dep.progress.ud : null;
+    let live = 0;
+    const realSet = window.setInterval, realClear = window.clearInterval;
+    const mine = new Set();
+    window.setInterval = function () { const id = realSet.apply(window, arguments); mine.add(id); live++; return id; };
+    window.clearInterval = function (id) { if (mine.delete(id)) live--; return realClear.call(window, id); };
+    await new Promise(r => setTimeout(r, 4400));
+    const after = dep.progress ? dep.progress.ud : null;
+    const bar = document.querySelector('#main [role="progressbar"]');
+    const shown = bar ? Number(bar.getAttribute('aria-valuenow')) : null;
+    window.location.hash = '#/overview';
+    await new Promise(r => setTimeout(r, 300));
+    const net = live;
+    window.setInterval = realSet; window.clearInterval = realClear;
+    return { before, after, shown, net, state: dep.state };
+  });
+  rec('ACT', 'an in-flight deployment advances one upgrade domain at a time while you watch',
+    rolling.before !== null && rolling.after === rolling.before + 1 && rolling.shown === rolling.after && rolling.state === 'inflight',
+    JSON.stringify(rolling));
+  rec('ACT', 'leaving the deployments screen stops the rollout clock', rolling.net === 0, `net live intervals: ${rolling.net}`);
+
+  const extended = await page.evaluate(async () => {
+    window.ARGUS.data.me.elevation = { group: 'G', reason: 'r', grantedAt: Date.now() - 3600000, expires: new Date(Date.now() + 200000) };
+    document.getElementById('flashes').textContent = '';
+    window.ARGUS.paintElevation();
+    await new Promise(r => setTimeout(r, 60));
+    const ending = document.getElementById('elevation').classList.contains('is-ending');
+    const warned = [...document.querySelectorAll('#flashes .flash')].some(f => /Elevation ends in/.test(f.textContent));
+    const extend = [...document.querySelectorAll('#elevation .btn')].find(b => /Extend/.test(b.textContent));
+    extend.click();
+    await new Promise(r => setTimeout(r, 100));
+    const go = [...document.querySelectorAll('.dialog-foot button')].find(b => /Simulate/.test(b.textContent));
+    go.click();
+    await new Promise(r => setTimeout(r, 150));
+    const left = (window.ARGUS.data.me.elevation.expires - Date.now()) / 60000;
+    const calm = !document.getElementById('elevation').classList.contains('is-ending');
+    const audited = window.ARGUS.data.audit[0].action;
+    window.ARGUS.data.me.elevation = null;
+    window.ARGUS.paintElevation();
+    document.getElementById('flashes').textContent = '';
+    return { ending, warned, left: Math.round(left), calm, audited };
+  });
+  rec('ACT', 'an elevation about to lapse warns once and can be extended with a second factor',
+    extended.ending && extended.warned && extended.left >= 62 && extended.left <= 64 && extended.calm && extended.audited === 'elevation.extend',
+    JSON.stringify(extended));
+
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));
   rec('CONS', 'no failed requests', realFails.length === 0, realFails.slice(0, 4).join(' | '));

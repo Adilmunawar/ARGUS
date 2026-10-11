@@ -64,12 +64,54 @@
         'aria-valuetext': sentence,
         'aria-label': 'Rolling upgrade for deployment ' + dep.id
       }, el('div.progressbar-fill', { style: { width: pct.toFixed(1) + '%' } })),
-      el('p.hint', { text: sentence + '. The reconciler stops and rolls back on its own if a domain fails its health policy.' })
+      el('p.hint', { text: sentence + '. The reconciler moves one domain at a time and stops and rolls back on its own if a domain fails its health policy.' })
     ]);
   }
 
+  var ROLL_MS = 4000;
+  var UD_SECONDS = 38;
+
+  function advance(dep) {
+    var p = dep.progress;
+    if (dep.state !== 'inflight' || !p) return false;
+    p.ud = Math.min(p.total, p.ud + 1);
+    if (p.ud < p.total) return false;
+    dep.state = 'done';
+    dep.outcome = 'healthy';
+    dep.durationS = p.total * UD_SECONDS;
+    dep.progress = null;
+    var app = appOf(dep);
+    if (app && dep.env === 'production') {
+      app.version = dep.version;
+      app.deployedAt = new Date(d.now.getTime());
+    } else if (app) {
+      app.staging = dep.version;
+    }
+    A.record('reconcile.apply', dep.app + ' ' + dep.version + ' to ' + dep.env, dep.id, 'reconciler', 'System');
+    A.flash('ok', 'Deployment ' + dep.id + ' applied',
+      appDisplay(dep) + ' ' + dep.version + ' is live in ' + dep.env + ' after ' + fmt.dur(dep.durationS) +
+      '. Every upgrade domain passed its health policy.', { timeout: 10000 });
+    return true;
+  }
+
+  function rollWhile(host, getDeps, onTick) {
+    var timer = window.setInterval(function () {
+      if (!document.body.contains(host)) { window.clearInterval(timer); return; }
+      var deps = getDeps();
+      if (!deps.length) { window.clearInterval(timer); return; }
+      var finished = false;
+      deps.forEach(function (dep) { if (advance(dep)) finished = true; });
+      A.refreshBadges();
+      if (finished) { window.clearInterval(timer); A.refresh(); return; }
+      onTick();
+    }, ROLL_MS);
+    A.onLeave(function () { window.clearInterval(timer); });
+  }
+
   function deployCard(dep) {
-    return el('div.deploycard', [
+    var progressHost = dep.state === 'inflight' ? el('div', progressBlock(dep)) : null;
+    if (progressHost) progressHost.repaint = function () { ui.clear(progressHost); progressHost.appendChild(progressBlock(dep)); };
+    return el('div.deploycard', { data: { key: 'dep-' + dep.id } }, [
       el('h3', { text: appDisplay(dep) + ' ' + dep.version }),
       el('div.chips', [
         el('span.chip', { text: dep.env }),
@@ -81,7 +123,7 @@
         fmt.time(dep.opened)
       ]),
       checkRow(dep),
-      dep.state === 'inflight' ? progressBlock(dep) : null,
+      progressHost,
       dep.state === 'rolledback' ? el('div.callout.bad', { text: 'Rolled back: ' + dep.outcome }) : null,
       dep.state === 'rejected' ? el('div.callout.warn', { text: 'Rejected: ' + dep.outcome }) : null,
       dep.state === 'done' && dep.durationS
@@ -117,7 +159,7 @@
       'Deployments',
       'Every write to production is a pull request. Nothing reaches a server that a person did not approve.'));
 
-    mount.appendChild(el('div.lanes', [
+    var lanes = el('div.lanes', [
       lane('Awaiting approval', awaiting,
         'Nothing is waiting for an approver',
         'The queue is empty. A deployment appears here as soon as somebody opens a pull request against the production branch.'),
@@ -127,7 +169,20 @@
       lane('Recent', recent,
         'No deployment has finished yet',
         'Completed and rolled-back deployments stay here so you can see what changed and when.')
-    ]));
+    ]);
+    mount.appendChild(lanes);
+
+    if (inflight.length) {
+      rollWhile(lanes, function () {
+        return d.deployments.filter(function (p) { return p.state === 'inflight'; });
+      }, function () {
+        Array.prototype.forEach.call(lanes.querySelectorAll('.deploycard'), function (card) {
+          var dep = d.deployments.filter(function (p) { return 'dep-' + p.id === card.dataset.key; })[0];
+          var host = card.querySelector('.progressbar') && card.querySelector('.progressbar').parentNode.parentNode;
+          if (dep && host && host.repaint) host.repaint();
+        });
+      });
+    }
   }
 
   function planTab(dep) {
@@ -375,7 +430,14 @@
         el('p', { text: 'Four eyes: a different Tier 1 person has to approve it. You can still reject your own deployment.' })
       ]));
     }
-    if (dep.state === 'inflight') mount.appendChild(progressBlock(dep));
+    if (dep.state === 'inflight') {
+      var progressHost = el('div', progressBlock(dep));
+      mount.appendChild(progressHost);
+      rollWhile(progressHost, function () { return dep.state === 'inflight' ? [dep] : []; }, function () {
+        ui.clear(progressHost);
+        progressHost.appendChild(progressBlock(dep));
+      });
+    }
     if (dep.state === 'rolledback') mount.appendChild(el('div.callout.bad', { text: 'Rolled back: ' + dep.outcome }));
     if (dep.state === 'rejected') {
       mount.appendChild(el('div.callout.warn', [

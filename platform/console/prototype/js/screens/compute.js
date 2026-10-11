@@ -101,12 +101,13 @@
       { key: 's2d', label: 'S2D health', status: true, render: function (r) { return statePill(r.s2d); } },
       { key: 'state', label: 'State', status: true, render: function (r) { return statePill(r.state); } }
     ];
-    return ui.table(cols, d.hosts, {
+    var hostTable = ui.table(cols, d.hosts, {
       caption: 'Physical hosts, with utilisation, patch age and storage health',
       sortKey: 'name',
       rowKey: function (r) { return r.name; },
       onRow: function (r) { A.go('compute', ['host', r.name]); }
     });
+    return el('div.stack', [el('div.row', [el('span.spacer'), ui.exportButton(hostTable, 'hosts')]), hostTable]);
   }
 
   function vmsTab() {
@@ -132,6 +133,7 @@
       },
       {
         label: 'Connect', sortable: false,
+        csv: function (r) { return r.connect.join('; '); },
         render: function (r) {
           return el('div.row', r.connect.map(function (proto) {
             var mode = modeFor(proto);
@@ -144,11 +146,12 @@
         }
       }
     ];
-    return ui.table(cols, d.vms, {
+    var vmTable = ui.table(cols, d.vms, {
       caption: 'Virtual machines, with placement, replication state and the ways in to each',
       sortKey: 'name',
       rowKey: function (r) { return r.name; }
     });
+    return el('div.stack', [el('div.row', [el('span.spacer'), ui.exportButton(vmTable, 'virtual machines')]), vmTable]);
   }
 
   function fabricTab() {

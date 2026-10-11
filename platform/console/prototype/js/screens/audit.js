@@ -89,7 +89,7 @@
   A.screen('audit', {
     title: 'Audit',
     crumb: 'Audit',
-    render: function (mount) {
+    render: function (mount, ctx) {
       var d = A.data;
 
       var since = d.now.getTime() - 86400000;
@@ -143,6 +143,10 @@
       var visible = d.audit.slice();
       var table = null;
 
+      function syncUrl(tokens) {
+        A.replaceHash(A.href('audit', [], { f: ui.encodeTokens(tokens) }));
+      }
+
       function paint(tokens) {
         visible = ui.applyTokens(d.audit, tokens || [], accessors);
         if (table) { table.setRows(visible); return; }
@@ -164,7 +168,9 @@
         { key: 'action', label: 'Action' },
         { key: 'target', label: 'Target' },
         { key: 'role', label: 'Role' }
-      ], paint);
+      ], function (tokens) { paint(tokens); syncUrl(tokens); }, {
+        initial: ui.decodeTokens((ctx && ctx.params && ctx.params.f) || (A.state.params && A.state.params.f))
+      });
 
       mount.appendChild(ui.pageHeader(
         'Audit',
@@ -187,13 +193,14 @@
         el('p', {
           text: 'AWS CloudTrail lets you filter on one attribute at a time, which is the single most complained-about '
             + 'thing about it: you cannot ask for "actor adil and action grant" in one query. Here you can stack as '
-            + 'many predicates as you like and they all apply at once.'
+            + 'many predicates as you like and they all apply at once. The filter is part of the address, so a '
+            + 'filtered view can be handed to somebody as a link.'
         })
       ]));
 
       mount.appendChild(filter);
       mount.appendChild(tableHost);
-      paint([]);
+      paint(filter.tokens());
     }
   });
 })();

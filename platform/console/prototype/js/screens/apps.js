@@ -120,11 +120,15 @@
       'Applications',
       'Every service on the platform, what it depends on, and how it is behaving.'));
 
-    var tokens = [];
+    var tokens = ui.decodeTokens(A.state.params && A.state.params.f);
     var filterHost = el('div');
     var tableHost = el('div');
 
     var appTable = null;
+
+    function syncUrl() {
+      A.replaceHash(A.href('apps', [], { f: ui.encodeTokens(tokens) }));
+    }
 
     function paint() {
       if (!d.apps.length) {
@@ -158,13 +162,16 @@
 
     function mountFilter() {
       ui.clear(filterHost);
-      filterHost.appendChild(ui.propertyFilter(FILTER_FIELDS, function (t) { tokens = t; paint(); }));
+      var pf = ui.propertyFilter(FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens });
+      tokens = pf.tokens();
+      filterHost.appendChild(el('div.row', [pf, el('span.spacer'), ui.exportButton(function () { return appTable; }, 'applications')]));
     }
 
     function clearFilters() {
       tokens = [];
       mountFilter();
       paint();
+      syncUrl();
       A.announce('Filters cleared, ' + d.apps.length + ' applications shown');
       var input = filterHost.querySelector('.pf-input');
       if (input) input.focus();

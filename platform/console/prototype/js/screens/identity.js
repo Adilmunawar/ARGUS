@@ -43,6 +43,16 @@
   }
 
   function peopleTab() {
+    var peopleTable = null;
+    function peopleCard() {
+      peopleTable = ui.table(cols, d.people, {
+        caption: 'People with a console account, with tier, MFA method, last sign-in, group membership and whether they are elevated right now',
+        sortKey: 'name',
+        rowKey: function (r) { return r.upn; },
+        empty: 'No people have a console account in this environment.'
+      });
+      return ui.card('People', peopleTable, { flush: true, actions: [ui.exportButton(function () { return peopleTable; }, 'people')] });
+    }
     var total = d.people.length;
     var withMfa = d.people.filter(function (p) { return !!p.mfa; }).length;
     var phishResistant = d.people.filter(function (p) { return p.mfa === 'FIDO2'; }).length;
@@ -102,11 +112,7 @@
             : 'No standing Tier 0: it is reached only through a time-boxed grant'
         })
       ]),
-      ui.card('People', ui.table(cols, d.people, {
-        caption: 'People with a console account, with tier, MFA method, last sign-in, group membership and whether they are elevated right now',
-        sortKey: 'name',
-        empty: 'No people have a console account in this environment.'
-      }), { flush: true })
+      peopleCard()
     ]);
   }
 
@@ -223,10 +229,17 @@
   function denyGrant(g) {
     g.state = 'denied';
     g.approver = ME;
-    A.record('grant.deny', g.principal + ' to ' + g.group + ': ' + g.reason);
+    var row = A.record('grant.deny', g.principal + ' to ' + g.group + ': ' + g.reason);
+    var undo = A.undoable('Undo', function () {
+      g.state = 'requested';
+      g.approver = null;
+      A.unrecord(row);
+      A.flash('info', 'Denial undone', g.principal + ' is waiting for an approver again.', { timeout: 6000 });
+      A.refresh();
+    });
     A.flash('info', 'Denied elevation for ' + g.principal,
       'The request for ' + g.group + ' is closed. ' + g.principal +
-      ' is told it was declined, and the decision is written to the audit.');
+      ' is told it was declined, and the decision is written to the audit.', { action: undo });
     A.replaceHash(A.href('identity', ['grants'], { id: g.id }));
     A.refresh();
   }
@@ -502,6 +515,16 @@
 
   function secretsTab() {
     var overdue = d.secrets.filter(function (s) { return s.rotatedDays > s.policyDays; });
+    var secretsTable = null;
+    function secretsCard() {
+      secretsTable = ui.table(cols, d.secrets, {
+        caption: 'Secret paths in OpenBao, with active leases, rotation age against policy and reads in the last 24 hours. Values are never shown.',
+        sortKey: 'path',
+        rowKey: function (r) { return r.path; },
+        empty: 'No secret paths are readable by your role.'
+      });
+      return ui.card('Secret paths', secretsTable, { flush: true, actions: [ui.exportButton(function () { return secretsTable; }, 'secret paths')] });
+    }
 
     var cols = [
       { key: 'path', label: 'Path', width: '22%', render: function (r) { return mono(r.path); } },
@@ -552,12 +575,7 @@
           text: 'A secret older than its policy has been valid for longer than anyone agreed it should be, which widens the window in which a copy taken months ago still works.'
         })
       ]) : null,
-      ui.card('Secret paths', ui.table(cols, d.secrets, {
-        caption: 'Secret paths in OpenBao, with active leases, rotation age against policy and reads in the last 24 hours. Values are never shown.',
-        sortKey: 'path',
-        rowKey: function (r) { return r.path; },
-        empty: 'No secret paths are readable by your role.'
-      }), { flush: true })
+      secretsCard()
     ]);
   }
 

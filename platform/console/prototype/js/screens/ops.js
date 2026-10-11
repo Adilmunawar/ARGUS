@@ -356,6 +356,19 @@
       { key: 'by', label: 'By' }
     ];
 
+    var backupTable = ui.table(backupCols, d.backups, {
+      caption: 'Backup stores with cadence, last run, object lock duration and site',
+      empty: 'No backup store is configured.',
+      sortKey: 'last', sortDir: 'asc',
+      rowKey: function (b) { return b.store + ' ' + b.kind; }
+    });
+    var drillTable = ui.table(drillCols, d.drills, {
+      caption: 'Restore and disaster recovery drills with measured duration against the RTO target',
+      empty: 'No drill has been run.',
+      sortKey: 'ran', sortDir: 'desc',
+      rowKey: function (x) { return x.id; }
+    });
+
     return el('div.stack', [
       el('div.tiles', [
         ui.statTile('Oldest backup', oldest ? fmt.ago(oldest.last) : '-', {
@@ -370,16 +383,8 @@
         }),
         ui.statTile('Worst RPO', fmt.num(worstRpo), { unit: 'min', note: 'Across every database in the estate' })
       ]),
-      ui.card('Backup stores', ui.table(backupCols, d.backups, {
-        caption: 'Backup stores with cadence, last run, object lock duration and site',
-        empty: 'No backup store is configured.',
-        sortKey: 'last', sortDir: 'asc'
-      })),
-      ui.card('Restore and DR drills', ui.table(drillCols, d.drills, {
-        caption: 'Restore and disaster recovery drills with measured duration against the RTO target',
-        empty: 'No drill has been run.',
-        sortKey: 'ran', sortDir: 'desc'
-      }))
+      ui.card('Backup stores', backupTable, { actions: [ui.exportButton(backupTable, 'backup stores')] }),
+      ui.card('Restore and DR drills', drillTable, { actions: [ui.exportButton(drillTable, 'drills')] })
     ]);
   }
 
