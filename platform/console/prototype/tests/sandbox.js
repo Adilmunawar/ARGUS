@@ -9,7 +9,7 @@ const URL = pathToFileURL(path.resolve(FILE)).href;
 const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-sandbox-shots');
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs', 'advisor'];
 const DEEP = [
   'apps/mills', 'apps/agis', 'apps/console',
   'deploys/1847', 'deploys/1843',

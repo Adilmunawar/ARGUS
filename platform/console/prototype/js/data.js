@@ -63,9 +63,9 @@
     ],
 
     vms: [
-      { name: 'sql-01', host: 'hv-01', site: 'a', os: 'Windows Server 2025', role: 'SQL Server 2022, AG primary', vcpu: 16, ram: 128, ip: '10.31.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 4, connect: ['rdp', 'powershell'], zone: 'DATA 31' },
+      { name: 'sql-01', host: 'hv-01', site: 'a', os: 'Windows Server 2025', role: 'SQL Server 2022, AG primary', vcpu: 16, ram: 128, ip: '10.31.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 4, connect: ['rdp', 'powershell'], zone: 'DATA 31', tags: { 'cost-centre': 'mills', 'data-class': 'confidential', backup: 'tier-1' } },
       { name: 'sql-02', host: 'hv-b01', site: 'b', os: 'Windows Server 2025', role: 'AG async secondary', vcpu: 16, ram: 128, ip: '10.131.0.20', state: 'running', replica: 'n/a', checkpointAgeMin: 0, connect: ['rdp', 'powershell'], zone: 'DATA-B' },
-      { name: 'pg-01', host: 'hv-02', site: 'a', os: 'Windows Server 2025', role: 'PostgreSQL 17 + PostGIS', vcpu: 8, ram: 64, ip: '10.31.0.30', state: 'running', replica: 'healthy', checkpointAgeMin: 7, connect: ['rdp', 'powershell'], zone: 'DATA 31' },
+      { name: 'pg-01', host: 'hv-02', site: 'a', os: 'Windows Server 2025', role: 'PostgreSQL 17 + PostGIS', vcpu: 8, ram: 64, ip: '10.31.0.30', state: 'running', replica: 'healthy', checkpointAgeMin: 7, connect: ['rdp', 'powershell'], zone: 'DATA 31', tags: { 'cost-centre': 'ml', 'data-class': 'internal', backup: 'tier-1' } },
       { name: 'dc-01', host: 'hv-01', site: 'a', os: 'Windows Server 2025 Core', role: 'AD DS, DNS, FSMO', vcpu: 4, ram: 8, ip: '10.11.0.10', state: 'running', replica: 'off', checkpointAgeMin: 0, connect: ['powershell'], zone: 'TIER0 11' },
       { name: 'dc-02', host: 'hv-02', site: 'a', os: 'Windows Server 2025 Core', role: 'AD DS, DNS', vcpu: 4, ram: 8, ip: '10.11.0.11', state: 'running', replica: 'off', checkpointAgeMin: 0, connect: ['powershell'], zone: 'TIER0 11' },
       { name: 'adfs-01', host: 'hv-03', site: 'a', os: 'Windows Server 2025', role: 'AD FS, OIDC and SAML', vcpu: 4, ram: 8, ip: '10.11.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 9, connect: ['rdp', 'powershell'], zone: 'TIER0 11' },
@@ -74,7 +74,7 @@
       { name: 'siem-01', host: 'hv-03', site: 'a', os: 'Ubuntu 24.04 LTS', role: 'Wazuh manager, indexer, dashboard', vcpu: 8, ram: 32, ip: '10.12.0.10', state: 'running', replica: 'healthy', checkpointAgeMin: 5, connect: ['ssh'], zone: 'SEC 12' },
       { name: 'guac-01', host: 'hv-02', site: 'a', os: 'Ubuntu 24.04 LTS', role: 'Guacamole RDP/SSH gateway', vcpu: 4, ram: 8, ip: '10.30.1.50', state: 'running', replica: 'healthy', checkpointAgeMin: 8, connect: ['ssh'], zone: 'PLATFORM 30' },
       { name: 'wef-01', host: 'hv-01', site: 'a', os: 'Windows Server 2025', role: 'Event forwarding collector', vcpu: 4, ram: 16, ip: '10.12.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 12, connect: ['rdp', 'powershell'], zone: 'SEC 12' },
-      { name: 'runner-01', host: 'hv-03', site: 'a', os: 'Windows Server 2025', role: 'GitHub Actions runner, code signing', vcpu: 8, ram: 32, ip: '10.32.0.10', state: 'running', replica: 'off', checkpointAgeMin: 0, connect: ['rdp'], zone: 'BUILD 32' },
+      { name: 'runner-01', host: 'hv-03', site: 'a', os: 'Windows Server 2025', role: 'GitHub Actions runner, code signing', vcpu: 8, ram: 32, ip: '10.32.0.10', state: 'running', replica: 'off', checkpointAgeMin: 0, connect: ['rdp'], zone: 'BUILD 32', tags: { 'cost-centre': 'platform', 'data-class': 'internal', rebuildable: 'yes' } },
       { name: 'forgejo-01', host: 'hv-01', site: 'a', os: 'Windows Server 2025', role: 'Forgejo mirror', vcpu: 4, ram: 8, ip: '10.32.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 14, connect: ['rdp'], zone: 'BUILD 32' },
       { name: 'kuma-b01', host: 'hv-b02', site: 'b', os: 'Windows Server 2025', role: 'Uptime Kuma, status page', vcpu: 2, ram: 4, ip: '10.120.0.10', state: 'running', replica: 'n/a', checkpointAgeMin: 0, connect: ['rdp'], zone: 'DMZ-B' }
     ],
@@ -90,6 +90,7 @@
     apps: [
       {
         name: 'mills', display: 'Mills Dashboard', owner: 'zayan', tier: 1, env: 'production',
+        tags: { 'cost-centre': 'mills', 'data-class': 'confidential', team: 'product', 'on-call': 'zayan' },
         version: '2026.09.08.1', staging: '2026.09.08.2', health: 'ok', instances: 3,
         p95: 212, rps: 47, errorRate: 0.0021, slo: 99.94, uptimeDays: 14,
         deployedAt: hoursAgo(3), identity: 'gmsa-mills$', host: 'mills.zaraatdost.pk',
@@ -103,6 +104,7 @@
       },
       {
         name: 'loan', display: 'Farmer Loan API', owner: 'zayan', tier: 1, env: 'production',
+        tags: { 'cost-centre': 'loans', 'data-class': 'restricted', team: 'product', 'on-call': 'zayan' },
         version: '2026.09.01.3', staging: '2026.09.01.3', health: 'ok', instances: 2,
         p95: 143, rps: 9, errorRate: 0.0004, slo: 99.99, uptimeDays: 38,
         deployedAt: daysAgo(7), identity: 'gmsa-loan$', host: 'loans.zaraatdost.pk',
@@ -112,6 +114,7 @@
       },
       {
         name: 'agis', display: 'AGIS', owner: 'adil', tier: 2, env: 'production',
+        tags: { 'cost-centre': 'ml', 'data-class': 'internal', team: 'research', 'on-call': 'adil' },
         version: '2026.08.22.4', staging: '2026.09.05.1', health: 'warn', instances: 2,
         p95: 688, rps: 4, errorRate: 0.0139, slo: 99.71, uptimeDays: 17,
         deployedAt: daysAgo(17), identity: 'gmsa-agis$', host: 'agis.zaraatdost.pk',
@@ -121,6 +124,7 @@
       },
       {
         name: 'console', display: 'Argus Console', owner: 'adil', tier: 0, env: 'production',
+        tags: { 'cost-centre': 'platform', 'data-class': 'restricted', team: 'platform', 'on-call': 'adil' },
         version: '0.5.0', staging: '0.5.1', health: 'ok', instances: 3,
         p95: 74, rps: 3, errorRate: 0, slo: 100, uptimeDays: 21,
         deployedAt: daysAgo(2), identity: 'gmsa-console$', host: 'console.zaraatdost.pk',
@@ -133,6 +137,7 @@
       },
       {
         name: 'caddy', display: 'Caddy edge', owner: 'platform', tier: 1, env: 'production',
+        tags: { 'cost-centre': 'platform', 'data-class': 'public', team: 'platform' },
         version: '2.10.0', staging: '2.10.0', health: 'ok', instances: 2,
         p95: 3, rps: 64, errorRate: 0.0009, slo: 99.98, uptimeDays: 62,
         deployedAt: daysAgo(30), identity: 'gmsa-caddy$', host: '10.20.0.10',
@@ -142,6 +147,7 @@
       },
       {
         name: 'nats', display: 'NATS JetStream', owner: 'platform', tier: 1, env: 'production',
+        tags: { 'cost-centre': 'platform', 'data-class': 'internal', team: 'platform' },
         version: '2.11.4', staging: '2.11.4', health: 'ok', instances: 3,
         p95: 1, rps: 118, errorRate: 0, slo: 100, uptimeDays: 62,
         deployedAt: daysAgo(30), identity: 'gmsa-nats$', host: 'nats.argus.local',
@@ -151,6 +157,7 @@
       },
       {
         name: 'openbao', display: 'OpenBao', owner: 'platform', tier: 0, env: 'production',
+        tags: { 'cost-centre': 'platform', 'data-class': 'restricted', team: 'platform' },
         version: '2.6.1', staging: '2.6.1', health: 'ok', instances: 3,
         p95: 6, rps: 21, errorRate: 0, slo: 100, uptimeDays: 62,
         deployedAt: daysAgo(30), identity: 'gmsa-openbao$', host: 'openbao.argus.local',
@@ -341,13 +348,14 @@
     cost: {
       monthlyTotalUsd: 9140,
       breakdown: [
-        { app: 'mills', cpu: 1840, storage: 610, gpu: 0, total: 2450 },
-        { app: 'ml pipelines', cpu: 420, storage: 980, gpu: 2600, total: 4000 },
-        { app: 'console', cpu: 210, storage: 20, gpu: 0, total: 230 },
-        { app: 'loan', cpu: 340, storage: 90, gpu: 0, total: 430 },
-        { app: 'agis', cpu: 280, storage: 340, gpu: 0, total: 620 },
-        { app: 'platform overhead', cpu: 1010, storage: 400, gpu: 0, total: 1410 }
+        { app: 'mills', costCentre: 'mills', cpu: 1840, storage: 610, gpu: 0, total: 2450 },
+        { app: 'ml pipelines', costCentre: 'ml', cpu: 420, storage: 980, gpu: 2600, total: 4000 },
+        { app: 'console', costCentre: 'platform', cpu: 210, storage: 20, gpu: 0, total: 230 },
+        { app: 'loan', costCentre: 'loans', cpu: 340, storage: 90, gpu: 0, total: 430 },
+        { app: 'agis', costCentre: 'ml', cpu: 280, storage: 340, gpu: 0, total: 620 },
+        { app: 'platform overhead', costCentre: 'platform', cpu: 1010, storage: 400, gpu: 0, total: 1410 }
       ],
+      history: [8720, 8810, 8790, 8930, 9010, 9140],
       awsBaselineUsd: 11800,
       forecast: [{ resource: 'argus-sentinel capacity', full: '2027-04', headroomPct: 38 }, { resource: 'hv-03 memory', full: '2026-12', headroomPct: 29 }]
     },
@@ -366,6 +374,14 @@
     ],
 
     reconciler: { state: 'running', lastSync: minutesAgo(1), head: 'aaa5607', drift: 0, pendingPlans: 1, applyLagS: 42 },
+
+    alarms: [
+      { id: 'alm-1', name: 'AGIS p95 above 500 ms', app: 'agis', metric: 'p95', op: '>', threshold: 500, forMin: 10, owner: 'adil' },
+      { id: 'alm-2', name: 'Mills error rate above 0.5%', app: 'mills', metric: 'errorRate', op: '>', threshold: 0.5, forMin: 5, owner: 'zayan' },
+      { id: 'alm-3', name: 'Caddy traffic collapsed', app: 'caddy', metric: 'rps', op: '<', threshold: 10, forMin: 5, owner: 'adil' }
+    ],
+
+    advisorSuppressed: [],
 
     policy: {
       freeze: null,

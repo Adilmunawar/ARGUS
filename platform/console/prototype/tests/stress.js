@@ -13,7 +13,7 @@ const SCALES = (process.env.STRESS_SCALES || '1,10,50').split(',').map(Number).f
 const WORKERS = Number(process.env.STRESS_WORKERS || 4);
 const JSON_OUT = process.env.STRESS_JSON || path.join(__dirname, 'stress-last-run.json');
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs', 'advisor'];
 
 const VIEWS = [
   'overview', 'apps', 'deploys', 'audit',

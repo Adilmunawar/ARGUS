@@ -32,14 +32,21 @@
     { key: 'name', label: 'Name' },
     { key: 'owner', label: 'Owner' },
     { key: 'health', label: 'Health' },
-    { key: 'env', label: 'Environment' }
+    { key: 'env', label: 'Environment' },
+    { key: 'tag', label: 'Tag' }
   ];
+
+  function tagText(a) {
+    var t = a.tags || {};
+    return Object.keys(t).map(function (k) { return k + ':' + t[k]; }).join(' ');
+  }
 
   var FILTER_ACCESSORS = {
     name: function (a) { return a.display + ' ' + a.name; },
     owner: function (a) { return a.owner; },
     health: function (a) { return a.health; },
-    env: function (a) { return a.env; }
+    env: function (a) { return a.env; },
+    tag: tagText
   };
 
   function listColumns() {
@@ -55,6 +62,7 @@
         }
       },
       { key: 'owner', label: 'Owner' },
+      { key: 'tags', label: 'Tags', sortable: false, csv: tagText, render: function (r) { return A.tagChips(r); } },
       { key: 'version', label: 'Version', render: function (r) { return mono(r.version); } },
       { key: 'health', label: 'Health', status: true, render: function (r) { return healthPill(r.health); } },
       { key: 'instances', label: 'Instances', align: 'right', render: function (r) { return fmt.num(r.instances); } },
@@ -386,8 +394,72 @@
     return ui.graph(nodes, edges, { label: 'What ' + app.display + ' depends on' });
   }
 
+  var RANGES = [
+    { id: '1h', label: '1 h', points: 60, spread: 0.4, word: 'the last hour, one sample a minute' },
+    { id: '6h', label: '6 h', points: 36, spread: 0.7, word: 'the last six hours, one sample every ten minutes' },
+    { id: '24h', label: '24 h', points: 24, spread: 1, word: 'the last day, one sample an hour' }
+  ];
+
+  function seriesFor(app, metric, range) {
+    if (range.id === '24h') return app.trend[metric];
+    var base = metric === 'rps' ? app.rps : metric === 'p95' ? app.p95 : app.errorRate * 100;
+    var spread = metric === 'rps' ? app.rps * 0.5 : metric === 'p95' ? app.p95 * 0.4 : Math.max(0.05, app.errorRate * 100 * 0.8);
+    var seed = 0;
+    for (var i = 0; i < app.name.length; i++) seed = (seed * 31 + app.name.charCodeAt(i)) % 100003;
+    return A.time.series(range.points, base, spread * range.spread, seed + metric.length + range.points);
+  }
+
+  function metricsCard(app) {
+    var current = RANGES[2];
+    var grid = el('div.metricgrid');
+    var bar = el('div.rangebar', { role: 'group', 'aria-label': 'Time range' });
+    var buttons = RANGES.map(function (r) {
+      var b = ui.btn(r.label, {
+        onClick: function () {
+          current = r;
+          buttons.forEach(function (x, i) { x.setAttribute('aria-pressed', RANGES[i] === r ? 'true' : 'false'); });
+          paint();
+          A.announce('Metrics over ' + r.word);
+        }
+      });
+      b.setAttribute('aria-pressed', r === current ? 'true' : 'false');
+      return b;
+    });
+    buttons.forEach(function (b) { bar.appendChild(b); });
+
+    function box(label, metric, format) {
+      var values = seriesFor(app, metric, current);
+      var last = values[values.length - 1];
+      var max = Math.max.apply(null, values), min = Math.min.apply(null, values);
+      return el('div.metricbox', [
+        el('div.metric-head', [el('span', { text: label }), el('b', { text: format(last) })]),
+        ui.sparkline(values, { width: 300, height: 44, label: label + ' of ' + app.display + ' over ' + current.word + ', from ' + format(min) + ' to ' + format(max) + ', now ' + format(last) }),
+        el('div.metric-head', [el('span', { text: 'low ' + format(min) }), el('span', { text: 'high ' + format(max) })])
+      ]);
+    }
+
+    function paint() {
+      ui.clear(grid);
+      grid.appendChild(box('Requests per second', 'rps', function (v) { return fmt.num(v, 1); }));
+      grid.appendChild(box('p95 latency', 'p95', function (v) { return fmt.ms(Math.round(v)); }));
+      grid.appendChild(box('Error rate', 'err', function (v) { return fmt.num(v, 2) + '%'; }));
+    }
+    paint();
+
+    return ui.card('Metrics', [
+      el('div.row', [el('span.muted', { text: 'Range' }), bar]),
+      grid,
+      el('p.hint', { text: 'Three charts on the same clock. The range buttons change every chart at once, which is what you need when a spike in one has to be read against the other two.' })
+    ]);
+  }
+
   function overviewTab(app) {
+    var tagsRow = el('div.row', [A.tagChips(app), el('span.spacer'), ui.btn('Edit tags', {
+      variant: 'ghost', title: 'Add or remove tags on ' + app.display,
+      onClick: function () { A.tagEditor(app, app.display, function () { A.refresh(); }); }
+    })]);
     return el('div.stack', [
+      metricsCard(app),
       ui.card('Declaration', ui.dl([
         ['Version', mono(app.version)],
         ['Staging version', mono(app.staging)],
@@ -395,7 +467,8 @@
         ['Tier', 'Tier ' + app.tier],
         ['Identity', mono(app.identity)],
         ['Host', mono(app.host)],
-        ['Last deployed', fmt.time(app.deployedAt)]
+        ['Last deployed', fmt.time(app.deployedAt)],
+        ['Tags', tagsRow]
       ])),
       ui.card('Dependencies', [
         el('p.hint', { text: 'This graph is generated from the same declaration file the reconciler applies, so it cannot drift from what is actually running.' }),
@@ -866,6 +939,12 @@
   registerScreen('apps', {
     title: 'Applications',
     crumb: 'Applications',
+    crumbs: function (rest) {
+      var app = d.appByName(rest[0]);
+      var out = [app ? app.display : rest[0]];
+      if (rest[1]) out.push(rest[1].charAt(0).toUpperCase() + rest[1].slice(1));
+      return out;
+    },
     render: function (mount, ctx) {
       if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx);
       else renderList(mount, ctx);

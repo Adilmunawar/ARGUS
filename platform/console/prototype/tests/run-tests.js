@@ -11,7 +11,7 @@ const SHOTS = process.env.SHOTS || path.join(os.tmpdir(), 'argus-console-shots')
 
 fs.mkdirSync(SHOTS, { recursive: true });
 
-const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs'];
+const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs', 'advisor'];
 const DEEP = [
   'apps/mills', 'apps/agis', 'deploys/1847', 'deploys/1843',
   'compute/host/hv-03', 'compute/vm/sql-01', 'compute/vm/siem-01',
@@ -2494,6 +2494,192 @@ async function axeOn(page, label, suite, opts) {
     /sealed for the first time/.test(chain.first) && chain.sealed === chain.total && /^Chain intact: \d+ rows verified\.$/.test(chain.second)
       && /^Chain broken at row \d+/.test(chain.third) && chain.flashed && chain.recordedBreak,
     JSON.stringify(chain));
+
+  await goto(page, 'advisor');
+  const advisor = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const findings = window.ARGUS.advisorFindings();
+    const rows = document.querySelectorAll('#main tbody tr[data-key]').length;
+    const tiles = [...document.querySelectorAll('#main .tiles a.tile')].map(t => t.getAttribute('href'));
+    const badge = document.getElementById('nav-advisor-badge').textContent;
+    const urgent = findings.filter(f => f.severity === 'critical' || f.severity === 'high').length;
+    const target = findings.find(f => f.id === 'patch-hv-03');
+    const accept = [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Accept risk on patch-hv-03');
+    accept.click();
+    await new Promise(r => setTimeout(r, 120));
+    const why = document.getElementById('suppress-why');
+    why.value = 'patch window is Tuesday'; why.dispatchEvent(new Event('input', { bubbles: true }));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /^Accept for/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 300));
+    const after = { rows: document.querySelectorAll('#main tbody tr[data-key]').length, badge: document.getElementById('nav-advisor-badge').textContent, audit: d.audit[0].action, suppressed: d.advisorSuppressed.length };
+    const host = d.hosts.find(h => h.name === 'hv-03');
+    host.patchAgeDays = 0;
+    const cleared = window.ARGUS.advisorFindings().some(f => f.id === 'patch-hv-03');
+    host.patchAgeDays = 34;
+    d.advisorSuppressed = [];
+    window.ARGUS.refreshBadges();
+    return { total: findings.length, rows, tiles, badge, urgent, hadTarget: !!target, after, cleared };
+  });
+  rec('ACT', 'the Advisor evaluates every rule against the live dataset and links each finding to its resource',
+    advisor.total >= 20 && advisor.rows === advisor.total && advisor.tiles.length === 5 && /category/.test(advisor.tiles[0])
+      && advisor.badge === String(advisor.urgent) && advisor.hadTarget && !advisor.cleared,
+    JSON.stringify(advisor));
+  rec('ACT', 'accepting a risk hides the finding for a fixed time, with the reason in the audit',
+    advisor.after.rows === advisor.total - 1 && Number(advisor.after.badge) === advisor.urgent - 1 && advisor.after.audit === 'advisor.accept' && advisor.after.suppressed === 1,
+    JSON.stringify(advisor.after));
+
+  await goto(page, 'overview');
+  const home = await page.evaluate(() => ({
+    linkedTiles: document.querySelectorAll('#main a.tile.is-link').length,
+    tiles: document.querySelectorAll('#main .tile').length,
+    recent: !![...document.querySelectorAll('#main .card-title')].find(t => /Recently visited/.test(t.textContent)),
+    health: document.querySelectorAll('#main .healthrow').length,
+    apps: window.ARGUS.data.apps.length,
+    bars: [...document.querySelectorAll('#main .healthrow svg')].every(s => s.getBoundingClientRect().width <= 200)
+  }));
+  rec('ACT', 'every Overview tile is a link to its screen, and the home carries recent items and 30-day service health',
+    home.linkedTiles === home.tiles && home.tiles === 6 && home.recent && home.health === home.apps && home.bars, JSON.stringify(home));
+
+  await goto(page, 'compute/vm/runner-01');
+  const vmActions = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const vm = d.vmByName('runner-01');
+    const crumb = document.getElementById('crumb').textContent;
+    const trigger = document.querySelector('#main .pagehead-actions .menubtn');
+    trigger.click();
+    await new Promise(r => setTimeout(r, 80));
+    const items = [...document.querySelectorAll('.menu .menuitem')].map(m => m.querySelector('.menuitem-label').textContent);
+    const protect = [...document.querySelectorAll('.menu .menuitem')].find(m => /Enable replica/.test(m.textContent));
+    protect.click();
+    await new Promise(r => setTimeout(r, 300));
+    const afterProtect = { replica: vm.replica, audit: d.audit[0].action, finding: window.ARGUS.advisorFindings().some(f => f.id === 'replica-runner-01') };
+    document.querySelector('#main .pagehead-actions .menubtn').click();
+    await new Promise(r => setTimeout(r, 80));
+    [...document.querySelectorAll('.menu .menuitem')].find(m => /^Stop/.test(m.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    const input = document.getElementById('confirm-name');
+    input.value = 'runner-01'; input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 300));
+    const afterStop = { state: vm.state, tile: document.querySelector('#main .tile-value').textContent.trim() };
+    document.querySelector('#main .pagehead-actions .menubtn').click();
+    await new Promise(r => setTimeout(r, 80));
+    const startLabel = [...document.querySelectorAll('.menu .menuitem')].map(m => m.querySelector('.menuitem-label').textContent).find(t => /^Start|^Stop/.test(t));
+    [...document.querySelectorAll('.menu .menuitem')].find(m => /^Start/.test(m.textContent)).click();
+    await new Promise(r => setTimeout(r, 300));
+    const out = { crumb, items, afterProtect, afterStop, startLabel, restarted: vm.state };
+    vm.replica = 'off'; vm.checkpointAgeMin = 0;
+    return out;
+  });
+  rec('ACT', 'a virtual machine has an Actions menu like an instance: stop, start, restart, resize, checkpoint, protect, tags',
+    /Virtual machines \/ runner-01/.test(vmActions.crumb) && vmActions.items.length === 7 && vmActions.items.indexOf('Resize') !== -1
+      && vmActions.afterProtect.replica === 'healthy' && vmActions.afterProtect.audit === 'vm.protect' && !vmActions.afterProtect.finding
+      && vmActions.afterStop.state === 'stopped' && vmActions.afterStop.tile === 'Stopped' && vmActions.startLabel === 'Start' && vmActions.restarted === 'running',
+    JSON.stringify(vmActions));
+
+  const tagged = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const vm = d.vmByName('runner-01');
+    const before = Object.assign({}, vm.tags);
+    document.querySelector('#main .pagehead-actions .menubtn').click();
+    await new Promise(r => setTimeout(r, 80));
+    [...document.querySelectorAll('.menu .menuitem')].find(m => /Edit tags/.test(m.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    const key = document.getElementById('tag-key'), val = document.getElementById('tag-value');
+    key.value = 'Owner Team'; val.value = 'ci';
+    val.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Save tags/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 300));
+    const out = { tags: Object.assign({}, vm.tags), audit: d.audit[0].action, chip: !![...document.querySelectorAll('#main .chip')].find(c => c.textContent === 'owner-team: ci') };
+    vm.tags = before;
+    return out;
+  });
+  rec('ACT', 'tags are edited in place, normalised, audited and shown as chips',
+    tagged.tags['owner-team'] === 'ci' && tagged.audit === 'tags.update' && tagged.chip, JSON.stringify(tagged));
+
+  await page.evaluate(() => { window.location.hash = '#/apps?f=tag%3Acost-centre%3Aml'; });
+  await page.waitForTimeout(250);
+  const tagFilter = await page.evaluate(() => [...document.querySelectorAll('#main tbody tr[data-key]')].map(t => t.dataset.key));
+  rec('ACT', 'applications filter by tag from the address', tagFilter.join(',') === 'agis', tagFilter.join(','));
+
+  await goto(page, 'apps/mills');
+  const ranges = await page.evaluate(async () => {
+    const crumb = document.getElementById('crumb').textContent;
+    const boxes = document.querySelectorAll('#main .metricbox').length;
+    const pressedBefore = document.querySelector('#main .rangebar [aria-pressed="true"]').textContent;
+    const labelBefore = document.querySelector('#main .metricbox .spark').getAttribute('aria-label');
+    [...document.querySelectorAll('#main .rangebar .btn')].find(b => b.textContent === '1 h').click();
+    await new Promise(r => setTimeout(r, 80));
+    return {
+      crumb, boxes, pressedBefore, labelBefore,
+      pressedAfter: document.querySelector('#main .rangebar [aria-pressed="true"]').textContent,
+      labelAfter: document.querySelector('#main .metricbox .spark').getAttribute('aria-label'),
+      points: document.querySelector('#main .metricbox polyline').getAttribute('points').split(' ').length
+    };
+  });
+  rec('ACT', 'application metrics share one time range and the breadcrumb names the application',
+    /Mills Dashboard/.test(ranges.crumb) && ranges.boxes === 3 && ranges.pressedBefore === '24 h' && ranges.pressedAfter === '1 h'
+      && /last day/.test(ranges.labelBefore) && /last hour/.test(ranges.labelAfter) && ranges.points === 60,
+    JSON.stringify(ranges));
+
+  await goto(page, 'compute/host/hv-03');
+  const patched = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const host = d.hosts.find(h => h.name === 'hv-03');
+    const findingBefore = window.ARGUS.advisorFindings().some(f => f.id === 'patch-hv-03');
+    [...document.querySelectorAll('#main .pagehead-actions button')].find(b => /^Patch now/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    const input = document.getElementById('confirm-name');
+    input.value = 'hv-03'; input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 300));
+    const out = { findingBefore, age: host.patchAgeDays, audit: d.audit[0].action, findingAfter: window.ARGUS.advisorFindings().some(f => f.id === 'patch-hv-03'), badge: document.getElementById('nav-advisor-badge').textContent };
+    host.patchAgeDays = 34; host.uptimeDays = 12;
+    window.ARGUS.refreshBadges();
+    return out;
+  });
+  rec('ACT', 'patching a host resets its patch age and clears the Advisor finding and badge at once',
+    patched.findingBefore && patched.age === 0 && patched.audit === 'host.patch' && !patched.findingAfter, JSON.stringify(patched));
+
+  await goto(page, 'ops/alarms');
+  const alarms = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const states = [...document.querySelectorAll('#main tbody tr[data-key]')].map(t => t.dataset.key + ':' + t.querySelector('.pill').textContent.replace(/^[^A-Za-z]+/, ''));
+    const inboxBefore = window.ARGUS.needsYou().filter(i => i.kind === 'Alarm').length;
+    [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Create alarm').click();
+    await new Promise(r => setTimeout(r, 120));
+    document.getElementById('alarm-name').value = 'Loan p95 high';
+    document.getElementById('alarm-name').dispatchEvent(new Event('input', { bubbles: true }));
+    document.getElementById('alarm-app').value = 'loan';
+    document.getElementById('alarm-app').dispatchEvent(new Event('change', { bubbles: true }));
+    document.getElementById('alarm-threshold').value = '100';
+    document.getElementById('alarm-threshold').dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    const preview = document.querySelector('.dialog [role="status"]').textContent;
+    [...document.querySelectorAll('.dialog-foot button')].find(b => b.textContent.trim() === 'Create alarm').click();
+    await new Promise(r => setTimeout(r, 300));
+    const created = d.alarms[d.alarms.length - 1];
+    const out = { states, inboxBefore, preview, hash: location.hash, created: created.name + ' ' + created.op + ' ' + created.threshold, audit: d.audit[0].action, inboxAfter: window.ARGUS.needsYou().filter(i => i.kind === 'Alarm').length, rows: document.querySelectorAll('#main tbody tr[data-key]').length };
+    d.alarms = d.alarms.filter(a => a !== created);
+    return out;
+  });
+  rec('ACT', 'alarms evaluate against the current values, preview before saving, and an alarm in ALARM reaches the inbox',
+    alarms.states.indexOf('alm-1:ALARM') !== -1 && alarms.states.indexOf('alm-2:OK') !== -1 && /would be ALARM/.test(alarms.preview)
+      && /^#\/ops\/alarms\?id=alm-\d+$/.test(alarms.hash) && alarms.created === 'Loan p95 high > 100' && alarms.audit === 'alarm.create'
+      && alarms.inboxAfter === alarms.inboxBefore + 1 && alarms.rows === 4,
+    JSON.stringify(alarms));
+
+  await goto(page, 'ops/cost');
+  const costTags = await page.evaluate(() => {
+    const titles = [...document.querySelectorAll('#main .card-title')].map(t => t.textContent);
+    const centres = [...document.querySelectorAll('#main .chip')].map(c => c.textContent).filter(t => /^cost-centre:/.test(t));
+    const total = window.ARGUS.data.cost.breakdown.reduce((s, r) => s + r.total, 0);
+    return { titles, centres, total, monthly: window.ARGUS.data.cost.monthlyTotalUsd };
+  });
+  rec('ACT', 'cost is allocated by the cost-centre tag and the six-month trend is drawn',
+    costTags.titles.indexOf('Cost by cost-centre tag') !== -1 && costTags.titles.indexOf('Six-month trend') !== -1 && costTags.centres.length === 4 && costTags.total === costTags.monthly,
+    JSON.stringify(costTags));
 
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));

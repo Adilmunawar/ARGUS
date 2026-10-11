@@ -606,6 +606,11 @@
   var screen = {
     title: 'Deployments',
     crumb: 'Deployments',
+    crumbs: function (rest) {
+      var out = ['Deployment ' + rest[0]];
+      if (rest[1]) out.push(rest[1].charAt(0).toUpperCase() + rest[1].slice(1));
+      return out;
+    },
     render: function (mount, ctx) {
       if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx.rest[0], ctx.rest[1]);
       else renderQueue(mount);

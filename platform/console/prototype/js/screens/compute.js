@@ -44,6 +44,7 @@
     if (state === 'upgrading') return ui.pill('Upgrading', 'warn');
     if (state === 'repairing') return ui.pill('Repairing', 'warn');
     if (state === 'off') return ui.pill('Off', 'warn');
+    if (state === 'stopped') return ui.pill('Stopped', 'bad');
     if (state === 'n/a') return ui.pill('Not applicable', 'idle');
     return ui.pill(String(state), 'idle');
   }
@@ -123,6 +124,11 @@
       { key: 'ip', label: 'IP', render: function (r) { return mono(r.ip); } },
       { key: 'state', label: 'State', status: true, render: function (r) { return statePill(r.state); } },
       { key: 'replica', label: 'Replica', status: true, render: function (r) { return statePill(r.replica); } },
+      {
+        key: 'tags', label: 'Tags', sortable: false,
+        csv: function (r) { var t = r.tags || {}; return Object.keys(t).map(function (k) { return k + ':' + t[k]; }).join(' '); },
+        render: function (r) { return A.tagChips(r); }
+      },
       {
         key: 'checkpointAgeMin', label: 'Checkpoint age', align: 'right',
         render: function (r) {
@@ -226,6 +232,117 @@
     }));
   }
 
+  function patchNow(host, ctx) {
+    A.confirmDestructive({
+      title: 'Patch ' + host.name + ' now',
+      match: host.name,
+      confirmLabel: 'Patch ' + host.name,
+      detail: 'Patching outside the Tuesday window drains ' + host.name + ', applies the cumulative update and reboots it. The virtual machines on it live-migrate first, so this is a few seconds of pause each rather than an outage.',
+      blast: fmt.num(vmsOn(host.name).length) + ' virtual machines move to another host for about twenty minutes. ' + (host.s2d === 'repairing' ? 'Storage Spaces Direct is repairing on this host; a reboot now extends the repair.' : 'Storage is healthy.'),
+      reversible: 'A failed update rolls back on reboot. The patch age resets only when the host reports the new build.',
+      environment: ctx.env,
+      onConfirm: function () {
+        host.patchAgeDays = 0;
+        host.uptimeDays = 0;
+        A.record('host.patch', host.name + ' (' + ctx.env + ')');
+        A.flash('ok', host.name + ' patched', 'Rebooted on the current cumulative update. The patch age is zero and the Advisor finding has cleared.');
+        A.refresh();
+      }
+    });
+  }
+
+  function vmActions(vm, ctx) {
+    var running = vm.state === 'running';
+    function rec(action, target, text) {
+      A.record(action, target + ' (' + ctx.env + ')');
+      A.flash('ok', text[0], text[1]);
+      A.refresh();
+    }
+    return ui.menu([
+      { label: 'Connect', hint: 'recorded', onSelect: function () { A.go('compute', ['vm', vm.name, 'connect']); } },
+      'divider',
+      {
+        label: running ? 'Stop' : 'Start', hint: running ? 'graceful' : 'on ' + vm.host,
+        onSelect: function () {
+          if (!running) {
+            vm.state = 'running';
+            rec('vm.start', vm.name, ['Started ' + vm.name, 'The guest is booting on ' + vm.host + '. Replication resumes once it is up.']);
+            return;
+          }
+          A.confirmDestructive({
+            title: 'Stop ' + vm.name, match: vm.name, confirmLabel: 'Stop ' + vm.name, environment: ctx.env,
+            detail: 'A graceful shutdown through the guest. ' + vm.role + ' stops serving until it is started again.',
+            blast: vm.zone + '. ' + (vm.replica === 'healthy' ? 'Replication pauses at the last checkpoint.' : 'No replica is affected.'),
+            reversible: 'Start it again from the same menu.',
+            onConfirm: function () {
+              vm.state = 'stopped';
+              rec('vm.stop', vm.name, ['Stopped ' + vm.name, 'The guest shut down cleanly. Start it from the Actions menu.']);
+            }
+          });
+        }
+      },
+      {
+        label: 'Restart', disabled: !running, title: running ? null : 'The machine is stopped; start it instead',
+        onSelect: function () {
+          A.confirmDestructive({
+            title: 'Restart ' + vm.name, match: vm.name, confirmLabel: 'Restart ' + vm.name, environment: ctx.env,
+            detail: 'A guest-initiated reboot. Anything in flight on ' + vm.name + ' is cut; connections re-establish when it is back.',
+            blast: vm.role + ' in ' + vm.zone + ' is unavailable for about ninety seconds.',
+            onConfirm: function () { rec('vm.restart', vm.name, ['Restarting ' + vm.name, 'Back in about ninety seconds. The restart is in the audit.']); }
+          });
+        }
+      },
+      {
+        label: 'Resize', hint: vm.vcpu + ' vCPU / ' + vm.ram + ' GB',
+        onSelect: function () {
+          var cpu = el('select.field', { id: 'vm-vcpu' }, [2, 4, 8, 16, 32].map(function (n) { return el('option', { value: String(n), text: n + ' vCPU', selected: n === vm.vcpu ? true : null }); }));
+          var ram = el('select.field', { id: 'vm-ram' }, [4, 8, 16, 32, 64, 128, 256].map(function (n) { return el('option', { value: String(n), text: n + ' GB', selected: n === vm.ram ? true : null }); }));
+          A.dialog({
+            title: 'Resize ' + vm.name,
+            body: function () {
+              return [
+                el('p', { text: 'The new size goes into the declaration and the reconciler applies it at the next reboot of ' + vm.name + '. Memory can grow while running; vCPU changes need the reboot.' }),
+                el('label.fieldlabel', { for: 'vm-vcpu', text: 'vCPU' }), cpu,
+                el('label.fieldlabel', { for: 'vm-ram', text: 'Memory' }), ram,
+                el('p.hint', { text: 'Host ' + vm.host + ' has ' + fmt.pct(100 - d.hosts.filter(function (h) { return h.name === vm.host; })[0].mem, 0) + ' of its memory free.' })
+              ];
+            },
+            actions: function (close) {
+              return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), ui.btn('Open pull request', {
+                variant: 'primary',
+                onClick: function () {
+                  var from = vm.vcpu + ' vCPU / ' + vm.ram + ' GB';
+                  vm.vcpu = Number(cpu.value); vm.ram = Number(ram.value);
+                  close();
+                  rec('vm.resize', vm.name + ' from ' + from + ' to ' + vm.vcpu + ' vCPU / ' + vm.ram + ' GB', ['Resize opened for ' + vm.name, 'From ' + from + ' to ' + vm.vcpu + ' vCPU / ' + vm.ram + ' GB, applied at the next reboot.']);
+                }
+              })];
+            }
+          });
+        }
+      },
+      'divider',
+      {
+        label: 'Take checkpoint', hint: 'now',
+        onSelect: function () {
+          vm.checkpointAgeMin = 0;
+          rec('vm.checkpoint', vm.name, ['Checkpoint taken on ' + vm.name, 'Application-consistent, shipped to Site B next cycle.']);
+        }
+      },
+      {
+        label: vm.replica === 'off' ? 'Enable replica at Site B' : 'Replica is on', disabled: vm.replica !== 'off',
+        title: vm.replica === 'off' ? null : 'Replication is already ' + vm.replica,
+        onSelect: function () {
+          vm.replica = 'healthy';
+          vm.checkpointAgeMin = 0;
+          rec('vm.protect', vm.name, ['Replication enabled for ' + vm.name, 'The initial copy to Site B is running. The Advisor finding for this machine has cleared.']);
+        }
+      },
+      'divider',
+      { label: 'Edit tags', onSelect: function () { A.tagEditor(vm, vm.name, function () { A.refresh(); }); } }
+    ], { label: 'Actions for ' + vm.name });
+  }
+
   function confirmDrain(host, ctx) {
     A.confirmDestructive({
       title: 'Drain ' + host.name,
@@ -277,6 +394,11 @@
           variant: 'ghost',
           title: 'Live-migrate every virtual machine off ' + host.name,
           onClick: function () { confirmDrain(host, ctx); }
+        }),
+        ui.btn(named('Patch now', host.name), {
+          variant: host.patchAgeDays > 30 ? 'primary' : 'ghost',
+          title: 'Drain, patch and reboot ' + host.name + ' outside the Tuesday window',
+          onClick: function () { patchNow(host, ctx); }
         }),
         ui.btn(named('Quarantine', host.name), {
           variant: 'danger',
@@ -463,7 +585,8 @@
       ['Checkpoint age', (vm.checkpointAgeMin !== null && vm.checkpointAgeMin !== undefined)
         ? fmt.dur(vm.checkpointAgeMin * 60)
         : el('span.muted', { text: 'no replica' })],
-      ['Ways in', vm.connect.map(function (p) { return modeFor(p).name; }).join(', ')]
+      ['Ways in', vm.connect.map(function (p) { return modeFor(p).name; }).join(', ')],
+      ['Tags', A.tagChips(vm)]
     ]));
   }
 
@@ -480,10 +603,11 @@
 
     mount.appendChild(ui.pageHeader(
       vm.name,
-      vm.role + ' · ' + vm.os + ' · ' + vm.ip));
+      vm.role + ' · ' + vm.os + ' · ' + vm.ip,
+      [vmActions(vm, ctx)]));
 
     mount.appendChild(el('div.tiles', [
-      ui.statTile('State', vm.state === 'running' ? 'Running' : vm.state),
+      ui.statTile('State', vm.state === 'running' ? 'Running' : vm.state.charAt(0).toUpperCase() + vm.state.slice(1)),
       ui.statTile('vCPU', fmt.num(vm.vcpu)),
       ui.statTile('Memory', fmt.num(vm.ram), { unit: 'GB' }),
       ui.statTile('Host', vm.host, { note: siteName(vm.site) }),
@@ -507,6 +631,11 @@
   registerScreen('compute', {
     title: 'Compute',
     crumb: 'Compute',
+    crumbs: function (rest) {
+      if (rest[0] === 'vm' && rest[1]) return ['Virtual machines', rest[1]].concat(rest[2] ? [rest[2].charAt(0).toUpperCase() + rest[2].slice(1)] : []);
+      if (rest[0] === 'host' && rest[1]) return ['Hosts', rest[1]];
+      return rest.map(function (s) { return s.charAt(0).toUpperCase() + s.slice(1); });
+    },
     render: function (mount, ctx) {
       var rest = ctx.rest || [];
       if (rest[0] === 'host' && rest[1]) { renderHost(mount, ctx); return; }

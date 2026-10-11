@@ -47,7 +47,7 @@ Argus Console
 │   ├── <app> / Config           env vars with secret references resolved to names only
 │   └── <app> / Deploy history   every version, who approved, rollback
 │
-├── Deployments                  the PR queue: pending, in-flight, recent, failed
+├── Deployments                  the PR queue: pending, in-flight, recent, failed, rejected
 │
 ├── Compute                      hosts, VMs, Service Fabric nodes, GPU
 │   ├── Hosts                    hv-01..05, S2D health, patch age, WDAC mode
@@ -104,9 +104,9 @@ Every screen uses the Mills component language: `PageHeader`, `StatTile`, `Secti
 Replaces: AWS Console Home + Personal Health Dashboard.
 
 - **Hero band** (`cane`→`pine` gradient, Lora title): site status, "all systems normal" or the worst thing happening, in one sentence a mill officer would understand.
-- **StatTile row**: applications healthy (n/n) · SLO this month · oldest backup · open alerts (by severity) · pending deployments · AWS exit progress (a percentage that reaches 100 at Phase 5).
-- **Three SectionCards**: *Needs you* (PRs awaiting your approval, expiring access grants, unacknowledged alerts) · *Recent activity* (last 20 audit rows, sentence-formatted: "Zayan deployed mills 2026.09.08.1 to production") · *Site map* (a small two-column diagram of Site A / Site B with live link status and replication lag).
-- **Sparklines** in chart tokens: request rate, p95, error rate, over 24 h.
+- **StatTile row**, every tile a link to its screen: applications healthy (n/n) · lowest SLO this month · oldest backup · open alerts (by severity) · pending deployments · Advisor findings.
+- **Three SectionCards**: *Needs you* (the first rows of the inbox: incidents, alerts, approvals, grants, waivers, secrets, pipelines, alarms) · *Recent activity* (audit rows, sentence-formatted: "Zayan deployed mills 2026.09.08.1 to production") · *Site map* (a small two-column diagram of Site A / Site B with live link status and replication lag).
+- **Second row**: traffic sparklines over 24 h · reconciler state · service health, thirty days of daily checks per application, worst first · recently visited.
 
 ### 3.2 Applications
 
@@ -207,7 +207,13 @@ How a connect actually works, so there is no ambiguity:
 
 ### 3.10 Audit
 
-Every action, forever: actor, role, elevation state, action, target, before/after, PR link, source IP, session id. Filterable, exportable, and linked from every other screen ("who changed this?" is a link, not a search).
+Every action, forever: actor, role, elevation state, action, target, before/after, PR link, source IP, session id. Filterable, exportable, and linked from every other screen ("who changed this?" is a link, not a search). Every row is sealed with a SHA-256 over its contents and the seal of the row before it; the screen verifies the chain and names the first row that no longer matches.
+
+### 3.11 Advisor
+
+Replaces: Trusted Advisor, plus the half of Config and Security Hub that an estate this size needs.
+
+A rule set evaluated against the estate as it is, not a report somebody ran last month. Five categories: security, fault tolerance, cost, performance, operations. Each finding names its resource and links to it; the moment the data changes the finding goes, which is the test for whether a fix worked. A risk can be accepted for seven, thirty or ninety days with a reason, which is audited and expires. The rail badge counts critical and high findings; the Overview has a tile. Rules are code in the console, next to the data they read, so adding one is a function and a regression, not a product.
 
 ---
 

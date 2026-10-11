@@ -2,6 +2,23 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.12.0] - 2026-10-11
+
+What the AWS console does that this one did not. Each of these is the Argus equivalent of a service an operator reaches for there, built on the dataset and the policies the console already holds, with the same no-comment code and the same tests.
+
+### Added
+- **Advisor**, a fourteenth screen in the Govern group, the equivalent of Trusted Advisor. Thirty-odd rules evaluated against the dataset as it is right now, in five categories: security (WDAC in audit mode, TOTP at Tier 1, secrets past policy, expired waivers, unlocked buckets, stale gMSA passwords, unacknowledged critical alerts), fault tolerance (no replica, no replication, Storage Spaces repairing, backups past cadence, no restore drill in 30 days), cost (idle GPU, capacity filling, cache near its limit), performance (p95, error rate, consumer lag, dead letters) and operations (patch age, stale pipelines, runbooks never run, drift, alarms with no data). Each finding links to its resource; a risk can be accepted for a fixed time with a reason, which is audited and returns when the time passes. Findings clear the moment the data changes, which the regression proves by patching a host. The rail carries a badge of critical and high findings, and the Overview a tile.
+- **Tags** on applications, virtual machines, hosts and buckets, with a tag editor that normalises keys, caps at twenty and audits the change. Applications filter by tag from the address, tables show tags as chips, and cost is allocated by the cost-centre tag the way a cost allocation tag does on a bill.
+- **Instance-style Actions on a virtual machine**: connect, stop and start, restart, resize through a pull request, take a checkpoint, enable replication at Site B, edit tags. Each is confirmed where it should be, changes the machine, and is audited. Hosts gain Patch now outside the Tuesday window.
+- **Alarms**, a tab on Operations, the equivalent of CloudWatch alarms over Prometheus rules: a metric, a comparison, a threshold and a duration per application, evaluated against the current values with the result previewed in the editor before saving. An alarm in ALARM reaches the inbox and pages its owner.
+- **Metrics on one clock.** The application overview carries requests, p95 and error rate over one hour, six hours or a day, with one range control for all three.
+- **Console home.** Every Overview tile is a link to its screen. Recently visited sits beside the reconciler, and a Service health card shows thirty days of daily checks per application, worst first.
+- **Cost by tag and a six-month trend** on Capacity and cost.
+- Breadcrumbs name what they point at: Compute / Virtual machines / sql-01 rather than compute / vm / sql-01, and the document title follows.
+
+### Note
+- 408 property checks, 125 sandbox checks and every stress budget pass.
+
 ## [0.11.0] - 2026-10-11
 
 Policy, evidence and the terminal. The console now enforces the rules the design documents only described, and shows its working in a form an auditor can check.

@@ -168,7 +168,8 @@
 
   function statTile(label, value, opts) {
     opts = opts || {};
-    return el('div.tile', [
+    var tag = opts.href ? 'a.tile.is-link' : 'div.tile';
+    return el(tag, opts.href ? { href: opts.href, title: opts.title || null } : null, [
       el('div.tile-label', { text: label }),
       el('div.tile-value', [
         String(value),
@@ -1516,6 +1517,7 @@
 
       var top = r.bottom + GAP;
       if (top + h + EDGE > window.innerHeight) top = Math.max(EDGE, r.top - h - GAP);
+      top = Math.max(EDGE, Math.min(top, window.innerHeight - h - EDGE));
       var left = r.right - w;
       if (left < EDGE) left = EDGE;
       if (left + w + EDGE > window.innerWidth) left = Math.max(EDGE, window.innerWidth - w - EDGE);

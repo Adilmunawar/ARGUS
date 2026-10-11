@@ -67,6 +67,19 @@
       case 'freeze.lift': return who + ' lifted the change freeze: ' + row.target + '.';
       case 'freeze.override': return who + ' signed off a deployment during the freeze: ' + row.target + '.';
       case 'audit.verify': return who + ' verified the audit chain: ' + row.target + '.';
+      case 'tags.update': return who + ' changed tags on ' + row.target + '.';
+      case 'advisor.accept': return who + ' accepted an advisor finding: ' + row.target + '.';
+      case 'advisor.reopen': return who + ' reopened advisor finding ' + row.target + '.';
+      case 'alarm.create': return who + ' created alarm ' + row.target + '.';
+      case 'alarm.update': return who + ' changed alarm ' + row.target + '.';
+      case 'alarm.delete': return who + ' deleted alarm ' + row.target + '.';
+      case 'vm.stop': return who + ' stopped ' + row.target + '.';
+      case 'vm.start': return who + ' started ' + row.target + '.';
+      case 'vm.restart': return who + ' restarted ' + row.target + '.';
+      case 'vm.resize': return who + ' resized ' + row.target + '.';
+      case 'vm.checkpoint': return who + ' took a checkpoint of ' + row.target + '.';
+      case 'vm.protect': return who + ' enabled replication for ' + row.target + '.';
+      case 'host.patch': return who + ' patched ' + row.target + '.';
       case 'session.unlock': return who + ' unlocked the console.';
       case 'secret.revoke-leases': return who + ' revoked every lease on ' + row.target + '.';
       case 'vuln.waive': return who + ' waived ' + row.target + '.';
@@ -126,40 +139,93 @@
     var open = openAlerts().slice().sort(bySeverity);
     var awaiting = awaitingDeployments();
 
+    var findings = typeof A.advisorFindings === 'function' ? A.advisorFindings().filter(function (f) { return !f.suppressed; }) : [];
+    var urgent = findings.filter(function (f) { return f.severity === 'critical' || f.severity === 'high'; }).length;
+
     return el('div.tiles', [
       ui.statTile('Applications healthy', fmt.num(healthy) + ' of ' + fmt.num(d.apps.length), {
         note: degraded.length
           ? degraded.map(function (app) { return app.display; }).join(', ') + ' not healthy'
-          : 'Every application is serving normally'
+          : 'Every application is serving normally',
+        href: A.href('apps'), title: 'Open Applications'
       }),
       ui.statTile('Lowest SLO this month', fmt.pct(worstSlo.slo, 2), {
-        note: worstSlo.display + ' is the worst of ' + fmt.num(d.apps.length)
+        note: worstSlo.display + ' is the worst of ' + fmt.num(d.apps.length),
+        href: A.href('apps', [worstSlo.name, 'budget']), title: 'Open the error budget of ' + worstSlo.display
       }),
       ui.statTile('Oldest backup', fmt.ago(back.last), {
-        note: back.store + ', ' + back.kind + ', ' + back.cadence
+        note: back.store + ', ' + back.kind + ', ' + back.cadence,
+        href: A.href('ops', ['backups']), title: 'Open backups and drills'
       }),
       ui.statTile('Open alerts', fmt.num(open.length), {
-        note: open.length ? 'Worst severity: ' + open[0].severity : 'Nothing open'
+        note: open.length ? 'Worst severity: ' + open[0].severity : 'Nothing open',
+        href: A.href('security', ['alerts']), title: 'Open the alerts'
       }),
       ui.statTile('Deployments awaiting approval', fmt.num(awaiting.length), {
         note: awaiting.length
           ? 'Oldest opened ' + fmt.ago(awaiting.slice().sort(function (a, b) { return a.opened - b.opened; })[0].opened)
-          : 'The queue is empty'
+          : 'The queue is empty',
+        href: A.href('deploys'), title: 'Open the deployment queue'
       }),
-      ui.statTile('AWS exit progress', fmt.pct(d.exitProgress.percent, 0), {
-        note: 'Phase ' + fmt.num(d.exitProgress.phase) + ' of ' + fmt.num(d.exitProgress.phases)
+      ui.statTile('Advisor findings', fmt.num(findings.length), {
+        note: urgent ? fmt.num(urgent) + ' critical or high' : 'none critical or high',
+        href: A.href('advisor'), title: 'Open the Advisor'
       })
+    ]);
+  }
+
+  function recentCard() {
+    var items = typeof A.recents === 'function' ? A.recents().slice(0, 6) : [];
+    return ui.card('Recently visited', items.length
+      ? el('div.stack', items.map(function (r) {
+        return el('div.row', [
+          el('a.rlink', { href: r.hash, text: r.label }),
+          el('span.muted', { text: r.kind })
+        ]);
+      }))
+      : ui.emptyState('Nothing yet', 'The screens and resources you open appear here, newest first, and in the palette.'));
+  }
+
+  function appBeats(app) {
+    var seed = 0;
+    for (var i = 0; i < app.name.length; i++) seed = (seed * 31 + app.name.charCodeAt(i)) % 100003;
+    var out = [];
+    for (var day = 29; day >= 0; day--) {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      var roll = seed / 2147483648;
+      var bad = app.health !== 'ok' ? 0.18 : app.slo < 99.95 ? 0.05 : 0.01;
+      var status = roll < bad ? 0 : roll < bad + 0.03 ? 2 : 1;
+      if (day === 0) status = app.health === 'ok' ? 1 : 2;
+      out.push({ at: A.time.daysAgo(day), status: status });
+    }
+    return out;
+  }
+
+  function healthCard() {
+    var rows = d.apps.slice().sort(function (a, b) { return a.slo - b.slo; }).map(function (app) {
+      var beats = appBeats(app);
+      var u = ui.uptimeOf(beats, {});
+      return el('div.healthrow', [
+        A.link(app.display, 'apps', [app.name]),
+        ui.heartbeatBar(beats, { slots: 30, width: 200, height: 16, label: app.display + ': ' + ui.heartbeatSentence(beats, { windowWord: 'the last 30 days' }) }),
+        el('span.num', { text: fmt.pct(u.ratio * 100, 1) })
+      ]);
+    });
+    return ui.card('Service health, 30 days', [
+      el('div.stack', rows),
+      el('p.hint', { text: 'One slot per day, oldest left. Full is up, short is a retry, notched is an outage. Worst at the top.' })
     ]);
   }
 
   function needsYouCard() {
     var items = typeof A.needsYou === 'function' ? A.needsYou() : [];
-    var rows = items.slice(0, 8).map(function (it) {
+    var SHOW = 6;
+    var rows = items.slice(0, SHOW).map(function (it) {
       return needsYouRow(it.kind + ': ' + it.text, A.link(it.label, it.route, it.rest, it.params));
     });
-    if (items.length > 8) {
+    if (items.length > SHOW) {
       rows.push(el('div.row', [
-        el('span.muted', { text: fmt.num(items.length - 8) + ' more in the inbox.' }),
+        el('span.muted', { text: fmt.num(items.length - SHOW) + ' more in the inbox.' }),
         ui.btn('Open the inbox', { variant: 'ghost', onClick: function () { A.inbox(); } })
       ]));
     }
@@ -295,7 +361,7 @@
       mount.appendChild(heroBand());
       mount.appendChild(tiles());
       mount.appendChild(el('div.grid.grid-3', [needsYouCard(), activityCard(), sitesCard()]));
-      mount.appendChild(el('div.grid.grid-2', [trafficCard(), reconcilerCard()]));
+      mount.appendChild(el('div.grid.grid-4', [trafficCard(), reconcilerCard(), healthCard(), recentCard()]));
     }
   };
 

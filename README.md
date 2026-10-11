@@ -8,7 +8,7 @@
 [![console tests](https://img.shields.io/badge/console%20tests-377%2F377-046c4e)](platform/console/prototype/tests/run-tests.js)
 [![ADRs](https://img.shields.io/badge/ADRs-34-1e6f4a)](docs/01-DECISIONS.md)
 [![licence](https://img.shields.io/badge/licence-MIT-113a2b)](LICENSE)
-[![status](https://img.shields.io/badge/status-planning%20%C2%B7%20v0.11.0-b07f23)](CHANGELOG.md)
+[![status](https://img.shields.io/badge/status-planning%20%C2%B7%20v0.12.0-b07f23)](CHANGELOG.md)
 
 </div>
 
@@ -29,7 +29,7 @@ It also says plainly what has **not** been proven. `docs/09-VALIDATION-STATUS.md
 | **Targets** | RPO 15 min · RTO 8 h for full site loss · 99.9% · under 10 min from `git push` to signed production deploy |
 | **Exceptions** | Three Linux hosts, each justified by an ADR: the GPU node, the Wazuh SIEM manager, the Guacamole gateway. OPNsense appliances are not counted, being appliances rather than servers. |
 | **Owner** | Adil Munawar, ML Research & Development |
-| **Status** | Planning · v0.11.0 · 11 October 2026 |
+| **Status** | Planning · v0.12.0 · 11 October 2026 |
 
 ## Start here
 
@@ -77,7 +77,17 @@ npm ci && npx playwright install chromium           # once
 node platform/console/prototype/tests/run-tests.js  # 377 assertions in headless Chromium
 ```
 
-The console is static, but it works: thirteen screens, a command palette that also finds deployments, alerts, secret paths and people, sortable and token-filtered tables, recorded browser RDP in a drawer that survives navigation, just-in-time elevation with a countdown, and the reconciler's plan and blast radius shown before any change is approved. Every action carries state: acknowledging an alert, approving or rejecting a deployment, granting or revoking access, rotating a secret, promoting a model and opening a pull request all change what the next screen shows, write an audit row, and move the counts in the navigation. The tab you are on and the filter you applied are part of the URL, so a reload or a shared link lands on the same view. Tables select in bulk and export what they show as CSV, reversible actions offer Undo on their flash, the header says whether the data is live, stale or the bundled sample, an in-flight deployment rolls through its upgrade domains while you watch, the bell opens an inbox of everything that needs a person, an alert becomes an incident with a commander and a timeline that folds in the audit, rows take the keyboard, columns can be hidden and remembered, a filtered view can be saved under a name, the console locks when left idle until a security key resumes it, a change freeze turns every production approval into a signed-off exception, Tier 0 needs two approvers, the plan shows the declaration as a unified diff, an alert can be silenced for a fixed time with a reason, the recorded terminal answers what you type and hands the transcript to Sessions, staging drift is listed with a Promote button, each application carries an error budget against its tier's objective, and the audit trail is a hash chain you can verify and watch break.
+The console is static, but it works. Fourteen screens, a command palette, sortable and token-filtered tables, recorded browser RDP in a drawer that survives navigation, just-in-time elevation with a countdown, and the reconciler's plan and blast radius shown before any change is approved. On top of that:
+
+- **Every action carries state.** Acknowledge, approve, reject, grant, revoke, rotate, promote, open a pull request: each changes what the next screen shows, writes an audit row and moves the counts in the navigation. Reversible actions offer Undo on their flash.
+- **The address is the view.** The tab you are on and the filter you applied are in the URL, so a reload or a shared link lands on the same view. Views can be saved under a name; recent items and saved views are in the palette.
+- **Tables work like an operator needs.** Bulk selection, keyboard row navigation, a column picker that remembers your choice, and CSV export of exactly the rows shown.
+- **What needs you is one list.** The bell opens an inbox of open incidents, unacknowledged alerts, waiting approvals, expired waivers, overdue secrets, failed pipelines and firing alarms; the Overview shows the same list, links every tile, and carries thirty days of service health.
+- **Incidents, silences and alarms.** An alert becomes an incident with a commander and a timeline that folds in the audit; an alert can be silenced for a fixed time with a reason; alarms are rules with a live preview that page their owner.
+- **Policy is enforced, not described.** A change freeze turns every production approval into a signed-off exception, Tier 0 needs two approvers, each application carries an error budget against its tier's objective, and the deploy dialog says so.
+- **Evidence an auditor can check.** The audit trail is a hash chain you can verify and watch break; the plan shows the declaration as a unified diff; the recorded terminal answers what you type and hands the transcript to Sessions.
+- **Estate hygiene.** An Advisor screen evaluates thirty-odd rules across security, fault tolerance, cost, performance and operations, with time-boxed risk acceptance. Tags drive cost allocation and filtering, virtual machines have an instance-style Actions menu, and application metrics share one time range.
+- **A console that behaves.** It says whether its data is live, stale or sample; locks when left idle until a security key resumes it; follows the system theme; and an in-flight deployment rolls through its upgrade domains while you watch.
 
 The tests are real too. 31 suites in headless Chromium against the rendered DOM: axe-core WCAG 2.1 A/AA on every screen and every overlay, keyboard traversal with actual `Tab` presses including focus trapping and restoration, contrast computed from rendered pixels, six viewport widths, WCAG 1.4.10 reflow at 200% and 400% zoom, a density suite that asserts a 1366×768 laptop does not spend more than 55% of its screen on chrome, a layout suite that catches a stylesheet rule leaking into a table cell, and a security pass that reads the source to prove `innerHTML` appears nowhere.
 

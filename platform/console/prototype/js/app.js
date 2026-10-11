@@ -326,6 +326,91 @@
   var SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
   function sevRank(sev) { return Object.prototype.hasOwnProperty.call(SEV_RANK, sev) ? SEV_RANK[sev] : 9; }
 
+  A.evaluateAlarm = function (alarm) {
+    var app = A.data.appByName(alarm.app);
+    if (!app) return { state: 'INSUFFICIENT', value: null, text: 'No application called ' + alarm.app + ', so nothing is measured.' };
+    var value = alarm.metric === 'errorRate' ? app.errorRate * 100 : app[alarm.metric];
+    if (typeof value !== 'number') return { state: 'INSUFFICIENT', value: null, text: 'No ' + alarm.metric + ' is reported for ' + app.display + '.' };
+    var hit = alarm.op === '<' ? value < alarm.threshold : value > alarm.threshold;
+    var unit = alarm.metric === 'p95' ? ' ms' : alarm.metric === 'errorRate' ? '%' : ' req/s';
+    return {
+      state: hit ? 'ALARM' : 'OK', value: value, unit: unit,
+      text: app.display + ' ' + alarm.metric + ' is ' + ui.fmt.num(value, alarm.metric === 'errorRate' ? 2 : 0) + unit + ', threshold ' + alarm.op + ' ' + alarm.threshold + unit + ' for ' + alarm.forMin + ' min.'
+    };
+  };
+
+  A.tagEditor = function (resource, label, onDone) {
+    var tags = Object.assign({}, resource.tags || {});
+    var list = el('div.stack');
+    var keyIn = el('input.field', { type: 'text', id: 'tag-key', autocomplete: 'off', spellcheck: 'false', placeholder: 'key, for example cost-centre', maxlength: '40' });
+    var valIn = el('input.field', { type: 'text', id: 'tag-value', autocomplete: 'off', spellcheck: 'false', placeholder: 'value', maxlength: '80' });
+    function paint() {
+      clear(list);
+      var keys = Object.keys(tags).sort();
+      if (!keys.length) list.appendChild(el('p.muted', { text: 'No tags. Add one below.' }));
+      keys.forEach(function (k) {
+        list.appendChild(el('div.row', [
+          el('span.chip.mono', { text: k + ': ' + tags[k] }),
+          el('span.spacer'),
+          ui.btn('Remove tag ' + k, { variant: 'ghost', onClick: function () { delete tags[k]; paint(); } })
+        ]));
+      });
+    }
+    function add() {
+      var k = keyIn.value.trim().toLowerCase().replace(/[^a-z0-9._:-]+/g, '-').replace(/^-+|-+$/g, '');
+      var v = valIn.value.trim();
+      if (!k || !v) { A.announce('A tag needs both a key and a value'); return; }
+      if (Object.keys(tags).length >= 20 && !tags[k]) { A.flash('info', 'Twenty tags is the limit', 'Remove one before adding another.'); return; }
+      tags[k] = v;
+      keyIn.value = ''; valIn.value = '';
+      paint();
+      keyIn.focus();
+    }
+    valIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+    paint();
+    A.dialog({
+      title: 'Tags on ' + label,
+      body: function () {
+        return [
+          el('p', { text: 'Tags are free key and value pairs carried in the declaration. Cost is allocated by cost-centre, data-class drives the backup and lock policy, and any tag can be filtered on.' }),
+          list,
+          el('div.row', [
+            el('label.sr', { for: 'tag-key', text: 'Tag key' }), keyIn,
+            el('label.sr', { for: 'tag-value', text: 'Tag value' }), valIn,
+            ui.btn('Add tag', { variant: 'ghost', onClick: add })
+          ]),
+          el('p.hint', { text: 'Keys are lower case; letters, digits, dots, colons and dashes. At most twenty tags.' })
+        ];
+      },
+      actions: function (close) {
+        return [
+          ui.btn('Cancel', { variant: 'ghost', onClick: close }),
+          ui.btn('Save tags', {
+            variant: 'primary',
+            onClick: function () {
+              var before = JSON.stringify(resource.tags || {});
+              var after = JSON.stringify(tags);
+              close();
+              if (before === after) { A.announce('Tags unchanged'); return; }
+              resource.tags = tags;
+              A.record('tags.update', label + ': ' + (Object.keys(tags).map(function (k) { return k + '=' + tags[k]; }).join(', ') || 'no tags'));
+              A.flash('ok', 'Tags saved on ' + label, Object.keys(tags).length + ' tag' + (Object.keys(tags).length === 1 ? '' : 's') + '. The change opens as part of the next pull request.', { timeout: 6000 });
+              if (onDone) onDone(tags);
+            }
+          })
+        ];
+      }
+    });
+    keyIn.focus();
+  };
+
+  A.tagChips = function (resource) {
+    var tags = resource.tags || {};
+    var keys = Object.keys(tags).sort();
+    if (!keys.length) return el('span.muted', { text: 'no tags' });
+    return el('div.chips', keys.map(function (k) { return el('span.chip.mono', { text: k + ': ' + tags[k] }); }));
+  };
+
   A.alertOpen = function (a) {
     if (a.state !== 'open') return false;
     if (a.silencedUntil && a.silencedUntil.getTime() > A.data.now.getTime()) return false;
@@ -372,6 +457,12 @@
       out.push({ kind: 'Pipeline', tone: 'bad', text: p.asset + ' failed ' + ui.fmt.ago(p.lastRun) + ' and nothing downstream can refresh.',
         label: 'Open pipelines', route: 'ml', rest: ['pipelines'] });
     });
+    (d.alarms || []).forEach(function (alarm) {
+      var ev = A.evaluateAlarm(alarm);
+      if (ev.state !== 'ALARM') return;
+      out.push({ kind: 'Alarm', tone: 'warn', text: alarm.name + ': ' + ev.text,
+        label: 'Open ' + alarm.id, route: 'ops', rest: ['alarms'], params: { id: alarm.id } });
+    });
     return out;
   };
 
@@ -402,6 +493,7 @@
   A.refreshBadges = function () {
     var d = A.data;
     paintEnv();
+    if (typeof A.refreshAdvisorBadge === 'function') A.refreshAdvisorBadge();
     var open = d.alerts.filter(A.alertOpen).length;
     var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).length;
     var needs = A.needsYou().length;
@@ -511,11 +603,15 @@
   function paintCrumb(r, def) {
     clear(crumbHost);
     crumbHost.appendChild(el('a.crumb-link', { href: A.href(r.route), text: def.crumb || def.title }));
-    if (r.rest.length) {
-      crumbHost.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
-      crumbHost.appendChild(el('b', { text: r.rest.join(' / ') }));
+    var labels = r.rest.slice();
+    if (r.rest.length && typeof def.crumbs === 'function') {
+      try { labels = def.crumbs(r.rest) || labels; } catch (e) { labels = r.rest.slice(); }
     }
-    var pageTitle = (r.rest.length ? r.rest[r.rest.length - 1] + ' - ' : '') + (def.title || r.route);
+    if (labels.length) {
+      crumbHost.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
+      crumbHost.appendChild(el('b', { text: labels.join(' / ') }));
+    }
+    var pageTitle = (labels.length ? labels[labels.length - 1] + ' - ' : '') + (def.title || r.route);
     document.title = pageTitle + ' - Argus Console';
     return pageTitle;
   }
@@ -1141,7 +1237,7 @@
     ['g then c', 'Compute'], ['g then t', 'Data'], ['g then i', 'Identity and secrets'],
     ['g then s', 'Security'], ['g then m', 'ML and geospatial'], ['g then p', 'Operations'],
     ['g then u', 'Audit'], ['g then k', 'Stack'], ['g then y', 'System'],
-    ['g then b', 'Object storage'], ['g then l', 'Logs'],
+    ['g then b', 'Object storage'], ['g then l', 'Logs'], ['g then v', 'Advisor'],
     ['?', 'This list'], ['Escape', 'Close a dialog, drawer or palette'],
     ['g then ,', 'Console preferences']
   ];
@@ -1217,7 +1313,7 @@
     });
   };
 
-  var GO_KEYS = { o: 'overview', a: 'apps', d: 'deploys', c: 'compute', t: 'data', i: 'identity', s: 'security', m: 'ml', p: 'ops', u: 'audit', k: 'stack', y: 'system', b: 'storage', l: 'logs' };
+  var GO_KEYS = { o: 'overview', a: 'apps', d: 'deploys', c: 'compute', t: 'data', i: 'identity', s: 'security', m: 'ml', p: 'ops', u: 'audit', k: 'stack', y: 'system', b: 'storage', l: 'logs', v: 'advisor' };
   var goArmed = false, goTimer = null;
 
   function isTyping(e) {
