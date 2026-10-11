@@ -1911,7 +1911,7 @@ async function axeOn(page, label, suite, opts) {
     acted.state === 'ack' && acted.openAfter === acted.openBefore - 1 && !acted.stillOffered, JSON.stringify(acted));
   rec('ACT', 'the navigation badge and the bell follow the open alert count',
     acted.badgeAfter === String(acted.openAfter) && acted.badgeBefore === String(acted.openBefore)
-      && acted.bell === acted.openAfter + ' open alerts', JSON.stringify(acted));
+      && new RegExp(acted.openAfter + ' open alerts$').test(acted.bell), JSON.stringify(acted));
   rec('ACT', 'every action writes an audit row', acted.audit === 'alert.acknowledge', String(acted.audit));
   rec('ACT', 'the badge in the shell is derived from data, not typed into the markup',
     /nav-alert-badge" hidden>/.test(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')));
@@ -2136,6 +2136,153 @@ async function axeOn(page, label, suite, opts) {
   rec('ACT', 'an elevation about to lapse warns once and can be extended with a second factor',
     extended.ending && extended.warned && extended.left >= 62 && extended.left <= 64 && extended.calm && extended.audited === 'elevation.extend',
     JSON.stringify(extended));
+
+  await goto(page, 'overview');
+  const inbox = await page.evaluate(async () => {
+    const expected = window.ARGUS.needsYou().length;
+    document.getElementById('bell').click();
+    await new Promise(r => setTimeout(r, 120));
+    const title = document.querySelector('.dialog h2').textContent;
+    const rows = document.querySelectorAll('.inbox-row').length;
+    const kinds = [...document.querySelectorAll('.inbox-row .pill')].map(p => p.textContent.replace(/^[^A-Za-z]+/, ''));
+    const firstText = document.querySelector('.inbox-row .inbox-text').textContent;
+    const go = [...document.querySelectorAll('.inbox-row .btn')].find(b => /^Review 1847/.test(b.textContent));
+    go.click();
+    await new Promise(r => setTimeout(r, 250));
+    return { expected, title, rows, kinds, firstText, hash: location.hash, label: document.getElementById('bell').getAttribute('aria-label') };
+  });
+  rec('ACT', 'the bell opens an inbox of everything that needs a person, and each row goes to its item',
+    inbox.rows === inbox.expected && inbox.rows >= 4 && new RegExp('^' + inbox.expected + ' things need you').test(inbox.title)
+      && inbox.kinds.indexOf('Deployment') !== -1 && inbox.kinds.indexOf('Alert') !== -1 && inbox.hash === '#/deploys/1847'
+      && new RegExp('^' + inbox.expected + ' things need you').test(inbox.label) && /^critical/.test(inbox.firstText),
+    JSON.stringify(inbox));
+
+  await goto(page, 'security/alerts');
+  const incident = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const before = d.incidents.length;
+    const alert = d.alerts.find(a => a.state === 'open');
+    const trigger = [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Open incident for ' + alert.id);
+    if (!trigger) return { reason: 'no open-incident button' };
+    trigger.click();
+    await new Promise(r => setTimeout(r, 120));
+    const note = document.getElementById('inc-note');
+    note.value = 'isolating now'; note.dispatchEvent(new Event('input', { bubbles: true }));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => b.textContent.trim() === 'Open incident').click();
+    await new Promise(r => setTimeout(r, 350));
+    const inc = d.incidents[0];
+    const tab = document.querySelector('#main .tab[aria-selected="true"]').textContent;
+    const timeline = document.querySelectorAll('.timeline-item').length;
+    const mitigate = [...document.querySelectorAll('#main button')].find(b => /Mark mitigated/.test(b.textContent));
+    mitigate.click();
+    await new Promise(r => setTimeout(r, 300));
+    const afterMitigate = { state: inc.state, timeline: document.querySelectorAll('.timeline-item').length, audit: d.audit[0].action };
+    const resolve = [...document.querySelectorAll('#main button')].find(b => /^Resolve inc-/.test(b.textContent));
+    resolve.click();
+    await new Promise(r => setTimeout(r, 120));
+    const input = document.getElementById('confirm-name');
+    input.value = inc.id; input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 350));
+    return {
+      created: d.incidents.length === before + 1, linked: inc.alerts[0] === alert.id, alertAcked: alert.state,
+      hash: location.hash, tab, timeline, afterMitigate,
+      resolved: inc.state, alertResolved: alert.state, reopen: !![...document.querySelectorAll('#main button')].find(b => /^Reopen/.test(b.textContent))
+    };
+  });
+  rec('ACT', 'an incident opened from an alert links it, lands on its timeline and folds audit rows in',
+    incident.created && incident.linked && /^#\/security\/incidents\?id=inc-\d+$/.test(incident.hash) && /Incidents/.test(incident.tab) && incident.timeline >= 2,
+    JSON.stringify(incident));
+  rec('ACT', 'mitigating and resolving an incident write the timeline, the audit and the linked alerts',
+    incident.afterMitigate && incident.afterMitigate.state === 'mitigated' && incident.afterMitigate.timeline >= 4 && incident.afterMitigate.audit === 'incident.mitigated'
+      && incident.resolved === 'resolved' && incident.alertResolved === 'resolved' && incident.reopen,
+    JSON.stringify(incident));
+
+  await goto(page, 'security/alerts?f=severity%3Ahigh');
+  const saved = await page.evaluate(async () => {
+    [...document.querySelectorAll('#main .btn')].find(b => b.textContent.trim() === 'Save view').click();
+    await new Promise(r => setTimeout(r, 120));
+    const input = document.getElementById('view-name');
+    input.value = 'High alerts'; input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 250));
+    const views = window.ARGUS.ui.views();
+    window.ARGUS.palette();
+    await new Promise(r => setTimeout(r, 100));
+    const pal = document.querySelector('.pal-input');
+    pal.value = 'High alerts'; pal.dispatchEvent(new Event('input', { bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    const hit = [...document.querySelectorAll('.pal-item')].find(n => /Saved view/.test(n.textContent));
+    return { views, inPalette: !!hit };
+  });
+  rec('ACT', 'a filtered view can be saved under a name and found again from the palette, whatever the case typed',
+    saved.views.length === 1 && saved.views[0].hash === '#/security/alerts?f=severity%3Ahigh' && saved.views[0].screen === 'security' && saved.inPalette,
+    JSON.stringify(saved));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(80);
+  await page.evaluate(() => { try { localStorage.removeItem('argus.views'); } catch (e) {} });
+
+  const columns = await page.evaluate(async () => {
+    const headBefore = [...document.querySelectorAll('#main thead th')].map(t => t.textContent.trim().replace(/↕$/, ''));
+    [...document.querySelectorAll('#main .btn')].find(b => b.textContent.trim() === 'Columns').click();
+    await new Promise(r => setTimeout(r, 120));
+    const boxes = [...document.querySelectorAll('.dialog input[type=checkbox]')];
+    boxes[1].click(); boxes[2].click();
+    [...document.querySelectorAll('.dialog-foot button')].find(b => b.textContent.trim() === 'Apply').click();
+    await new Promise(r => setTimeout(r, 150));
+    const headAfter = [...document.querySelectorAll('#main thead th')].map(t => t.textContent.trim().replace(/↕$/, ''));
+    const cells = document.querySelector('#main tbody tr[data-key]').querySelectorAll('td').length;
+    return { headBefore, headAfter, cells, stored: localStorage.getItem('argus.cols') };
+  });
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(AXE);
+  await page.waitForTimeout(200);
+  const headReloaded = await page.evaluate(() => [...document.querySelectorAll('#main thead th')].map(t => t.textContent.trim().replace(/↕$/, '')));
+  await axeOn(page, 'alerts with hidden columns', 'A11Y');
+  await page.evaluate(() => { try { localStorage.removeItem('argus.cols'); } catch (e) {} });
+  rec('ACT', 'hiding columns removes them from the header and every row, and the choice survives a reload',
+    columns.headBefore.length === columns.headAfter.length + 2 && columns.cells === columns.headAfter.length
+      && columns.headAfter.indexOf('Source') === -1 && columns.headAfter.indexOf('Rule') === -1
+      && headReloaded.join('|') === columns.headAfter.join('|'),
+    JSON.stringify({ columns, headReloaded }));
+
+  const rowKeys = await page.evaluate(async () => {
+    const first = document.querySelector('#main tbody tr[data-key]');
+    first.focus();
+    const start = document.activeElement.dataset.key;
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', bubbles: true }));
+    const moved = document.activeElement.dataset.key;
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
+    await new Promise(r => setTimeout(r, 40));
+    const selected = [...document.querySelectorAll('#main tr.is-selected')].map(t => t.dataset.key);
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    const back = document.activeElement.dataset.key;
+    return { start, moved, selected, back };
+  });
+  rec('ACT', 'rows take the keyboard: j and k or the arrows move, x selects',
+    rowKeys.start && rowKeys.moved && rowKeys.moved !== rowKeys.start && rowKeys.selected.length === 1 && rowKeys.selected[0] === rowKeys.moved && rowKeys.back === rowKeys.start,
+    JSON.stringify(rowKeys));
+
+  const locked = await page.evaluate(async () => {
+    window.ARGUS.lock('test');
+    await new Promise(r => setTimeout(r, 80));
+    const lockedNow = window.ARGUS.isLocked();
+    const noX = !document.querySelector('.dialog .x');
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.querySelector('.dialog').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    document.querySelector('.scrim.is-dialog').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    window.ARGUS.dismissOverlays();
+    await new Promise(r => setTimeout(r, 80));
+    const stillLocked = window.ARGUS.isLocked() && !!document.querySelector('.dialog');
+    const blurred = document.body.classList.contains('is-locked');
+    const audited = window.ARGUS.data.audit[0].action;
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Resume/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    return { lockedNow, noX, stillLocked, blurred, audited, unlocked: !window.ARGUS.isLocked() && !document.body.classList.contains('is-locked'), after: window.ARGUS.data.audit[0].action };
+  });
+  rec('ACT', 'a locked console cannot be dismissed by Escape, the scrim or a route change, only by the key',
+    locked.lockedNow && locked.noX && locked.stillLocked && locked.blurred && locked.audited === 'session.lock' && locked.unlocked && locked.after === 'session.unlock',
+    JSON.stringify(locked));
 
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));

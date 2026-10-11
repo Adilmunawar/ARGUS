@@ -2,6 +2,24 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.10.0] - 2026-10-11
+
+The operator's day, end to end: find out what needs you, work an incident from the alert that raised it, keep the view you built, and leave the desk without leaving the session open.
+
+### Added
+- **An inbox behind the bell.** Everything that needs a person in one list: open incidents, critical and high alerts nobody has acknowledged, deployments and grants waiting for an approver, expired waivers, secrets past their rotation policy and failed pipelines, each with a button to the item. The bell's label and dot count the same list, and the Overview's Needs you card is now the first eight rows of it, so the two can never disagree.
+- **Incidents.** A new tab on Security. An alert's row offers Open incident, which takes a title, a severity, a commander and a first note, links the alert and acknowledges it. The incident's timeline holds what people write and, folded in automatically, every audit row that names the incident, its host or its alerts, so an action taken elsewhere in the console cannot go missing from the record. Mark mitigated, resolve with a typed confirmation that resolves the linked alerts with it, or reopen; each writes the timeline and the audit. Incidents appear in the palette, the inbox and Needs you.
+- **Rows take the keyboard.** On any clickable or selectable table, `j`/`k` or the arrows move between rows, Home and End jump, Enter opens, and `x` or Space toggles the selection. The row focus ring already existed; it now has somewhere to go.
+- **A column picker on every list screen that has one**, with the choice remembered per table in this browser. The export still carries every column, and a table refuses to hide its last one.
+- **Saved views.** Save the filter and tab you built under a name; it lives in a Views menu on that screen and in the palette as a Saved view. Views are per browser and can be forgotten from the same menu.
+- **Lock when idle.** A preference, on by default at fifteen minutes, that blurs the console behind a dialog that Escape, the scrim and a route change cannot dismiss; only the security key resumes it. Locking and resuming are both audited. The session itself continues underneath: an elevation keeps counting down and a rollout keeps rolling. Lock the console is also a palette action.
+
+### Fixed
+- The palette's search was case-sensitive. Typing a capital letter found nothing, because the query was matched raw against a lowercased index.
+
+### Note
+- 377 property checks, 125 sandbox checks and every stress budget pass.
+
 ## [0.9.0] - 2026-10-11
 
 Features an operator reaches for once the basics work. Every one of them is built on the state-carrying actions of 0.8.0, tested in the ACT suite, and leaves nothing running when the screen is left.

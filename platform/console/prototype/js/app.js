@@ -2,13 +2,14 @@
   'use strict';
 
   var A = (window.ARGUS = window.ARGUS || {});
-  var ui = A.ui, el = ui.el, clear = ui.clear;
+  var ui = A.ui, el = ui.el, clear = ui.clear, fmt = ui.fmt;
 
-  var prefs = { density: 'comfortable', rail: false, timezone: 'utc', theme: 'system' };
+  var prefs = { density: 'comfortable', rail: false, timezone: 'utc', theme: 'system', idleLock: '15' };
   var PREF_VALUES = {
     density: ['comfortable', 'compact'],
     timezone: ['utc', 'local'],
-    theme: ['system', 'light', 'dark']
+    theme: ['system', 'light', 'dark'],
+    idleLock: ['off', '5', '15', '30']
   };
   function loadPrefs() {
     try {
@@ -128,10 +129,13 @@
     if (!opener || opener === document.body) opener = null;
     openerStack.push(opener);
     var titleId = 'dlg-title-' + Math.random().toString(36).slice(2, 8);
+    var closeAllowed = !opts.locked;
+    function unlockClose() { closeAllowed = true; close(); }
 
     var closed = false;
     function close() {
       if (closed) return;
+      if (opts.locked && !closeAllowed) return;
       closed = true;
       untrap();
       scrim.remove();
@@ -153,13 +157,13 @@
     }, [
       el('div.dialog-head', [
         el('h2', { id: titleId, tabindex: '-1', text: opts.title }),
-        el('button.x', { type: 'button', 'aria-label': 'Close dialog', on: { click: close } }, '×')
+        opts.locked ? null : el('button.x', { type: 'button', 'aria-label': 'Close dialog', on: { click: close } }, '×')
       ]),
-      el('div.dialog-body', opts.body ? opts.body(close) : null),
-      el('div.dialog-foot', opts.actions ? opts.actions(close) : ui.btn('Close', { onClick: close }))
+      el('div.dialog-body', opts.body ? opts.body(opts.locked ? unlockClose : close) : null),
+      el('div.dialog-foot', opts.actions ? opts.actions(opts.locked ? unlockClose : close) : ui.btn('Close', { onClick: close }))
     ]);
 
-    var scrim = el('div.scrim.is-dialog', {
+    var scrim = el('div.scrim.is-dialog' + (opts.locked ? '.is-locked' : ''), {
       on: { mousedown: function (e) { if (e.target === scrim) close(); } }
     }, panel);
 
@@ -167,7 +171,7 @@
     document.body.classList.add('has-dialog');
     var untrap = trapFocus(panel, close);
     panel.querySelector('h2').focus();
-    var handle = { close: close, panel: panel };
+    var handle = { close: close, panel: panel, locked: !!opts.locked };
     openDialogs.push(handle);
     return handle;
   };
@@ -176,6 +180,7 @@
     var guard = 0;
     while (openDialogs.length && guard++ < 20) {
       var h = openDialogs[openDialogs.length - 1];
+      if (h.locked) break;
       try { h.close(); } catch (e) { openDialogs.pop(); }
     }
     if (ui.closeMenus) ui.closeMenus();
@@ -318,20 +323,87 @@
     if (at !== -1) A.data.audit.splice(at, 1);
   };
 
+  var SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+  function sevRank(sev) { return Object.prototype.hasOwnProperty.call(SEV_RANK, sev) ? SEV_RANK[sev] : 9; }
+
+  A.needsYou = function () {
+    var d = A.data, out = [];
+    var me = A.me();
+    (d.incidents || []).filter(function (i) { return i.state === 'open'; }).forEach(function (i) {
+      out.push({ kind: 'Incident', tone: 'bad', text: i.title + ' on ' + i.host + ', ' + i.severity + ', commanded by ' + i.commander + '.',
+        label: 'Open ' + i.id, route: 'security', rest: ['incidents'], params: { id: i.id } });
+    });
+    d.alerts.filter(function (a) { return a.state === 'open' && (a.severity === 'critical' || a.severity === 'high'); })
+      .sort(function (a, b) { return sevRank(a.severity) - sevRank(b.severity); })
+      .forEach(function (a) {
+        out.push({ kind: 'Alert', tone: a.severity === 'critical' ? 'bad' : 'warn', text: a.severity + ': ' + a.rule + ' on ' + a.host + ', last seen ' + ui.fmt.ago(a.last) + '.',
+          label: 'Open ' + a.id, route: 'security', rest: ['alerts'], params: { id: a.id } });
+      });
+    d.deployments.filter(function (p) { return p.state === 'awaiting'; }).forEach(function (p) {
+      var app = d.appByName(p.app);
+      var mine = p.author === me;
+      out.push({ kind: 'Deployment', tone: 'info', text: (app ? app.display : p.app) + ' ' + p.version + ' is waiting for approval into ' + p.env + (mine ? ', opened by you, so somebody else must approve it.' : '.'),
+        label: 'Review ' + p.id, route: 'deploys', rest: [String(p.id)] });
+    });
+    d.grants.filter(function (g) { return g.state === 'requested'; }).forEach(function (g) {
+      out.push({ kind: 'Grant', tone: 'info', text: g.principal + ' asked to join ' + g.group + ': ' + g.reason + '.',
+        label: 'Review ' + g.id, route: 'identity', rest: ['grants'], params: { id: g.id } });
+    });
+    d.vulns.filter(function (v) { return v.waiver && v.waiver.until < d.now; }).forEach(function (v) {
+      out.push({ kind: 'Waiver', tone: 'bad', text: 'The waiver on ' + v.id + ' in ' + v.app + ' expired ' + ui.fmt.ago(v.waiver.until) + '.',
+        label: 'Open vulnerabilities', route: 'security', rest: ['vulns'] });
+    });
+    d.secrets.filter(function (s) { return s.rotatedDays > s.policyDays; }).forEach(function (s) {
+      out.push({ kind: 'Secret', tone: 'warn', text: s.path + ' is ' + s.rotatedDays + ' days old against a ' + s.policyDays + ' day policy.',
+        label: 'Open ' + s.path, route: 'identity', rest: ['secrets'], params: { path: s.path } });
+    });
+    d.pipelines.filter(function (p) { return p.state === 'failed'; }).forEach(function (p) {
+      out.push({ kind: 'Pipeline', tone: 'bad', text: p.asset + ' failed ' + ui.fmt.ago(p.lastRun) + ' and nothing downstream can refresh.',
+        label: 'Open pipelines', route: 'ml', rest: ['pipelines'] });
+    });
+    return out;
+  };
+
+  A.inbox = function () {
+    var items = A.needsYou();
+    A.dialog({
+      title: items.length ? fmt.num(items.length) + ' thing' + (items.length === 1 ? '' : 's') + ' need' + (items.length === 1 ? 's' : '') + ' you' : 'Nothing needs you',
+      wide: true,
+      body: function (close) {
+        if (!items.length) {
+          return ui.emptyState('The inbox is empty',
+            'No incident is open, no critical or high alert is unacknowledged, no deployment or grant waits for an approver, no waiver has expired and no secret is past its policy.');
+        }
+        return el('div.stack.inbox', items.map(function (it) {
+          return el('div.row.inbox-row', [
+            ui.pill(it.kind, it.tone),
+            el('span.inbox-text', { text: it.text }),
+            ui.btn(it.label, {
+              variant: 'ghost',
+              onClick: function () { close(); A.go(it.route, it.rest, it.params); }
+            })
+          ]);
+        }));
+      }
+    });
+  };
+
   A.refreshBadges = function () {
     var d = A.data;
     var open = d.alerts.filter(function (a) { return a.state === 'open'; }).length;
     var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).length;
+    var needs = A.needsYou().length;
     var alertBadge = document.getElementById('nav-alert-badge');
     var deployBadge = document.getElementById('nav-deploy-badge');
     var bell = document.getElementById('bell');
     if (alertBadge) { alertBadge.textContent = open ? String(open) : ''; alertBadge.hidden = !open; }
     if (deployBadge) { deployBadge.textContent = awaiting ? String(awaiting) : ''; deployBadge.hidden = !awaiting; }
     if (bell) {
-      bell.setAttribute('aria-label', open ? open + ' open alert' + (open === 1 ? '' : 's') : 'No open alerts');
-      bell.title = open ? open + ' open alert' + (open === 1 ? '' : 's') : 'No open alerts';
+      var word = needs ? needs + ' thing' + (needs === 1 ? '' : 's') + ' need' + (needs === 1 ? 's' : '') + ' you, ' + open + ' open alert' + (open === 1 ? '' : 's') : 'Nothing needs you';
+      bell.setAttribute('aria-label', word);
+      bell.title = word;
       var dot = bell.querySelector('.dot');
-      if (dot) dot.hidden = !open;
+      if (dot) dot.hidden = !needs;
     }
   };
 
@@ -554,6 +626,16 @@
     d.people.forEach(function (p) {
       items.push({ kind: 'Person', label: p.name, hint: p.upn + ' · Tier ' + p.tier, run: function () { A.go('identity', ['people']); } });
     });
+    (d.incidents || []).forEach(function (i) {
+      items.push({ kind: 'Incident', label: i.title, hint: i.id + ' · ' + i.state + ' · ' + i.host, run: function () { A.go('security', ['incidents'], { id: i.id }); } });
+    });
+    (ui.views ? ui.views() : []).forEach(function (v) {
+      items.push({ kind: 'Saved view', label: v.name, hint: v.screen, run: function () {
+        if (window.location.hash === v.hash) render(); else window.location.hash = v.hash;
+      } });
+    });
+    items.push({ kind: 'Action', label: 'What needs me', hint: 'Inbox', run: function () { A.inbox(); } });
+    items.push({ kind: 'Action', label: 'Lock the console', hint: 'Needs your key to resume', run: function () { A.lock('locked by hand'); } });
     items.push({ kind: 'Action', label: 'Switch to ' + (A.state.env === 'production' ? 'staging' : 'production'), hint: 'Environment', run: function () { A.setEnv(A.state.env === 'production' ? 'staging' : 'production'); } });
     items.push({ kind: 'Action', label: 'Toggle compact density', hint: 'Rows per screen', run: function () { A.setDensity(prefs.density === 'compact' ? 'comfortable' : 'compact'); } });
     items.push({ kind: 'Action', label: 'Show keyboard shortcuts', hint: '?', run: function () { A.shortcuts(); } });
@@ -662,8 +744,9 @@
         return;
       }
       var lowest = -Infinity;
+      var needle = q.toLowerCase();
       for (var ix = 0; ix < items.length; ix++) {
-        var sc = q ? fuzzy(q, items[ix].hay) : 0;
+        var sc = q ? fuzzy(needle, items[ix].hay) : 0;
         if (sc < 0) continue;
         if (best.length === LIMIT && sc <= lowest) continue;
         var at = best.length;
@@ -1006,6 +1089,13 @@
         options: [['comfortable', 'Comfortable'], ['compact', 'Compact']],
         get: function () { return prefs.density; },
         set: function (v) { A.setDensity(v); }
+      },
+      {
+        key: 'idleLock', legend: 'Lock when idle',
+        hint: 'A console left open on a desk is a signed-in session for whoever walks past. Resuming needs your security key.',
+        options: [['off', 'Never'], ['5', 'After 5 min'], ['15', 'After 15 min'], ['30', 'After 30 min']],
+        get: function () { return prefs.idleLock; },
+        set: function (v) { A.setIdleLock(v); }
       }
     ];
 
@@ -1167,6 +1257,66 @@
     return true;
   };
 
+  var idleTimer = null;
+  var lockHandle = null;
+
+  function idleMs() {
+    var n = Number(prefs.idleLock);
+    return isFinite(n) && n > 0 ? n * 60000 : 0;
+  }
+
+  function armIdle() {
+    if (idleTimer) { window.clearTimeout(idleTimer); idleTimer = null; }
+    var ms = idleMs();
+    if (!ms || lockHandle) return;
+    idleTimer = window.setTimeout(function () { idleTimer = null; A.lock('idle for ' + prefs.idleLock + ' min'); }, ms);
+  }
+
+  A.setIdleLock = function (v) {
+    if (PREF_VALUES.idleLock.indexOf(v) === -1) return;
+    prefs.idleLock = v; savePrefs();
+    armIdle();
+    A.announce(v === 'off' ? 'The console will not lock on its own' : 'The console locks after ' + v + ' minutes idle');
+  };
+
+  A.isLocked = function () { return !!lockHandle; };
+
+  A.lock = function (why) {
+    if (lockHandle) return lockHandle;
+    if (idleTimer) { window.clearTimeout(idleTimer); idleTimer = null; }
+    A.dismissOverlays();
+    A.closeSession();
+    document.body.classList.add('is-locked');
+    A.record('session.lock', why || 'locked');
+    var sinceAt = new Date();
+    lockHandle = A.dialog({
+      title: 'Console locked',
+      locked: true,
+      body: function () {
+        return [
+          el('div.stepup-key', { 'aria-hidden': 'true', text: '🔒' }),
+          el('p', { text: 'Locked ' + (why || 'by hand') + ' at ' + ui.fmt.stamp(sinceAt) + '. Nothing behind this dialog can be read or pressed until you resume with your security key.' }),
+          el('p.hint', { text: 'The session itself has not ended: an elevation keeps counting down, and a deployment in flight keeps rolling.' })
+        ];
+      },
+      actions: function (close) {
+        return [ui.btn('Resume with security key', {
+          variant: 'primary',
+          onClick: function () {
+            lockHandle = null;
+            document.body.classList.remove('is-locked');
+            A.record('session.unlock', A.me());
+            close();
+            A.announce('Console unlocked');
+            armIdle();
+          }
+        })];
+      }
+    });
+    A.announce('Console locked. Resume with your security key.');
+    return lockHandle;
+  };
+
   function boot() {
     loadPrefs();
     loadRecents();
@@ -1216,7 +1366,7 @@
     document.getElementById('drawer-close').addEventListener('click', A.closeSession);
     document.getElementById('helpbtn').addEventListener('click', A.shortcuts);
     document.getElementById('prefsbtn').addEventListener('click', A.settings);
-    document.getElementById('bell').addEventListener('click', function () { A.go('security', ['alerts']); });
+    document.getElementById('bell').addEventListener('click', function () { A.inbox(); });
     var modePill = document.getElementById('modepill');
     if (modePill) {
       modePill.addEventListener('click', function () { A.dataSource(); });
@@ -1245,6 +1395,10 @@
     });
 
     window.addEventListener('hashchange', function () { render(); });
+    ['keydown', 'pointerdown', 'hashchange', 'focus'].forEach(function (name) {
+      window.addEventListener(name, function () { if (!lockHandle) armIdle(); }, true);
+    });
+    armIdle();
     A.setEnv('production', true);
     paintElevation();
     render();

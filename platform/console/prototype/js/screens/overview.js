@@ -25,16 +25,6 @@
     return d.deployments.filter(function (p) { return p.state === 'awaiting'; });
   }
 
-  function requestedGrants() {
-    return d.grants.filter(function (g) { return g.state === 'requested'; });
-  }
-
-  function urgentAlerts() {
-    return openAlerts().filter(function (a) {
-      return a.severity === 'critical' || a.severity === 'high';
-    }).sort(bySeverity);
-  }
-
   function personName(upn) {
     var p = d.personByUpn(upn);
     if (p) return p.name;
@@ -64,6 +54,13 @@
       case 'elevation.request': return who + ' elevated ' + row.target + '.';
       case 'elevation.release': return who + ' released the elevation of ' + row.target + '.';
       case 'elevation.extend': return who + ' extended an elevation: ' + row.target + '.';
+      case 'incident.open': return who + ' opened incident ' + row.target + '.';
+      case 'incident.note': return who + ' wrote on incident ' + row.target + '.';
+      case 'incident.mitigated': return who + ' marked incident ' + row.target + ' mitigated.';
+      case 'incident.resolved': return who + ' resolved incident ' + row.target + '.';
+      case 'incident.reopen': return who + ' reopened incident ' + row.target + '.';
+      case 'session.lock': return 'The console locked, ' + row.target + '.';
+      case 'session.unlock': return who + ' unlocked the console.';
       case 'secret.revoke-leases': return who + ' revoked every lease on ' + row.target + '.';
       case 'vuln.waive': return who + ' waived ' + row.target + '.';
       case 'model.promote': return who + ' promoted model ' + row.target + '.';
@@ -149,37 +146,22 @@
   }
 
   function needsYouCard() {
-    var rows = [];
-
-    awaitingDeployments().forEach(function (dep) {
-      var app = d.appByName(dep.app);
-      rows.push(needsYouRow(
-        (app ? app.display : dep.app) + ' ' + dep.version + ' is waiting for approval into ' +
-          dep.env + ', opened by ' + personName(dep.author) + ' ' + fmt.ago(dep.opened) + '.',
-        A.link('Review deployment ' + dep.id, 'deploys', [String(dep.id)])
-      ));
+    var items = typeof A.needsYou === 'function' ? A.needsYou() : [];
+    var rows = items.slice(0, 8).map(function (it) {
+      return needsYouRow(it.kind + ': ' + it.text, A.link(it.label, it.route, it.rest, it.params));
     });
-
-    requestedGrants().forEach(function (g) {
-      rows.push(needsYouRow(
-        personName(g.principal) + ' has asked to join ' + g.group + ': ' + g.reason + '.',
-        A.link('Review grant ' + g.id, 'identity', ['grants'], { id: g.id })
-      ));
-    });
-
-    urgentAlerts().forEach(function (a) {
-      rows.push(needsYouRow(
-        a.severity.charAt(0).toUpperCase() + a.severity.slice(1) + ': ' + a.rule + ' on ' + a.host +
-          ', last seen ' + fmt.ago(a.last) + '.',
-        A.link('Open alert ' + a.id, 'security', ['alerts'], { id: a.id })
-      ));
-    });
+    if (items.length > 8) {
+      rows.push(el('div.row', [
+        el('span.muted', { text: fmt.num(items.length - 8) + ' more in the inbox.' }),
+        ui.btn('Open the inbox', { variant: 'ghost', onClick: function () { A.inbox(); } })
+      ]));
+    }
 
     return ui.card('Needs you', rows.length
       ? el('div.stack', rows)
       : ui.emptyState(
         'Nothing is waiting for you',
-        'No deployment needs an approver, no elevation has been requested, and no critical or high alert is open. This list fills itself, so there is nothing to refresh.',
+        'No incident is open, no deployment needs an approver, no elevation has been requested, no waiver has expired, no secret is past its policy and no critical or high alert is open. This list fills itself, so there is nothing to refresh.',
         A.link('Look at the deployment queue anyway', 'deploys')));
   }
 

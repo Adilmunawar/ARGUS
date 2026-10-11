@@ -194,12 +194,41 @@
     ]);
   }
 
+  var COLS_KEY = 'argus.cols';
+
+  function colId(c) { return String(c.key || c.label); }
+
+  function loadHiddenCols(id) {
+    if (!id) return {};
+    try {
+      var all = JSON.parse(window.localStorage.getItem(COLS_KEY) || '{}');
+      var list = all && typeof all === 'object' && Array.isArray(all[id]) ? all[id] : [];
+      var out = {};
+      list.forEach(function (k) { if (typeof k === 'string' && k.length < 64) out[k] = true; });
+      return out;
+    } catch (e) { return {}; }
+  }
+
+  function saveHiddenCols(id, hidden) {
+    if (!id) return;
+    try {
+      var all = {};
+      try { all = JSON.parse(window.localStorage.getItem(COLS_KEY) || '{}') || {}; } catch (e) { all = {}; }
+      if (typeof all !== 'object' || Array.isArray(all)) all = {};
+      var list = Object.keys(hidden);
+      if (list.length) all[id] = list; else delete all[id];
+      window.localStorage.setItem(COLS_KEY, JSON.stringify(all));
+    } catch (e) {  }
+  }
+
   function table(cols, rows, opts) {
     opts = opts || {};
     var state = { key: opts.sortKey || null, dir: opts.sortDir || 'asc' };
     var announceNext = false;
     var current = rows.slice();
     var selectable = !!(opts.selectable && opts.rowKey);
+    var hidden = loadHiddenCols(opts.id);
+    function shown() { return cols.filter(function (c) { return !hidden[colId(c)]; }); }
     var selected = Object.create(null);
     var headCheck = null;
 
@@ -256,13 +285,33 @@
         var row = rowFromEvent(e);
         if (row) opts.onRow(row);
       });
-      tbody.addEventListener('keydown', function (e) {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        if (e.target.tagName !== 'TR') return;
-        var row = rowFromEvent(e);
-        if (row) { e.preventDefault(); opts.onRow(row); }
-      });
     }
+
+    function focusRowAt(index) {
+      var trs = tbody.querySelectorAll('tr[data-key], tr[data-row-index]');
+      var list = Array.prototype.filter.call(trs, function (tr) { return tr.dataset.rowIndex !== undefined; });
+      if (!list.length) return;
+      var n = Math.max(0, Math.min(list.length - 1, index));
+      list[n].focus({ preventScroll: false });
+    }
+
+    tbody.addEventListener('keydown', function (e) {
+      if (e.target.tagName !== 'TR') return;
+      var at = Number(e.target.dataset.rowIndex);
+      if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); focusRowAt(at + 1); return; }
+      if (e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); focusRowAt(at - 1); return; }
+      if (e.key === 'Home') { e.preventDefault(); focusRowAt(0); return; }
+      if (e.key === 'End') { e.preventDefault(); focusRowAt(1e9); return; }
+      var row = rowFromEvent(e);
+      if (!row) return;
+      if ((e.key === ' ' || e.key === 'x') && selectable) {
+        e.preventDefault();
+        var box = e.target.querySelector('.rowcheck');
+        if (box) { box.checked = !box.checked; box.dispatchEvent(new Event('change', { bubbles: true })); }
+        return;
+      }
+      if ((e.key === 'Enter' || e.key === ' ') && opts.onRow) { e.preventDefault(); opts.onRow(row); }
+    });
 
     var VIRTUAL_MIN = 150;
     var OVERSCAN = 10;
@@ -291,22 +340,20 @@
         tr.classList.toggle('is-selected', !!selected[key]);
         tr.appendChild(el('td.sel', box));
       }
-      cols.forEach(function (c) {
+      shown().forEach(function (c) {
         var td = el('td' + (c.align === 'right' ? '.num' : '') + (c.status ? '.st' : ''));
         var v = c.render ? c.render(row) : row[c.key];
         append(td, v === undefined || v === null ? '-' : v);
         tr.appendChild(td);
       });
-      if (opts.onRow) {
-        tr.classList.add('is-clickable');
-        tr.tabIndex = 0;
-      }
+      if (opts.onRow) tr.classList.add('is-clickable');
+      if (opts.onRow || selectable) tr.tabIndex = 0;
       return tr;
     }
 
     function spacer(height) {
       return el('tr.vspacer', { 'aria-hidden': 'true' },
-        el('td', { colspan: String(cols.length + (selectable ? 1 : 0)), style: { height: height + 'px', padding: '0' } }));
+        el('td', { colspan: String(shown().length + (selectable ? 1 : 0)), style: { height: height + 'px', padding: '0' } }));
     }
 
     function focusedRowKey() {
@@ -332,7 +379,7 @@
       clear(tbody);
 
       if (!list.length) {
-        tbody.appendChild(el('tr', el('td', { colspan: String(cols.length + (selectable ? 1 : 0)) },
+        tbody.appendChild(el('tr', el('td', { colspan: String(shown().length + (selectable ? 1 : 0)) },
           el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
         restoreRowFocus(keepFocus);
         return;
@@ -424,7 +471,9 @@
       headRow.appendChild(el('th.sel', { scope: 'col' }, headCheck));
     }
 
-    cols.forEach(function (c) {
+    function buildHead() {
+      Array.prototype.slice.call(headRow.querySelectorAll('th:not(.sel)')).forEach(function (th) { th.remove(); });
+      shown().forEach(function (c) {
       var th = el('th', { scope: 'col', style: c.width ? { width: c.width } : null });
       if (c.align === 'right') th.classList.add('num');
       if (c.sortable === false || (!c.key && !c.sort)) {
@@ -450,7 +499,9 @@
         th.appendChild(sortBtn);
       }
       headRow.appendChild(th);
-    });
+      });
+    }
+    buildHead();
 
     thead.appendChild(headRow);
     t.appendChild(thead);
@@ -461,6 +512,15 @@
     wrap.currentRows = function () { return current.slice(); };
     wrap.setRows = function (next) { rows = next || []; paint(); if (selectable) selectionChanged(); };
     wrap.columns = cols;
+    wrap.hiddenColumns = function () { return Object.keys(hidden); };
+    wrap.setHiddenColumns = function (keys) {
+      hidden = {};
+      (keys || []).forEach(function (k) { hidden[k] = true; });
+      if (!shown().length) hidden = {};
+      saveHiddenCols(opts.id, hidden);
+      buildHead();
+      paint();
+    };
     wrap.selectedKeys = selectedKeys;
     wrap.selectedRows = function () {
       return rows.filter(function (r) { return selected[opts.rowKey(r)]; });
@@ -550,6 +610,165 @@
         ];
       }
     });
+  }
+
+  function columnsButton(getTable, name) {
+    return btn('Columns', {
+      variant: 'ghost',
+      title: 'Choose which columns of ' + name + ' to show. Remembered in this browser.',
+      onClick: function () {
+        var t = typeof getTable === 'function' ? getTable() : getTable;
+        if (!t || !t.columns) return;
+        var hiddenNow = {};
+        t.hiddenColumns().forEach(function (k) { hiddenNow[k] = true; });
+        var boxes = [];
+        A.dialog({
+          title: 'Columns of ' + name,
+          body: function () {
+            return [
+              el('p', { text: 'Untick a column to hide it. The export still carries every column, and the choice is kept in this browser only.' }),
+              el('div.stack', t.columns.map(function (c, i) {
+                var id = 'col-' + i + '-' + Math.random().toString(36).slice(2, 6);
+                var box = el('input', { type: 'checkbox', id: id, checked: hiddenNow[colId(c)] ? null : true });
+                boxes.push([c, box]);
+                return el('label.prefopt', { for: id }, [box, el('span', { text: c.label })]);
+              }))
+            ];
+          },
+          actions: function (close) {
+            return [
+              btn('Show every column', {
+                variant: 'ghost',
+                onClick: function () { close(); t.setHiddenColumns([]); A.announce('Every column of ' + name + ' is shown'); }
+              }),
+              btn('Apply', {
+                variant: 'primary',
+                onClick: function () {
+                  var hide = boxes.filter(function (p) { return !p[1].checked; }).map(function (p) { return colId(p[0]); });
+                  if (hide.length === boxes.length) { A.flash('info', 'Keep at least one column', 'A table with no columns shows nothing.'); return; }
+                  close();
+                  t.setHiddenColumns(hide);
+                  A.announce(hide.length ? hide.length + ' column' + (hide.length === 1 ? '' : 's') + ' hidden' : 'Every column shown');
+                }
+              })
+            ];
+          }
+        });
+      }
+    });
+  }
+
+  var VIEWS_KEY = 'argus.views';
+
+  function loadViews() {
+    try {
+      var list = JSON.parse(window.localStorage.getItem(VIEWS_KEY) || '[]');
+      if (!Array.isArray(list)) return [];
+      return list.filter(function (v) {
+        return v && typeof v === 'object' && typeof v.name === 'string' && v.name.length < 80 &&
+          typeof v.hash === 'string' && /^#\//.test(v.hash) && typeof v.screen === 'string';
+      }).slice(0, 40);
+    } catch (e) { return []; }
+  }
+
+  function saveViews(list) {
+    try { window.localStorage.setItem(VIEWS_KEY, JSON.stringify(list)); } catch (e) {  }
+  }
+
+  UI.views = loadViews;
+
+  function viewsBar(screen, currentHash) {
+    var host = el('span.viewsbar');
+
+    function go(hash) {
+      if (window.location.hash === hash) { if (A.refresh) A.refresh(); }
+      else window.location.hash = hash;
+    }
+
+    function paint() {
+      clear(host);
+      var mine = loadViews().filter(function (v) { return v.screen === screen; });
+      var items = mine.map(function (v) {
+        return {
+          label: v.name, hint: 'open',
+          onSelect: function () { go(v.hash); }
+        };
+      });
+      if (mine.length) {
+        items.push('divider');
+        items.push({
+          label: 'Forget a view', hint: mine.length + ' saved',
+          onSelect: function () {
+            A.dialog({
+              title: 'Saved views of this screen',
+              body: function () {
+                return el('div.stack', mine.map(function (v) {
+                  return el('div.row', [
+                    el('strong', { text: v.name }),
+                    el('span.muted.mono', { text: v.hash }),
+                    el('span.spacer'),
+                    btn('Forget ' + v.name, {
+                      variant: 'ghost',
+                      onClick: function (e) {
+                        saveViews(loadViews().filter(function (x) { return !(x.screen === screen && x.name === v.name); }));
+                        var row = e.target.closest('.row');
+                        if (row) row.remove();
+                        paint();
+                        A.announce('View ' + v.name + ' forgotten');
+                      }
+                    })
+                  ]);
+                }));
+              }
+            });
+          }
+        });
+      }
+      host.appendChild(btn('Save view', {
+        variant: 'ghost',
+        title: 'Keep the current filter and tab under a name, in this browser',
+        onClick: function () {
+          var hash = typeof currentHash === 'function' ? currentHash() : window.location.hash;
+          var input = el('input.field', { type: 'text', id: 'view-name', autocomplete: 'off', spellcheck: 'false', placeholder: 'For example: open high alerts on gpu-01' });
+          var save = null;
+          A.dialog({
+            title: 'Save this view',
+            body: function () {
+              return [
+                el('p', { text: 'The view is the address below, kept under a name in this browser and offered in the palette.' }),
+                el('p.mono', { text: hash }),
+                el('label.fieldlabel', { for: 'view-name', text: 'Name' }),
+                input,
+                el('p.hint', { text: 'Saving under an existing name replaces it.' })
+              ];
+            },
+            actions: function (close) {
+              save = btn('Save view', {
+                variant: 'primary', disabled: true,
+                onClick: function () {
+                  var name = input.value.trim();
+                  if (!name) return;
+                  var list = loadViews().filter(function (x) { return !(x.screen === screen && x.name === name); });
+                  list.unshift({ name: name, hash: hash, screen: screen, at: Date.now() });
+                  saveViews(list.slice(0, 40));
+                  close();
+                  paint();
+                  A.flash('ok', 'View saved', name + ' is in the Views menu and the palette.', { timeout: 5000 });
+                }
+              });
+              input.addEventListener('input', function () { save.setDisabled(!input.value.trim()); });
+              input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !save.isDisabled()) { e.preventDefault(); save.click(); } });
+              return [btn('Cancel', { variant: 'ghost', onClick: close }), save];
+            }
+          });
+          input.focus();
+        }
+      }));
+      if (items.length) host.appendChild(menu(items, { label: 'Saved views' }));
+    }
+
+    paint();
+    return host;
   }
 
   function exportButton(getTable, name) {
@@ -1351,6 +1570,7 @@
   UI.heartbeatSentence = heartbeatSentence; UI.BEAT = BEAT;
   UI.propertyFilter = propertyFilter; UI.applyTokens = applyTokens; UI.menu = menu;
   UI.csvOf = csvOf; UI.csvDialog = csvDialog; UI.exportButton = exportButton;
+  UI.columnsButton = columnsButton; UI.viewsBar = viewsBar;
   UI.encodeTokens = encodeTokens; UI.decodeTokens = decodeTokens;
 
   A.ui = UI;

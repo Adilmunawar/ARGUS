@@ -151,6 +151,7 @@
         visible = ui.applyTokens(d.audit, tokens || [], accessors);
         if (table) { table.setRows(visible); return; }
         table = ui.table(cols, visible, {
+          id: 'audit.events',
           caption: 'Audit events, newest first, with actor, role, action, target, pull request and source address',
           empty: 'No event matches every filter. Remove a token to widen the search.',
           sortKey: 'at', sortDir: 'desc',
@@ -198,7 +199,9 @@
         })
       ]));
 
-      mount.appendChild(filter);
+      mount.appendChild(el('div.row', [filter, el('span.spacer'),
+        ui.viewsBar('audit', function () { return window.location.hash; }),
+        ui.columnsButton(function () { return table; }, 'audit events')]));
       mount.appendChild(tableHost);
       paint(filter.tokens());
     }

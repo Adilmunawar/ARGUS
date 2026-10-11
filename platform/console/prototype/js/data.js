@@ -242,6 +242,27 @@
       { id: 'al-9016', severity: 'low', source: 'Prometheus', rule: 'Certificate expires in 13 days', host: 'caddy', first: daysAgo(1), last: hoursAgo(1), count: 1, state: 'open', runbook: 'cert-01-renewal-failure' }
     ],
 
+    incidents: [
+      {
+        id: 'inc-31', title: 'CIS baseline drift on hv-03', severity: 'medium', state: 'mitigated',
+        commander: 'adil', host: 'hv-03', alerts: ['al-9017'], opened: hoursAgo(7), updated: hoursAgo(2),
+        timeline: [
+          { at: hoursAgo(7), who: 'adil', text: 'Opened from alert al-9017. Audit family at 71% after the September patch set.' },
+          { at: hoursAgo(5), who: 'zayan', text: 'Audit policy GPO was reverted by the patch. Re-linked and forced a gpupdate.' },
+          { at: hoursAgo(2), who: 'adil', text: 'SCA re-run shows 96%. Holding at mitigated until the 02:00 scheduled evaluation agrees.' }
+        ]
+      },
+      {
+        id: 'inc-30', title: 'Credential stuffing against the edge', severity: 'medium', state: 'resolved',
+        commander: 'zayan', host: 'caddy', alerts: ['al-9018'], opened: hoursAgo(6), updated: hoursAgo(4),
+        timeline: [
+          { at: hoursAgo(6), who: 'zayan', text: 'Opened from alert al-9018. 41 attempts from three addresses in the same /24.' },
+          { at: hoursAgo(5), who: 'zayan', text: 'CrowdSec banned the range for 24 h. No account was reached.' },
+          { at: hoursAgo(4), who: 'zayan', text: 'Resolved. No action beyond the ban; the sign-in page already needs a key.' }
+        ]
+      }
+    ],
+
     sessions: [
       { id: 's-2291', user: 'contractor', target: 'sql-01', protocol: 'RDP', started: minutesAgo(28), duration: 1680, reason: 'September restore drill', approver: 'adil', recorded: true, sizeMB: 412, state: 'active' },
       { id: 's-2290', user: 'adil', target: 'gpu-01', protocol: 'SSH', started: hoursAgo(3), duration: 540, reason: 'Ray worker would not start', approver: 'self', recorded: true, sizeMB: 3, state: 'closed' },

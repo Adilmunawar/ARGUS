@@ -277,6 +277,236 @@
     });
   }
 
+  var INC_TONE = { open: 'bad', mitigated: 'warn', resolved: 'ok' };
+
+  function incidentById(id) {
+    return (A.data.incidents || []).filter(function (i) { return i.id === id; })[0] || null;
+  }
+
+  function openIncidentDialog(alert) {
+    var d = A.data;
+    var title = el('input.field', { type: 'text', id: 'inc-title', autocomplete: 'off', spellcheck: 'false', value: alert ? alert.rule + ' on ' + alert.host : '' });
+    var sev = el('select.field', { id: 'inc-sev' }, ['critical', 'high', 'medium', 'low'].map(function (s) {
+      return el('option', { value: s, text: s, selected: alert && alert.severity === s ? true : null });
+    }));
+    var who = el('select.field', { id: 'inc-cmd' }, d.people.map(function (p) {
+      return el('option', { value: p.upn, text: p.name + ' (' + p.upn + ')', selected: p.upn === A.me() ? true : null });
+    }));
+    var note = el('textarea.field', { id: 'inc-note', rows: '3', spellcheck: 'false', placeholder: 'What is known right now, and what is being done first.' });
+    A.dialog({
+      title: 'Open an incident',
+      body: function () {
+        return [
+          el('p', { text: alert ? 'From alert ' + alert.id + ', raised by ' + alert.source + '. The alert is linked and acknowledged, and the incident collects every audit row about ' + alert.host + ' from here on.' : 'An incident gathers a commander, a timeline and every related audit row in one place.' }),
+          el('label.fieldlabel', { for: 'inc-title', text: 'Title' }), title,
+          el('label.fieldlabel', { for: 'inc-sev', text: 'Severity' }), sev,
+          el('label.fieldlabel', { for: 'inc-cmd', text: 'Incident commander' }), who,
+          el('label.fieldlabel', { for: 'inc-note', text: 'First timeline entry' }), note
+        ];
+      },
+      actions: function (close) {
+        var go = ui.btn('Open incident', {
+          variant: 'primary', disabled: !title.value.trim(),
+          onClick: function () {
+            var name = title.value.trim();
+            if (!name) return;
+            var n = (d.incidents || []).reduce(function (m, i) { return Math.max(m, Number(String(i.id).replace(/\D/g, '')) || 0); }, 0) + 1;
+            var inc = {
+              id: 'inc-' + n, title: name, severity: sev.value, state: 'open', commander: who.value,
+              host: alert ? alert.host : '-', alerts: alert ? [alert.id] : [],
+              opened: new Date(d.now.getTime()), updated: new Date(d.now.getTime()),
+              timeline: [{ at: new Date(d.now.getTime()), who: A.me(), text: (alert ? 'Opened from alert ' + alert.id + '. ' : 'Opened. ') + (note.value.trim() || 'No first note.') }]
+            };
+            if (!d.incidents) d.incidents = [];
+            d.incidents.unshift(inc);
+            if (alert && alert.state === 'open') alert.state = 'ack';
+            A.record('incident.open', inc.id + ' ' + inc.title + ' (' + inc.severity + ', commander ' + inc.commander + ')');
+            close();
+            A.flash('warn', 'Incident ' + inc.id + ' opened', inc.title + '. ' + personName(inc.commander) + ' is the commander; every step goes on its timeline.');
+            A.go('security', ['incidents'], { id: inc.id });
+          }
+        });
+        title.addEventListener('input', function () { go.setDisabled(!title.value.trim()); });
+        return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), go];
+      }
+    });
+  }
+
+  function personName(upn) {
+    var p = A.data.personByUpn(upn);
+    return p ? p.name : upn;
+  }
+
+  function addTimelineNote(inc) {
+    var note = el('textarea.field', { id: 'inc-add-note', rows: '3', spellcheck: 'false' });
+    A.dialog({
+      title: 'Add to the timeline of ' + inc.id,
+      body: function () {
+        return [el('label.fieldlabel', { for: 'inc-add-note', text: 'What happened, or what was decided' }), note];
+      },
+      actions: function (close) {
+        var go = ui.btn('Add entry', {
+          variant: 'primary', disabled: true,
+          onClick: function () {
+            var text = note.value.trim();
+            if (!text) return;
+            inc.timeline.push({ at: new Date(A.data.now.getTime()), who: A.me(), text: text });
+            inc.updated = new Date(A.data.now.getTime());
+            A.record('incident.note', inc.id + ': ' + text);
+            close();
+            A.replaceHash(A.href('security', ['incidents'], { id: inc.id }));
+            A.refresh();
+          }
+        });
+        note.addEventListener('input', function () { go.setDisabled(!note.value.trim()); });
+        return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), go];
+      }
+    });
+    note.focus();
+  }
+
+  function setIncidentState(inc, next) {
+    var d = A.data;
+    var apply = function () {
+      inc.state = next;
+      inc.updated = new Date(d.now.getTime());
+      inc.timeline.push({ at: inc.updated, who: A.me(), text: next === 'resolved' ? 'Resolved.' : next === 'mitigated' ? 'Mitigated. Watching before resolving.' : 'Reopened.' });
+      if (next === 'resolved') {
+        inc.alerts.forEach(function (id) {
+          var a = d.alerts.filter(function (x) { return x.id === id; })[0];
+          if (a && a.state !== 'resolved') a.state = 'resolved';
+        });
+      }
+      A.record('incident.' + (next === 'open' ? 'reopen' : next), inc.id + ' ' + inc.title);
+      A.flash(next === 'resolved' ? 'ok' : 'info', inc.id + ' ' + next, inc.title + (next === 'resolved' && inc.alerts.length ? '. The linked alerts are resolved with it.' : '.'));
+      A.replaceHash(A.href('security', ['incidents'], { id: inc.id }));
+      A.refresh();
+    };
+    if (next === 'resolved') {
+      A.confirmDestructive({
+        title: 'Resolve ' + inc.id,
+        match: inc.id,
+        confirmLabel: 'Resolve ' + inc.id,
+        detail: 'Resolving closes the incident and marks ' + (inc.alerts.length ? 'its ' + fmt.num(inc.alerts.length) + ' linked alert' + (inc.alerts.length === 1 ? '' : 's') : 'no alert') + ' resolved. The timeline stays readable for ever.',
+        blast: 'Commander ' + personName(inc.commander) + ', opened ' + fmt.ago(inc.opened) + ', ' + fmt.num(inc.timeline.length) + ' timeline entries.',
+        reversible: 'An incident can be reopened from its page, which writes a new timeline entry rather than erasing this one.',
+        onConfirm: apply
+      });
+      return;
+    }
+    apply();
+  }
+
+  function relatedAudit(inc) {
+    var d = A.data;
+    var needles = [inc.id, inc.host].concat(inc.alerts).filter(function (x) { return x && x !== '-'; }).map(String);
+    return d.audit.filter(function (r) {
+      var hay = r.target + ' ' + r.action;
+      return needles.some(function (n) { return hay.indexOf(n) !== -1; }) && r.at >= inc.opened;
+    });
+  }
+
+  function incidentDetail(inc) {
+    var entries = inc.timeline.map(function (t) { return { at: t.at, who: t.who, text: t.text, kind: 'note' }; })
+      .concat(relatedAudit(inc).map(function (r) {
+        return { at: r.at, who: r.actor, text: r.action.split('.').join(' ') + ': ' + r.target, kind: 'audit' };
+      }))
+      .sort(function (a, b) { return a.at - b.at; });
+
+    var actions = [];
+    if (inc.state !== 'resolved') actions.push(ui.btn('Add to timeline', { variant: 'primary', onClick: function () { addTimelineNote(inc); } }));
+    if (inc.state === 'open') actions.push(ui.btn('Mark mitigated', { variant: 'ghost', onClick: function () { setIncidentState(inc, 'mitigated'); } }));
+    if (inc.state !== 'resolved') actions.push(ui.btn('Resolve ' + inc.id, { variant: 'danger', onClick: function () { setIncidentState(inc, 'resolved'); } }));
+    if (inc.state === 'resolved') actions.push(ui.btn('Reopen ' + inc.id, { variant: 'ghost', onClick: function () { setIncidentState(inc, 'open'); } }));
+
+    return ui.card(inc.id + ' · ' + inc.title, [
+      el('div.row', [
+        ui.pill(inc.state, INC_TONE[inc.state] || 'idle'),
+        ui.pill(inc.severity, SEV_TONE[inc.severity] || 'idle'),
+        el('span.muted', { text: 'Commander ' + personName(inc.commander) + ' · opened ' + fmt.ago(inc.opened) + ' · updated ' + fmt.ago(inc.updated) })
+      ]),
+      ui.dl([
+        ['Host', el('span.mono', { text: inc.host })],
+        ['Linked alerts', inc.alerts.length
+          ? el('div.chips', inc.alerts.map(function (id) { return A.link(id, 'security', ['alerts'], { id: id }, 'chip'); }))
+          : el('span.muted', { text: 'none' })],
+        ['Timeline entries', fmt.num(inc.timeline.length) + ', plus ' + fmt.num(entries.length - inc.timeline.length) + ' related audit rows']
+      ]),
+      el('div.sectiontitle', { text: 'Timeline' }),
+      el('ol.timeline-list', entries.map(function (t) {
+        return el('li.timeline-item' + (t.kind === 'audit' ? '.is-audit' : ''), [
+          el('div.timeline-meta', { text: fmt.stamp(t.at) + ' · ' + personName(t.who) + (t.kind === 'audit' ? ' · from the audit' : '') }),
+          el('div', { text: t.text })
+        ]);
+      })),
+      el('p.hint', { text: 'Notes are written here by people. Audit rows that name the incident, its host or its alerts are folded in automatically, so the timeline cannot miss an action somebody took elsewhere in the console.' })
+    ], { actions: actions });
+  }
+
+  function incidentsTab() {
+    var d = A.data;
+    var list = d.incidents || [];
+    var wanted = (A.state.params || {}).id;
+    var detailHost = el('div');
+
+    function show(inc) {
+      ui.clear(detailHost);
+      detailHost.appendChild(incidentDetail(inc));
+      A.replaceHash(A.href('security', ['incidents'], { id: inc.id }));
+    }
+
+    var cols = [
+      { key: 'id', label: 'Incident', render: function (i) { return el('span.mono', { text: i.id }); } },
+      { key: 'title', label: 'Title' },
+      {
+        key: 'severity', label: 'Severity', status: true,
+        sort: function (i) { return ['critical', 'high', 'medium', 'low'].indexOf(i.severity); },
+        render: function (i) { return ui.pill(i.severity, SEV_TONE[i.severity] || 'idle'); }
+      },
+      {
+        key: 'state', label: 'State', status: true,
+        sort: function (i) { return ['open', 'mitigated', 'resolved'].indexOf(i.state); },
+        render: function (i) { return ui.pill(i.state, INC_TONE[i.state] || 'idle'); }
+      },
+      { key: 'commander', label: 'Commander', render: function (i) { return personName(i.commander); } },
+      { key: 'host', label: 'Host', render: function (i) { return el('span.mono', { text: i.host }); } },
+      { key: 'opened', label: 'Opened', sort: function (i) { return i.opened.getTime(); }, render: function (i) { return fmt.time(i.opened); } },
+      { key: 'updated', label: 'Updated', sort: function (i) { return i.updated.getTime(); }, render: function (i) { return fmt.time(i.updated); } },
+      { key: 'alerts', label: 'Alerts', align: 'right', sort: function (i) { return i.alerts.length; }, csv: function (i) { return i.alerts.join('; '); }, render: function (i) { return fmt.num(i.alerts.length); } }
+    ];
+
+    var open = list.filter(function (i) { return i.state === 'open'; }).length;
+    var table = ui.table(cols, list, {
+      id: 'security.incidents',
+      caption: 'Incidents with severity, state, commander, host and the alerts linked to each',
+      empty: 'No incident has been opened. One is opened from an alert, or from the button above.',
+      sortKey: 'state', sortDir: 'asc',
+      rowKey: function (i) { return i.id; },
+      onRow: show
+    });
+
+    ui.clear(detailHost);
+    var initial = wanted ? incidentById(wanted) : null;
+    if (initial) detailHost.appendChild(incidentDetail(initial));
+    else detailHost.appendChild(ui.emptyState('No incident selected', 'Choose an incident to read its timeline, add to it, or resolve it.'));
+
+    return el('div.stack', [
+      el('div.tiles', [
+        ui.statTile('Open incidents', fmt.num(open), { note: open ? 'Somebody is on each one' : 'Nothing is being worked right now' }),
+        ui.statTile('Mitigated', fmt.num(list.filter(function (i) { return i.state === 'mitigated'; }).length), { note: 'Contained, not yet closed' }),
+        ui.statTile('Resolved', fmt.num(list.filter(function (i) { return i.state === 'resolved'; }).length), { note: 'Timelines kept for ever' })
+      ]),
+      el('div.row', [
+        ui.btn('Open an incident', { variant: 'primary', onClick: function () { openIncidentDialog(null); } }),
+        el('span.spacer'),
+        ui.columnsButton(table, 'incidents'),
+        ui.exportButton(table, 'incidents')
+      ]),
+      table,
+      detailHost
+    ]);
+  }
+
   function quarantineHost(alert) {
     A.confirmDestructive({
       title: 'Quarantine ' + alert.host,
@@ -434,6 +664,10 @@
     return card;
   }
 
+  function linkedIncident(alert) {
+    return (A.data.incidents || []).filter(function (i) { return i.alerts.indexOf(alert.id) !== -1 && i.state !== 'resolved'; })[0] || null;
+  }
+
   var ALERT_FIELDS = [
     { key: 'severity', label: 'Severity' },
     { key: 'source', label: 'Source' },
@@ -490,6 +724,13 @@
               title: 'Move every NIC on ' + r.host + ' to VLAN 90',
               onClick: function () { quarantineHost(r); }
             }),
+            linkedIncident(r)
+              ? A.link('Incident ' + linkedIncident(r).id, 'security', ['incidents'], { id: linkedIncident(r).id })
+              : ui.btn('Open incident for ' + r.id, {
+                variant: 'ghost',
+                title: 'Open an incident from ' + r.id + ' with a commander and a timeline',
+                onClick: function () { openIncidentDialog(r); }
+              }),
             r.runbook ? ui.btn('Open runbook ' + r.runbook, {
               variant: 'ghost',
               onClick: function () { A.go('ops', ['runbook', r.runbook]); }
@@ -533,6 +774,7 @@
       var rows = ui.applyTokens(d.alerts, tokens || [], accessors);
       if (alertTable) { alertTable.setRows(rows); return; }
       alertTable = ui.table(cols, rows, {
+        id: 'security.alerts',
         caption: 'Open and recent security alerts, by severity, source, host and state',
         empty: 'No alert matches every filter. Remove a token to widen the search.',
         sortKey: 'severity', sortDir: 'asc',
@@ -562,6 +804,8 @@
         countNode,
         bulkBtn,
         el('span.spacer'),
+        ui.viewsBar('security', function () { return window.location.hash; }),
+        ui.columnsButton(function () { return alertTable; }, 'alerts'),
         ui.exportButton(function () { return alertTable; }, 'alerts')
       ]),
       tableHost
@@ -1017,6 +1261,7 @@
       var items = [
         { id: 'posture', label: 'Posture', render: postureTab },
         { id: 'alerts', label: 'Alerts', render: alertsTab },
+        { id: 'incidents', label: 'Incidents', render: incidentsTab },
         { id: 'vulns', label: 'Vulnerabilities', render: vulnsTab },
         { id: 'sessions', label: 'Sessions', render: sessionsTab },
         { id: 'evidence', label: 'Evidence', render: evidenceTab }

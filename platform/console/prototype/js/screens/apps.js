@@ -152,6 +152,7 @@
       if (appTable && appTable.isConnected) { appTable.setRows(rows); return; }
       ui.clear(tableHost);
       appTable = ui.table(listColumns(), rows, {
+        id: 'apps.list',
         caption: 'Applications, showing ' + rows.length + ' of ' + d.apps.length,
         sortKey: 'name',
         rowKey: function (r) { return r.name; },
@@ -164,7 +165,10 @@
       ui.clear(filterHost);
       var pf = ui.propertyFilter(FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens });
       tokens = pf.tokens();
-      filterHost.appendChild(el('div.row', [pf, el('span.spacer'), ui.exportButton(function () { return appTable; }, 'applications')]));
+      filterHost.appendChild(el('div.row', [pf, el('span.spacer'),
+        ui.viewsBar('apps', function () { return window.location.hash; }),
+        ui.columnsButton(function () { return appTable; }, 'applications'),
+        ui.exportButton(function () { return appTable; }, 'applications')]));
     }
 
     function clearFilters() {
