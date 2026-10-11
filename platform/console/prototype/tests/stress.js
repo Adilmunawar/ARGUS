@@ -471,7 +471,7 @@ async function suiteFlash(browser) {
       window.ARGUS.flash('ok', 'Restart requested', 'MillsApi on sf-0' + (i % 5 + 1) + '.');
       history.replaceState(null, '', '#/' + ['overview', 'apps', 'audit', 'deploys'][i % 4]);
       window.dispatchEvent(new Event('hashchange'));
-      if (i % 10 === 9) samples.push({ i: i + 1, inBar: host ? host.childElementCount : -1, docNodes: document.getElementsByTagName('*').length });
+      if (i % 12 === 11) samples.push({ i: i + 1, inBar: host ? host.childElementCount : -1, docNodes: document.getElementsByTagName('*').length });
     }
     history.replaceState(null, '', '#/overview');
     window.dispatchEvent(new Event('hashchange'));

@@ -367,6 +367,13 @@
 
     reconciler: { state: 'running', lastSync: minutesAgo(1), head: 'aaa5607', drift: 0, pendingPlans: 1, applyLagS: 42 },
 
+    policy: {
+      freeze: null,
+      approvalsByTier: { 0: 2, 1: 1, 2: 1 },
+      sloTargetByTier: { 0: 99.95, 1: 99.9, 2: 99.8 },
+      windowDays: 30
+    },
+
     exitProgress: { phase: 2, phases: 7, percent: 34, awsRemaining: ['1 Windows EC2 instance', '1 S3 bucket (read-only)'] }
   };
 

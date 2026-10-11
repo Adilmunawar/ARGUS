@@ -33,6 +33,89 @@
       || r.action.indexOf('reconciler') !== -1;
   }
 
+  function rowText(r, prev) {
+    return [prev || 'genesis', r.at.toISOString(), r.actor, r.role, r.action, r.target, r.pr === null || r.pr === undefined ? '' : String(r.pr), r.ip].join('|');
+  }
+
+  function fnv(text) {
+    var h1 = 2166136261, h2 = 1431655765;
+    for (var i = 0; i < text.length; i++) {
+      var c = text.charCodeAt(i);
+      h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+      h2 = Math.imul(h2 ^ c, 2246822519) >>> 0;
+    }
+    return ('00000000' + h1.toString(16)).slice(-8) + ('00000000' + h2.toString(16)).slice(-8);
+  }
+
+  function digest(text) {
+    var subtle = window.crypto && window.crypto.subtle;
+    if (!subtle || typeof TextEncoder !== 'function') return Promise.resolve('fnv:' + fnv(text));
+    return subtle.digest('SHA-256', new TextEncoder().encode(text)).then(function (buf) {
+      var bytes = new Uint8Array(buf), out = '';
+      for (var i = 0; i < bytes.length; i++) out += ('0' + bytes[i].toString(16)).slice(-2);
+      return 'sha256:' + out;
+    }, function () { return 'fnv:' + fnv(text); });
+  }
+
+  function verifyChain(rows) {
+    var ordered = rows.slice().sort(function (a, b) { return a.at - b.at || rows.indexOf(a) - rows.indexOf(b); });
+    var prev = null, index = 0;
+    var result = { rows: ordered.length, sealedNow: 0, verified: 0, broken: null };
+    function step() {
+      if (index >= ordered.length) return Promise.resolve(result);
+      var r = ordered[index];
+      return digest(rowText(r, prev)).then(function (h) {
+        if (r.hash) {
+          if (r.hash === h) result.verified += 1;
+          else if (!result.broken) result.broken = { index: index + 1, row: r, expected: h, found: r.hash };
+        } else {
+          r.hash = h;
+          result.sealedNow += 1;
+        }
+        prev = r.hash;
+        index += 1;
+        return step();
+      });
+    }
+    return step();
+  }
+
+  A.verifyAuditChain = function () { return verifyChain(A.data.audit); };
+
+  function chainCard(d) {
+    var status = el('p', { role: 'status', text: 'Not verified in this session yet.' });
+    var sealedCount = d.audit.filter(function (r) { return r.hash; }).length;
+    var summary = el('p.hint', { text: fmt.num(sealedCount) + ' of ' + fmt.num(d.audit.length) + ' rows carry a seal. Each seal is the hash of the row and the seal before it, so editing or removing any row breaks every seal after it.' });
+    var verify = ui.btn('Verify the chain', {
+      variant: 'primary',
+      onClick: function () {
+        verify.setDisabled(true);
+        status.textContent = 'Verifying ' + fmt.num(d.audit.length) + ' rows.';
+        verifyChain(d.audit).then(function (res) {
+          verify.setDisabled(false);
+          summary.textContent = fmt.num(d.audit.filter(function (r) { return r.hash; }).length) + ' of ' + fmt.num(d.audit.length) + ' rows carry a seal.';
+          if (res.broken) {
+            status.textContent = 'Chain broken at row ' + res.broken.index + ' (' + res.broken.row.actor + ' ' + res.broken.row.action + ' ' + fmt.stamp(res.broken.row.at) + '). ' +
+              'The seal on that row does not match its contents, so it or a row before it was altered after sealing. ' + fmt.num(res.verified) + ' rows before it verified.';
+            A.flash('bad', 'Audit chain broken', 'Row ' + res.broken.index + ' does not match its seal. Treat the trail as tampered from there.', { sticky: true });
+            A.record('audit.verify', 'broken at row ' + res.broken.index);
+          } else {
+            status.textContent = 'Chain intact: ' + fmt.num(res.verified) + ' rows verified' + (res.sealedNow ? ', ' + fmt.num(res.sealedNow) + ' sealed for the first time' : '') + '.';
+            A.flash('ok', 'Audit chain intact', fmt.num(res.rows) + ' rows, every seal matches.', { timeout: 6000 });
+          }
+          if (table) table.repaint();
+        });
+      }
+    });
+    return ui.card('Tamper evidence', [
+      el('p', { text: 'Every audit row is sealed with a SHA-256 over its contents and the seal of the row before it. A real deployment writes the same chain into an object-locked bucket at the end of every day; here it is computed in the page so you can see it break.' }),
+      el('div.row', [verify, status]),
+      summary
+    ]);
+  }
+
+  var table = null;
+
   function exportDialog(rows) {
     A.dialog({
       wide: true,
@@ -136,12 +219,21 @@
             return a;
           }
         },
-        { key: 'ip', label: 'Source IP', render: function (r) { return el('span.mono', { text: r.ip }); } }
+        { key: 'ip', label: 'Source IP', render: function (r) { return el('span.mono', { text: r.ip }); } },
+        {
+          key: 'hash', label: 'Seal', sortable: false,
+          csv: function (r) { return r.hash || ''; },
+          render: function (r) {
+            return r.hash
+              ? el('span.chain', { title: r.hash }, [ui.pill('sealed', 'ok'), el('span.mono.muted', { text: r.hash.split(':')[1].slice(0, 8) })])
+              : ui.pill('unsealed', 'idle', { title: 'Verify the chain to seal this row' });
+          }
+        }
       ];
 
       var tableHost = el('div');
       var visible = d.audit.slice();
-      var table = null;
+      table = null;
 
       function syncUrl(tokens) {
         A.replaceHash(A.href('audit', [], { f: ui.encodeTokens(tokens) }));
@@ -188,6 +280,8 @@
         ui.statTile('Privileged actions', fmt.num(privileged), { note: 'Admin role, a grant, or the reconciler being overridden' }),
         ui.statTile('Pull requests referenced', fmt.num(Object.keys(prs).length), { note: 'Every change traceable to a diff somebody approved' })
       ]));
+
+      mount.appendChild(chainCard(d));
 
       mount.appendChild(el('div.callout.info', [
         el('strong', { text: 'Filters combine with AND.' }),

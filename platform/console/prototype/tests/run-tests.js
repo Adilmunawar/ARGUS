@@ -2284,6 +2284,217 @@ async function axeOn(page, label, suite, opts) {
     locked.lockedNow && locked.noX && locked.stillLocked && locked.blurred && locked.audited === 'session.lock' && locked.unlocked && locked.after === 'session.unlock',
     JSON.stringify(locked));
 
+  await goto(page, 'security/alerts');
+  const silence = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const target = d.alerts.find(a => a.state === 'open');
+    const before = document.getElementById('nav-alert-badge').textContent;
+    [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Silence ' + target.id).click();
+    await new Promise(r => setTimeout(r, 120));
+    const why = document.getElementById('silence-why');
+    why.value = 'noisy during the drill'; why.dispatchEvent(new Event('input', { bubbles: true }));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /^Silence/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 300));
+    const during = {
+      badge: document.getElementById('nav-alert-badge').textContent,
+      state: target.state, until: target.silencedUntil instanceof Date,
+      pill: (document.querySelector('tr[data-key="' + target.id + '"] .pill.idle') || {}).textContent || '',
+      inInbox: window.ARGUS.needsYou().some(it => it.label === 'Open ' + target.id),
+      audit: d.audit[0].action
+    };
+    [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Unsilence ' + target.id).click();
+    await new Promise(r => setTimeout(r, 300));
+    return { before, during, after: document.getElementById('nav-alert-badge').textContent, audit: d.audit[0].action };
+  });
+  rec('ACT', 'a silence takes an alert out of the counts and the inbox for a fixed time without acknowledging it',
+    silence.during.state === 'open' && silence.during.until && /silenced/.test(silence.during.pill) && !silence.during.inInbox
+      && Number(silence.during.badge) === Number(silence.before) - 1 && silence.during.audit === 'alert.silence'
+      && silence.after === silence.before && silence.audit === 'alert.unsilence',
+    JSON.stringify(silence));
+
+  await goto(page, 'apps');
+  const drift = await page.evaluate(async () => {
+    const ahead = window.ARGUS.data.apps.filter(a => a.staging && a.staging !== a.version).map(a => a.name);
+    const buttons = [...document.querySelectorAll('#main button')].filter(b => /^Promote /.test(b.textContent)).map(b => b.textContent.replace('Promote ', ''));
+    const agis = [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Promote agis');
+    agis.click();
+    await new Promise(r => setTimeout(r, 120));
+    const out = {
+      ahead, buttons,
+      version: document.getElementById('deploy-version').value,
+      env: document.getElementById('deploy-env').value,
+      budgetWarning: !!document.querySelector('.dialog .callout.bad')
+    };
+    window.ARGUS.dismissOverlays();
+    return out;
+  });
+  rec('ACT', 'environment drift lists every application whose staging build is ahead, and Promote presets the pull request',
+    drift.ahead.join(',') === drift.buttons.join(',') && drift.ahead.indexOf('agis') !== -1 && drift.version === '2026.09.05.1' && drift.env === 'production',
+    JSON.stringify(drift));
+  rec('ACT', 'a spent error budget is said in the deploy dialog, not discovered after the fact',
+    drift.budgetWarning, JSON.stringify(drift));
+
+  await goto(page, 'apps/agis/budget');
+  const budget = await page.evaluate(() => ({
+    spent: /error budget is spent/i.test(document.querySelector('#main .callout.bad strong').textContent),
+    tiles: document.querySelectorAll('#main .budget .tile').length,
+    bar: (document.querySelector('#main .bar') || {}).getAttribute && document.querySelector('#main .bar').getAttribute('aria-label')
+  }));
+  rec('ACT', 'the error budget tab computes budget, spend and burn from the objective for the tier',
+    budget.spent && budget.tiles === 4 && /100% of the error budget consumed/.test(budget.bar || ''), JSON.stringify(budget));
+
+  await goto(page, 'apps/openbao');
+  const tier0 = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    [...document.querySelectorAll('#main .pagehead-actions button')].find(b => /^Deploy/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Open pull request/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 350));
+    const dep = d.deployments[0];
+    dep.author = 'zayan';
+    window.ARGUS.refresh();
+    await new Promise(r => setTimeout(r, 150));
+    const notice = (document.querySelector('#main .callout.info strong') || {}).textContent || '';
+    [...document.querySelectorAll('#main .pagehead-actions button')].find(b => /^Approve/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Simulate/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 350));
+    const btn = document.querySelector('#main .pagehead-actions button');
+    const out = { notice, state: dep.state, approvals: dep.approvals.slice(), label: btn.textContent, disabled: btn.getAttribute('aria-disabled'), audit: d.audit[0].target };
+    d.deployments.shift();
+    d.audit.splice(0, 2);
+    return out;
+  });
+  rec('ACT', 'a Tier 0 deployment needs two approvals and the same person cannot give both',
+    /2 approvals required/.test(tier0.notice) && tier0.state === 'awaiting' && tier0.approvals.length === 1 && /1 of 2/.test(tier0.label) && tier0.disabled === 'true' && /approval 1 of 2/.test(tier0.audit),
+    JSON.stringify(tier0));
+
+  await goto(page, 'deploys/1847');
+  const diff = await page.evaluate(() => ({
+    add: document.querySelectorAll('#main .diffline.add').length,
+    del: document.querySelectorAll('#main .diffline.del').length,
+    same: document.querySelectorAll('#main .diffline.same').length,
+    addText: [...document.querySelectorAll('#main .diffline.add')].map(n => n.textContent.trim()).join(' | ')
+  }));
+  rec('ACT', 'the plan shows the declaration as a unified diff with the version line changing',
+    diff.add >= 1 && diff.del >= 1 && diff.same > 5 && /version: 2026\.09\.08\.2/.test(diff.addText), JSON.stringify(diff));
+
+  await goto(page, 'ops/maintenance');
+  const freeze = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    [...document.querySelectorAll('#main button')].find(b => /Declare a change freeze/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    const why = document.getElementById('freeze-why');
+    why.value = 'audit week'; why.dispatchEvent(new Event('input', { bubbles: true }));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Declare freeze/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 120));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Simulate/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 350));
+    return {
+      frozen: !!window.ARGUS.freeze(),
+      pill: document.getElementById('envbtn').textContent,
+      inbox: window.ARGUS.needsYou()[0].kind,
+      lift: !![...document.querySelectorAll('#main button')].find(b => /Lift the freeze/.test(b.textContent))
+    };
+  });
+  rec('ACT', 'a declared change freeze shows on the environment pill and at the top of the inbox',
+    freeze.frozen && /Freeze/.test(freeze.pill) && freeze.inbox === 'Freeze' && freeze.lift, JSON.stringify(freeze));
+
+  await goto(page, 'deploys/1847');
+  const override = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const dep = d.deployments.find(x => x.id === 1847);
+    const btn = [...document.querySelectorAll('#main .pagehead-actions button')].find(b => /^Approve/.test(b.textContent));
+    const danger = btn.classList.contains('danger');
+    btn.click();
+    await new Promise(r => setTimeout(r, 120));
+    const title = document.querySelector('.dialog h2').textContent;
+    const go = [...document.querySelectorAll('.dialog-foot button')].find(b => /Sign off/.test(b.textContent));
+    const lockedFirst = go.getAttribute('aria-disabled') === 'true';
+    const why = document.getElementById('freeze-reason');
+    why.value = 'fix for the open incident'; why.dispatchEvent(new Event('input', { bubbles: true }));
+    go.click();
+    await new Promise(r => setTimeout(r, 120));
+    [...document.querySelectorAll('.dialog-foot button')].find(b => /Simulate/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 350));
+    const out = { danger, title, lockedFirst, state: dep.state, audit: d.audit.slice(0, 2).map(r => r.action) };
+    d.policy.freeze = null;
+    window.ARGUS.refreshBadges();
+    return out;
+  });
+  rec('ACT', 'approving during a freeze needs a written security sign-off, which is recorded beside the approval',
+    override.danger && /change freeze/.test(override.title) && override.lockedFirst && override.state === 'inflight'
+      && override.audit[0] === 'deployment.approve' && override.audit[1] === 'freeze.override',
+    JSON.stringify(override));
+
+  await page.evaluate(() => {
+    window.ARGUS.data.me.elevation = { group: 'G', reason: 'ray worker', grantedAt: Date.now(), expires: new Date(Date.now() + 3600000) };
+    window.ARGUS.paintElevation();
+  });
+  await goto(page, 'compute/vm/siem-01/connect');
+  const recorded = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const before = d.sessions.length;
+    document.querySelector('#main .connectcard .btn.primary').click();
+    await new Promise(r => setTimeout(r, 200));
+    const input = document.querySelector('.term-input');
+    const typed = ['uptime', 'nosuchthing'];
+    for (const t of typed) {
+      input.value = t;
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    }
+    const screen = document.querySelector('.term-screen').textContent;
+    [...document.querySelectorAll('.term-foot button')].find(b => /Disconnect/.test(b.textContent)).click();
+    await new Promise(r => setTimeout(r, 250));
+    const s = d.sessions[0];
+    const open = document.querySelector('#flashes .flash .btn');
+    open.click();
+    await new Promise(r => setTimeout(r, 350));
+    const out = {
+      answered: /load average/.test(screen) && /command not found/.test(screen),
+      added: d.sessions.length === before + 1, keys: s.keys.map(k => k.text), target: s.target, user: s.user,
+      hash: location.hash, player: !!document.querySelector('.sessionplayer'),
+      lines: document.querySelectorAll('.sessionplayer .logline').length, audit: d.audit.find(r => r.action === 'session.end') ? 'yes' : 'no'
+    };
+    d.me.elevation = null;
+    window.ARGUS.paintElevation();
+    return out;
+  });
+  rec('ACT', 'what you type in the recorded terminal is answered, recorded, and playable from Sessions once you disconnect',
+    recorded.answered && recorded.added && recorded.keys.join(',') === 'uptime,nosuchthing' && recorded.target === 'siem-01' && recorded.user === 'adil'
+      && /^#\/security\/sessions\?id=s-\d+$/.test(recorded.hash) && recorded.player && recorded.lines === 2 && recorded.audit === 'yes',
+    JSON.stringify(recorded));
+
+  await goto(page, 'audit');
+  const chain = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const verify = () => [...document.querySelectorAll('#main button')].find(b => /Verify the chain/.test(b.textContent)).click();
+    verify();
+    await new Promise(r => setTimeout(r, 700));
+    const first = document.querySelector('#main [role="status"]').textContent;
+    const sealed = d.audit.filter(r => r.hash && /^sha256:/.test(r.hash)).length;
+    const unsealed = d.audit.filter(r => !r.hash).map(r => r.actor + ' ' + r.action + ' ' + r.target.slice(0, 40));
+    const total = d.audit.length;
+    verify();
+    await new Promise(r => setTimeout(r, 700));
+    const second = document.querySelector('#main [role="status"]').textContent;
+    const victim = d.audit[Math.floor(d.audit.length / 2)];
+    const original = victim.target;
+    victim.target = 'tampered';
+    verify();
+    await new Promise(r => setTimeout(r, 700));
+    const third = document.querySelector('#main [role="status"]').textContent;
+    const flashed = !!document.querySelector('#flashes .flash.bad');
+    victim.target = original;
+    d.audit.forEach(r => { delete r.hash; });
+    document.getElementById('flashes').textContent = '';
+    return { first, sealed, unsealed, total, second, third, flashed, recordedBreak: d.audit[0].action === 'audit.verify' };
+  });
+  rec('ACT', 'the audit trail is a hash chain: verifying seals it, verifying again confirms it, and one edited row breaks it',
+    /sealed for the first time/.test(chain.first) && chain.sealed === chain.total && /^Chain intact: \d+ rows verified\.$/.test(chain.second)
+      && /^Chain broken at row \d+/.test(chain.third) && chain.flashed && chain.recordedBreak,
+    JSON.stringify(chain));
+
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));
   rec('CONS', 'no failed requests', realFails.length === 0, realFails.slice(0, 4).join(' | '));

@@ -388,6 +388,80 @@
     ]);
   }
 
+  function declareFreeze() {
+    var d = A.data;
+    var reason = el('input.field', { type: 'text', id: 'freeze-why', autocomplete: 'off', spellcheck: 'false', placeholder: 'Quarter-end close, audit week, a migration in progress' });
+    var hours = el('select.field', { id: 'freeze-hours' }, [['24', '24 hours'], ['72', '3 days'], ['168', '7 days']].map(function (o) {
+      return el('option', { value: o[0], text: o[1] });
+    }));
+    A.dialog({
+      title: 'Declare a change freeze',
+      body: function () {
+        return [
+          el('p', { text: 'While a freeze is in force, approving any deployment into production needs security sign-off with a written reason, every approval records that it happened during the freeze, and the environment pill says so on every screen.' }),
+          el('label.fieldlabel', { for: 'freeze-why', text: 'Reason (shown to everyone who hits it)' }), reason,
+          el('label.fieldlabel', { for: 'freeze-hours', text: 'Duration' }), hours,
+          el('p.hint', { text: 'A freeze lifts on its own at the end, or by hand from this screen.' })
+        ];
+      },
+      actions: function (close) {
+        var go = ui.btn('Declare freeze', {
+          variant: 'danger', disabled: true,
+          onClick: function () {
+            var why = reason.value.trim();
+            if (!why) return;
+            close();
+            A.stepUp('Declaring a change freeze needs a second factor.', function () {
+              d.policy.freeze = { from: new Date(d.now.getTime()), until: new Date(d.now.getTime() + Number(hours.value) * 3600000), reason: why, by: A.me() };
+              A.record('freeze.declare', why + ' for ' + hours.value + ' h');
+              A.flash('warn', 'Change freeze declared', 'Until ' + fmt.stamp(d.policy.freeze.until) + '. Production approvals now need security sign-off.');
+              A.refresh();
+            });
+          }
+        });
+        reason.addEventListener('input', function () { go.setDisabled(!reason.value.trim()); });
+        return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), go];
+      }
+    });
+    reason.focus();
+  }
+
+  function liftFreeze() {
+    var d = A.data;
+    var f = A.freeze();
+    if (!f) return;
+    A.confirmDestructive({
+      title: 'Lift the change freeze',
+      match: 'lift',
+      confirmLabel: 'Lift the freeze',
+      detail: 'Declared by ' + f.by + ' until ' + fmt.stamp(f.until) + ': ' + f.reason + '. Lifting it early means production approvals go back to one or two people with a key, with no security sign-off.',
+      blast: 'Every deployment waiting for approval becomes approvable without a justification.',
+      reversible: 'A new freeze can be declared at any time.',
+      onConfirm: function () {
+        d.policy.freeze = null;
+        A.record('freeze.lift', f.reason);
+        A.flash('ok', 'Change freeze lifted', 'Production approvals are back to the normal policy.');
+        A.refresh();
+      }
+    });
+  }
+
+  function freezeCard() {
+    var f = A.freeze();
+    if (f) {
+      return el('div.callout.warn', [
+        el('strong', { text: 'A change freeze is in force until ' + fmt.stamp(f.until) + '.' }),
+        el('p', { text: f.reason + ' Declared by ' + f.by + ' ' + fmt.ago(f.from) + '.' }),
+        el('div.row', [ui.btn('Lift the freeze', { variant: 'ghost', onClick: liftFreeze })])
+      ]);
+    }
+    return el('div.callout.info', [
+      el('strong', { text: 'No change freeze is in force.' }),
+      el('p', { text: 'Deployments into production need the approvals their tier requires and nothing more. A freeze adds security sign-off with a written reason to every production approval until it lifts.' }),
+      el('div.row', [ui.btn('Declare a change freeze', { variant: 'ghost', onClick: declareFreeze })])
+    ]);
+  }
+
   function maintenanceTab() {
     var d = A.data;
     var start = new Date(Date.UTC(d.now.getUTCFullYear(), d.now.getUTCMonth(), d.now.getUTCDate()));
@@ -422,6 +496,7 @@
     ];
 
     return el('div.stack', [
+      freezeCard(),
       ui.card('Next four weeks', [
         el('div.calendar', {
           role: 'img',

@@ -507,6 +507,65 @@
     ]);
   }
 
+  function silenced(a) {
+    return !!(a.silencedUntil && a.silencedUntil.getTime() > A.data.now.getTime());
+  }
+
+  function silenceDialog(alert) {
+    var d = A.data;
+    var hours = el('select.field', { id: 'silence-hours' }, [['1', '1 hour'], ['4', '4 hours'], ['24', '24 hours']].map(function (o) {
+      return el('option', { value: o[0], text: o[1], selected: o[0] === '4' ? true : null });
+    }));
+    var why = el('input.field', { type: 'text', id: 'silence-why', autocomplete: 'off', spellcheck: 'false', placeholder: 'Known noisy rule during the drill; fix is in deployment 1848' });
+    A.dialog({
+      title: 'Silence ' + alert.id,
+      body: function () {
+        return [
+          el('p', { text: alert.rule + ' on ' + alert.host + '. A silence stops the pages and takes the alert out of the open count for a fixed time; it does not acknowledge or resolve it, and it ends on its own.' }),
+          el('label.fieldlabel', { for: 'silence-hours', text: 'For how long' }), hours,
+          el('label.fieldlabel', { for: 'silence-why', text: 'Reason (required, recorded in the audit)' }), why,
+          el('p.hint', { text: 'A silence without a reason is a muted smoke detector.' })
+        ];
+      },
+      actions: function (close) {
+        var go = ui.btn('Silence ' + alert.id, {
+          variant: 'primary', disabled: true,
+          onClick: function () {
+            var reason = why.value.trim();
+            if (!reason) return;
+            close();
+            alert.silencedUntil = new Date(d.now.getTime() + Number(hours.value) * 3600000);
+            alert.silenceReason = reason;
+            alert.silencedBy = A.me();
+            var row = A.record('alert.silence', alert.id + ' for ' + hours.value + ' h: ' + reason);
+            var undo = A.undoable('Undo', function () {
+              alert.silencedUntil = null; alert.silenceReason = null; alert.silencedBy = null;
+              A.unrecord(row);
+              A.flash('info', 'Silence undone', alert.id + ' counts as open again.', { timeout: 6000 });
+              A.refresh();
+            });
+            A.flash('ok', alert.id + ' silenced for ' + hours.value + ' h', 'Until ' + fmt.stamp(alert.silencedUntil) + '. ' + reason, { action: undo });
+            A.replaceHash(A.href('security', ['alerts'], { f: (A.state.params || {}).f || null, id: alert.id }));
+            A.refresh();
+          }
+        });
+        why.addEventListener('input', function () { go.setDisabled(!why.value.trim()); });
+        return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), go];
+      }
+    });
+    why.focus();
+  }
+
+  function unsilence(alert) {
+    alert.silencedUntil = null;
+    A.record('alert.unsilence', alert.id + (alert.silenceReason ? ' (was: ' + alert.silenceReason + ')' : ''));
+    alert.silenceReason = null;
+    alert.silencedBy = null;
+    A.flash('info', alert.id + ' is no longer silenced', 'It counts as open again and pages resume.');
+    A.replaceHash(A.href('security', ['alerts'], { f: (A.state.params || {}).f || null, id: alert.id }));
+    A.refresh();
+  }
+
   function quarantineHost(alert) {
     A.confirmDestructive({
       title: 'Quarantine ' + alert.host,
@@ -682,7 +741,7 @@
       severity: function (r) { return r.severity; },
       source: function (r) { return r.source; },
       host: function (r) { return r.host; },
-      state: function (r) { return r.state; }
+      state: function (r) { return silenced(r) ? 'silenced' : r.state; }
     };
 
     var cols = [
@@ -699,7 +758,13 @@
       { key: 'count', label: 'Count', align: 'right', render: function (r) { return fmt.num(r.count); } },
       {
         key: 'state', label: 'State', status: true,
-        render: function (r) { return ui.pill(r.state, STATE_TONE[r.state] || 'idle'); }
+        csv: function (r) { return silenced(r) ? 'silenced' : r.state; },
+        render: function (r) {
+          if (silenced(r)) {
+            return ui.pill('silenced', 'idle', { title: 'Until ' + fmt.stamp(r.silencedUntil) + ' by ' + r.silencedBy + ': ' + r.silenceReason });
+          }
+          return ui.pill(r.state, STATE_TONE[r.state] || 'idle');
+        }
       },
       {
         key: 'actions', label: 'Actions', sortable: false,
@@ -719,6 +784,16 @@
               title: 'Acknowledge ' + r.rule + ' on ' + r.host,
               onClick: function () { acknowledgeDialog(r); }
             }) : el('span.muted', { text: 'Acknowledged.' }),
+            r.state === 'open' && !silenced(r) ? ui.btn('Silence ' + r.id, {
+              variant: 'ghost',
+              title: 'Stop the pages for a fixed time with a reason',
+              onClick: function () { silenceDialog(r); }
+            }) : null,
+            silenced(r) ? ui.btn('Unsilence ' + r.id, {
+              variant: 'ghost',
+              title: 'Silenced until ' + fmt.stamp(r.silencedUntil) + ': ' + r.silenceReason,
+              onClick: function () { unsilence(r); }
+            }) : null,
             ui.btn('Quarantine ' + r.host, {
               variant: 'danger',
               title: 'Move every NIC on ' + r.host + ' to VLAN 90',
@@ -957,7 +1032,7 @@
   }
 
   function buildPlayer(session) {
-    var keys = (KEYSTROKES[session.id] || []).slice();
+    var keys = (session.keys || KEYSTROKES[session.id] || []).slice();
     var duration = session.duration > 0 ? session.duration : 1;
     var playTimer = null;
     var speed = 1;
@@ -1160,12 +1235,21 @@
       'Choose a session to scrub through its recording and read what was typed.'));
 
     var sessionTable = ui.table(cols, d.sessions, {
+      id: 'security.sessions',
       caption: 'Recorded gateway sessions, with the reason given and the person who approved them',
       empty: 'No session has been recorded.',
       sortKey: 'started', sortDir: 'desc',
       rowKey: function (s) { return s.id; },
       onRow: show
     });
+
+    var wantedSession = (A.state.params || {}).id;
+    var preselected = wantedSession ? d.sessions.filter(function (s) { return s.id === wantedSession; })[0] : null;
+    if (preselected) {
+      ui.clear(detail);
+      detail.appendChild(ui.card('Recording ' + preselected.id, buildPlayer(preselected).node));
+      ui.revealRow(sessionTable, preselected.id, { label: 'Recording ' + preselected.id + ' is highlighted and open below' });
+    }
 
     return el('div.stack', [
       el('div.callout.info', {

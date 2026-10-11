@@ -2,6 +2,26 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.11.0] - 2026-10-11
+
+Policy, evidence and the terminal. The console now enforces the rules the design documents only described, and shows its working in a form an auditor can check.
+
+### Added
+- **Change freeze.** Declared from Operations, Maintenance, with a reason and a duration, lifted by hand with a typed confirmation or on its own at the end. While it is in force the environment pill says Freeze on every screen, the inbox leads with it, and approving anything into production turns into a signed-off exception: a written justification, a second factor, and a `freeze.override` audit row beside the approval.
+- **Approval policy by tier.** A Tier 0 application needs two approvals before the reconciler moves; the same person cannot give both; the card and the detail say how many are in. Tier 1 and 2 stay at one.
+- **The declaration as a unified diff.** The Plan tab renders the GitOps declaration the reconciler reads, before and after, line by line, with the changed lines marked and read out to a screen reader.
+- **Silences.** An open alert can be silenced for one, four or twenty-four hours with a required reason. It leaves the open count and the inbox for that time without being acknowledged or resolved, shows as silenced with the reason on hover, lifts on its own, can be lifted early, and both are audited with Undo on the flash.
+- **The recorded terminal answers.** Typing in the session drawer runs a small vocabulary per protocol: a shell on Linux, the constrained JEA cmdlets on Windows, a refusal with the attempt transcribed for anything else. Disconnecting seals the transcript into a new recording under Security, Sessions, playable from the flash's button, with an audit row naming it.
+- **Environment drift.** Applications lists every application whose staging build is ahead of production, with a Promote button that opens the pull request preset to that version and environment.
+- **Error budgets.** Each application has an objective by tier and an Error budget tab: budget, spent, remaining and burn rate over the window, with the deploy dialog saying when the budget is spent and the policy is fixes only.
+- **A tamper-evident audit trail.** Every audit row is sealed with a SHA-256 over its contents and the seal of the row before it. Verify the chain seals unsealed rows, confirms sealed ones, and names the first row whose seal no longer matches, which is what one edited row does to every seal after it. The seal is a column and travels with the export.
+
+### Fixed
+- The stress suite's document-growth budget sampled every ten navigations while cycling four routes, so it alternated between two screens of different size and fitted a line through the zigzag; the drift card made the two differ enough to trip it. It now samples on the same route every cycle, which is the same trap docs/12 records for the FLASH and SOAK suites.
+
+### Note
+- 387 property checks, 125 sandbox checks and every stress budget pass.
+
 ## [0.10.0] - 2026-10-11
 
 The operator's day, end to end: find out what needs you, work an incident from the alert that raised it, keep the view you built, and leave the desk without leaving the session open.

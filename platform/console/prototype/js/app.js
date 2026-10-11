@@ -326,14 +326,25 @@
   var SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
   function sevRank(sev) { return Object.prototype.hasOwnProperty.call(SEV_RANK, sev) ? SEV_RANK[sev] : 9; }
 
+  A.alertOpen = function (a) {
+    if (a.state !== 'open') return false;
+    if (a.silencedUntil && a.silencedUntil.getTime() > A.data.now.getTime()) return false;
+    return true;
+  };
+
   A.needsYou = function () {
     var d = A.data, out = [];
     var me = A.me();
+    var freeze = A.freeze();
+    if (freeze) {
+      out.push({ kind: 'Freeze', tone: 'warn', text: 'A change freeze is in force until ' + ui.fmt.stamp(freeze.until) + ': ' + freeze.reason + '. Production approvals need security sign-off.',
+        label: 'Open maintenance', route: 'ops', rest: ['maintenance'] });
+    }
     (d.incidents || []).filter(function (i) { return i.state === 'open'; }).forEach(function (i) {
       out.push({ kind: 'Incident', tone: 'bad', text: i.title + ' on ' + i.host + ', ' + i.severity + ', commanded by ' + i.commander + '.',
         label: 'Open ' + i.id, route: 'security', rest: ['incidents'], params: { id: i.id } });
     });
-    d.alerts.filter(function (a) { return a.state === 'open' && (a.severity === 'critical' || a.severity === 'high'); })
+    d.alerts.filter(function (a) { return A.alertOpen(a) && (a.severity === 'critical' || a.severity === 'high'); })
       .sort(function (a, b) { return sevRank(a.severity) - sevRank(b.severity); })
       .forEach(function (a) {
         out.push({ kind: 'Alert', tone: a.severity === 'critical' ? 'bad' : 'warn', text: a.severity + ': ' + a.rule + ' on ' + a.host + ', last seen ' + ui.fmt.ago(a.last) + '.',
@@ -390,7 +401,8 @@
 
   A.refreshBadges = function () {
     var d = A.data;
-    var open = d.alerts.filter(function (a) { return a.state === 'open'; }).length;
+    paintEnv();
+    var open = d.alerts.filter(A.alertOpen).length;
     var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).length;
     var needs = A.needsYou().length;
     var alertBadge = document.getElementById('nav-alert-badge');
@@ -848,14 +860,32 @@
     return dlg;
   };
 
-  A.setEnv = function (env, quiet) {
-    A.state.env = env;
+  A.freeze = function () {
+    var f = A.data.policy && A.data.policy.freeze;
+    if (!f) return null;
+    if (f.until && f.until.getTime() <= A.data.now.getTime()) return null;
+    return f;
+  };
+
+  function paintEnv() {
+    var env = A.state.env;
     var pill = document.getElementById('envbtn');
+    if (!pill) return;
+    var frozen = !!A.freeze();
     clear(pill);
     pill.classList.toggle('is-staging', env === 'staging');
+    pill.classList.toggle('is-frozen', frozen);
     pill.appendChild(el('span.env-dot', { 'aria-hidden': 'true' }));
     pill.appendChild(el('span', { text: env === 'production' ? 'Production' : 'Staging' }));
-    pill.setAttribute('aria-label', 'Environment: ' + env + '. Activate to switch.');
+    if (frozen) pill.appendChild(el('span.env-freeze', { text: 'Freeze' }));
+    pill.setAttribute('aria-label', 'Environment: ' + env + (frozen ? '. A change freeze is in force: ' + A.freeze().reason : '') + '. Activate to switch.');
+    pill.title = frozen ? 'Change freeze until ' + ui.fmt.stamp(A.freeze().until) + ': ' + A.freeze().reason : 'Switch between production and staging';
+  }
+  A.paintEnv = paintEnv;
+
+  A.setEnv = function (env, quiet) {
+    A.state.env = env;
+    paintEnv();
     if (quiet) return;
     A.flash(env === 'production' ? 'info' : 'warn', 'Environment: ' + env,
       env === 'production' ? 'Destructive actions will name this environment before they run.' : 'Changes here do not affect production.',
@@ -983,6 +1013,47 @@
         screenText = 'Connected to ' + vm.name + ' (' + vm.ip + ')\nOne-time credential issued by OpenBao and never shown.\n\nC:\\Users\\adil> ';
       }
       A.record('session.start', vm.name + ' (' + label + ', recorded)');
+      var startedAt = Date.now();
+      var keys = [];
+      var prompt = proto === 'SSH' ? vm.name + ':~$ ' : proto === 'POWERSHELL' ? '[' + vm.name + ']: PS> ' : 'C:\\Users\\adil> ';
+      var screen = el('pre.term-screen', { tabindex: '0', 'aria-label': label + ' session on ' + vm.name + '. Output of what you type appears here.' }, screenText);
+      var line = el('input.term-input', {
+        type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off',
+        'aria-label': 'Command to send to ' + vm.name + '. Every keystroke is recorded.',
+        placeholder: proto === 'VNC' ? 'The hypervisor console takes no typed commands here' : 'Type a command and press Enter. Try help.'
+      });
+      if (proto === 'VNC') line.disabled = true;
+      var MAX_LINES = 400;
+      function say(text) {
+        screen.textContent += text;
+        var lines = screen.textContent.split('\n');
+        if (lines.length > MAX_LINES) screen.textContent = lines.slice(lines.length - MAX_LINES).join('\n');
+        screen.scrollTop = 1e9;
+      }
+      line.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        var cmd = line.value.trim();
+        if (!cmd) return;
+        line.value = '';
+        keys.push({ at: Math.round((Date.now() - startedAt) / 1000), text: cmd });
+        say(cmd + '\n' + A.terminalAnswer(vm, proto, cmd) + '\n' + prompt);
+      });
+      function endSession() {
+        var durationS = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+        var id = 's-' + ((A.data.sessions || []).reduce(function (m, s) { return Math.max(m, Number(String(s.id).replace(/\D/g, '')) || 0); }, 0) + 1);
+        A.data.sessions.unshift({
+          id: id, user: A.me(), target: vm.name, protocol: label, started: new Date(A.data.now.getTime()),
+          duration: durationS, reason: reason, approver: 'self', recorded: true,
+          sizeMB: Math.max(1, Math.round(durationS / 4) + keys.length), state: 'closed', keys: keys.slice()
+        });
+        A.record('session.end', vm.name + ' (' + label + ', ' + keys.length + ' command' + (keys.length === 1 ? '' : 's') + ', recording ' + id + ')');
+        A.closeSession();
+        A.flash('ok', 'Session ended, recording ' + id + ' sealed',
+          keys.length + ' command' + (keys.length === 1 ? '' : 's') + ' recorded to argus-sessions and the one-time credential is revoked.', {
+            action: ui.btn('Open the recording', { variant: 'ghost', onClick: function () { A.go('security', ['sessions'], { id: id }); } })
+          });
+      }
       body.appendChild(el('div.term', [
         el('div.term-banner', { role: 'status' }, [
           el('span.rec', { 'aria-hidden': 'true' }),
@@ -990,18 +1061,14 @@
           ' · ' + vm.name + ' · ' + label + ' · expires ' + ui.fmt.stamp(expires),
           el('span.term-reason', { text: 'reason: ' + reason })
         ]),
-        el('pre.term-screen', { tabindex: '0', 'aria-label': label + ' session on ' + vm.name }, screenText),
+        screen,
+        el('div.term-line', [el('span.term-prompt', { 'aria-hidden': 'true', text: prompt.trim() }), line]),
         el('div.term-foot', [
-          el('span.muted', { text: 'Clipboard: in only · File transfer: blocked for your role' }),
-          ui.btn('Disconnect', {
-            variant: 'danger', onClick: function () {
-              A.closeSession();
-              A.flash('ok', 'Session ended',
-                'The recording is written to argus-sessions and the one-time credential is revoked.');
-            }
-          })
+          el('span.muted', { text: 'Clipboard: in only · File transfer: blocked for your role · every command is transcribed' }),
+          ui.btn('Disconnect', { variant: 'danger', onClick: endSession })
         ])
       ]));
+      if (proto !== 'VNC') line.focus();
       A.announce('Recorded ' + label + ' session opened on ' + vm.name);
     };
 
@@ -1039,6 +1106,32 @@
       return;
     }
     open();
+  };
+
+  A.terminalAnswer = function (vm, proto, cmd) {
+    var d = A.data;
+    var word = cmd.split(/\s+/)[0].toLowerCase();
+    var ps = proto === 'POWERSHELL';
+    if (word === 'help' || word === 'get-help' || word === '?') {
+      return ps
+        ? 'Cmdlets allowed for your role on this endpoint:\n  Get-ArgusHealth  Get-Service  Get-Process  Get-Date  Get-EventLog -Newest\nEverything else is refused by the JEA configuration and the refusal is transcribed.'
+        : 'Commands in this recorded shell: uptime, df -h, free -m, hostname, date, whoami, systemctl status <unit>, journalctl -n <n>, exit';
+    }
+    if (word === 'exit' || word === 'logout' || word === 'logoff') return 'Use Disconnect to end the session; the recording is sealed when you do.';
+    if (word === 'whoami') return ps ? 'ARGUS\\' + A.me() + ' (JEA virtual account)' : A.me();
+    if (word === 'hostname') return vm.name;
+    if (word === 'date' || word === 'get-date') return ui.fmt.stamp(new Date(d.now.getTime() + 60000)) + ' (clock of ' + vm.name + ')';
+    if (word === 'uptime') return ' 09:15:04 up 41 days,  3:12,  1 user,  load average: 0.' + (vm.vcpu + 11) + ', 0.' + (vm.vcpu + 4) + ', 0.' + vm.vcpu;
+    if (word === 'df') return 'Filesystem      Size  Used Avail Use% Mounted on\n/dev/sda2       240G  ' + (60 + vm.vcpu * 3) + 'G  ' + (170 - vm.vcpu * 3) + 'G  ' + (26 + vm.vcpu) + '% /\n/dev/sdb1       2.0T  1.1T  854G  57% /data';
+    if (word === 'free') return '              total        used        free      shared  buff/cache   available\nMem:          ' + (vm.ram * 1024) + '      ' + Math.round(vm.ram * 1024 * 0.54) + '      ' + Math.round(vm.ram * 1024 * 0.21) + '        312      ' + Math.round(vm.ram * 1024 * 0.25) + '      ' + Math.round(vm.ram * 1024 * 0.43);
+    if (word === 'systemctl') return '● ' + (cmd.split(/\s+/)[2] || 'unit') + ' - managed service\n     Loaded: loaded\n     Active: active (running) since ' + ui.fmt.stamp(A.time.daysAgo(3)) + '\n   Main PID: 1' + String(vm.vcpu) + '42';
+    if (word === 'journalctl') return ui.fmt.stamp(d.now) + ' ' + vm.name + ' systemd[1]: Started session for argus.\n' + ui.fmt.stamp(d.now) + ' ' + vm.name + ' sshd[2211]: Accepted publickey for ' + A.me() + ' from 10.99.0.14';
+    if (word === 'get-argushealth') return 'Host    : ' + vm.host + '\nMachine : ' + vm.name + '\nState   : ' + vm.state + '\nReplica : ' + vm.replica + '\nZone    : ' + vm.zone;
+    if (word === 'get-service') return 'Status   Name               DisplayName\n------   ----               -----------\nRunning  ArgusAgent         Argus host agent\nRunning  WinRM              Windows Remote Management\nStopped  Spooler            Print Spooler';
+    if (word === 'get-process') return ' NPM(K)    PM(M)      WS(M)     CPU(s)     Id  ProcessName\n ------    -----      -----     ------     --  -----------\n    412   ' + (vm.ram * 3) + '.1    ' + (vm.ram * 5) + '.4     812.3   4120  sqlservr\n     88     41.2      72.9       3.1   1' + String(vm.vcpu) + '42  ArgusAgent';
+    if (word === 'get-eventlog') return 'Index Time          EntryType   Source                 Message\n----- ----          ---------   ------                 -------\n 9120 ' + ui.fmt.stamp(d.now).slice(5, 16) + ' Information Argus                  Health probe ok';
+    if (ps) return 'The term \'' + word + '\' is not allowed on this constrained endpoint. The attempt is transcribed.';
+    return word + ': command not found';
   };
 
   var SHORTCUTS = [

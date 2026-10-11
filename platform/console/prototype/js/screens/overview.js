@@ -60,6 +60,13 @@
       case 'incident.resolved': return who + ' resolved incident ' + row.target + '.';
       case 'incident.reopen': return who + ' reopened incident ' + row.target + '.';
       case 'session.lock': return 'The console locked, ' + row.target + '.';
+      case 'session.end': return who + ' ended a recorded session on ' + row.target + '.';
+      case 'alert.silence': return who + ' silenced alert ' + row.target + '.';
+      case 'alert.unsilence': return who + ' lifted the silence on ' + row.target + '.';
+      case 'freeze.declare': return who + ' declared a change freeze: ' + row.target + '.';
+      case 'freeze.lift': return who + ' lifted the change freeze: ' + row.target + '.';
+      case 'freeze.override': return who + ' signed off a deployment during the freeze: ' + row.target + '.';
+      case 'audit.verify': return who + ' verified the audit chain: ' + row.target + '.';
       case 'session.unlock': return who + ' unlocked the console.';
       case 'secret.revoke-leases': return who + ' revoked every lease on ' + row.target + '.';
       case 'vuln.waive': return who + ' waived ' + row.target + '.';

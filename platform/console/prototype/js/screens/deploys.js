@@ -116,7 +116,9 @@
       el('div.chips', [
         el('span.chip', { text: dep.env }),
         el('span.chip', { text: 'Deployment ' + dep.id }),
-        el('span.chip.mono', { text: dep.sha })
+        el('span.chip.mono', { text: dep.sha }),
+        dep.state === 'awaiting' && approvalsNeeded(dep) > 1 ? el('span.chip', { text: (dep.approvals || []).length + ' of ' + approvalsNeeded(dep) + ' approvals' }) : null,
+        dep.state === 'awaiting' && frozenFor(dep) ? el('span.chip', { text: 'freeze in force' }) : null
       ]),
       el('div.row', [
         el('span.muted', { text: 'Opened by ' + personName(dep.author) }),
@@ -215,7 +217,8 @@
           el('span.sr', { text: ' to ' }),
           el('span.plan-add', { text: String(p.to) })
         ]);
-      }))
+      })),
+      declarationDiff(dep)
     ]);
   }
 
@@ -298,27 +301,158 @@
     ]);
   }
 
-  function approveButton(dep) {
-    var selfOpened = dep.author === ME;
-    return ui.btn('Approve deployment ' + dep.id, {
-      variant: 'primary',
-      disabled: selfOpened,
-      title: selfOpened
-        ? 'You opened this deployment. A different Tier 1 person must approve it.'
-        : 'Approving needs your security key.',
-      onClick: function () {
-        A.stepUp('Approving a ' + dep.env + ' deployment needs a second factor.', function () {
-          dep.approvals = (dep.approvals || []).concat([ME]);
-          dep.state = 'inflight';
-          dep.progress = { ud: 0, total: 5, healthy: true };
-          A.record('deployment.approve', dep.app + ' ' + dep.version + ' (' + dep.env + ')', dep.id);
-          A.flash('ok', 'Approved',
-            'Deployment ' + dep.id + ' for ' + appDisplay(dep) + ' ' + dep.version +
-            ' is queued. The reconciler verifies the signatures on every artefact, then runs a health-gated rolling upgrade one upgrade domain at a time, and rolls back automatically if a domain fails its health policy.');
-          A.refresh();
+  function approvalsNeeded(dep) {
+    var app = appOf(dep);
+    var byTier = (d.policy && d.policy.approvalsByTier) || {};
+    var tier = app ? app.tier : 1;
+    return Object.prototype.hasOwnProperty.call(byTier, tier) ? byTier[tier] : 1;
+  }
+
+  function frozenFor(dep) {
+    return dep.env === 'production' ? A.freeze() : null;
+  }
+
+  function grantApproval(dep, note) {
+    dep.approvals = (dep.approvals || []).concat([ME]);
+    var needed = approvalsNeeded(dep);
+    A.record('deployment.approve', dep.app + ' ' + dep.version + ' (' + dep.env + ')' + (note ? ', ' + note : '') +
+      (needed > 1 ? ', approval ' + dep.approvals.length + ' of ' + needed : ''), dep.id);
+    if (dep.approvals.length < needed) {
+      A.flash('info', 'Approval ' + dep.approvals.length + ' of ' + needed + ' recorded',
+        appDisplay(dep) + ' is Tier ' + appOf(dep).tier + ', so ' + needed + ' people have to approve before the reconciler moves. Nothing has been applied.');
+      A.refresh();
+      return;
+    }
+    dep.state = 'inflight';
+    dep.progress = { ud: 0, total: 5, healthy: true };
+    A.flash('ok', 'Approved',
+      'Deployment ' + dep.id + ' for ' + appDisplay(dep) + ' ' + dep.version +
+      ' is queued. The reconciler verifies the signatures on every artefact, then runs a health-gated rolling upgrade one upgrade domain at a time, and rolls back automatically if a domain fails its health policy.');
+    A.refresh();
+  }
+
+  function freezeOverrideDialog(dep, freeze) {
+    var reason = el('textarea.field', { id: 'freeze-reason', rows: '3', spellcheck: 'false', 'aria-describedby': 'freeze-help' });
+    A.dialog({
+      title: 'A change freeze is in force',
+      body: function () {
+        return [
+          el('div.callout.warn', [
+            el('strong', { text: 'Frozen until ' + fmt.stamp(freeze.until) + ' by ' + personName(freeze.by) + '.' }),
+            el('p', { text: freeze.reason })
+          ]),
+          el('p', { text: 'Approving ' + appDisplay(dep) + ' ' + dep.version + ' into production during the freeze needs security sign-off. Write the justification; it is recorded next to the approval and paged to the security channel.' }),
+          el('label.fieldlabel', { for: 'freeze-reason', text: 'Why this cannot wait for the freeze to lift' }),
+          reason,
+          el('p.hint', { id: 'freeze-help', text: '"Customer is waiting" is not a reason; "the fix for incident inc-32" is.' })
+        ];
+      },
+      actions: function (close) {
+        var go = ui.btn('Sign off and approve', {
+          variant: 'danger', disabled: true,
+          onClick: function () {
+            var why = reason.value.trim();
+            if (!why) return;
+            close();
+            A.stepUp('Overriding a change freeze needs a second factor.', function () {
+              A.record('freeze.override', dep.app + ' ' + dep.version + ': ' + why, dep.id);
+              grantApproval(dep, 'during a freeze: ' + why);
+            });
+          }
         });
+        reason.addEventListener('input', function () { go.setDisabled(!reason.value.trim()); });
+        return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), go];
       }
     });
+  }
+
+  function approveButton(dep) {
+    var selfOpened = dep.author === ME;
+    var already = (dep.approvals || []).indexOf(ME) !== -1;
+    var needed = approvalsNeeded(dep);
+    var freeze = frozenFor(dep);
+    var label = 'Approve deployment ' + dep.id + (needed > 1 ? ' (' + (dep.approvals || []).length + ' of ' + needed + ')' : '');
+    return ui.btn(label, {
+      variant: freeze ? 'danger' : 'primary',
+      disabled: selfOpened || already,
+      title: selfOpened
+        ? 'You opened this deployment. A different Tier 1 person must approve it.'
+        : already
+          ? 'You have already approved it. Another person has to give the next approval.'
+          : freeze
+            ? 'A change freeze is in force. Approving needs security sign-off and a written reason.'
+            : 'Approving needs your security key.',
+      onClick: function () {
+        if (freeze) { freezeOverrideDialog(dep, freeze); return; }
+        A.stepUp('Approving a ' + dep.env + ' deployment needs a second factor.', function () { grantApproval(dep, null); });
+      }
+    });
+  }
+
+  function declarationOf(dep, version) {
+    var app = appOf(dep);
+    var lines = [
+      'kind: ServiceFabricApp',
+      'name: ' + dep.app,
+      'environment: ' + dep.env,
+      'version: ' + version,
+      'identity: ' + (app ? app.identity : 'gmsa-' + dep.app + '$'),
+      'services:'
+    ];
+    (app ? app.services : []).forEach(function (svc) {
+      lines.push('  - name: ' + svc.name);
+      lines.push('    exe: ' + svc.exe);
+      lines.push('    instances: ' + svc.instances);
+      lines.push('    port: ' + svc.port);
+    });
+    (dep.plan || []).forEach(function (p) {
+      if (p.kind === 'PrometheusRule') {
+        lines.push('rules:');
+        lines.push('  - alert: ' + p.name);
+        lines.push('    expr: p95 ' + (version === dep.version ? p.to : p.from));
+      }
+    });
+    return lines;
+  }
+
+  function diffLines(before, after) {
+    var n = before.length, m = after.length;
+    var table = [];
+    for (var i = 0; i <= n; i++) { table.push([]); for (var j = 0; j <= m; j++) table[i].push(0); }
+    for (var i2 = n - 1; i2 >= 0; i2--) {
+      for (var j2 = m - 1; j2 >= 0; j2--) {
+        table[i2][j2] = before[i2] === after[j2] ? table[i2 + 1][j2 + 1] + 1 : Math.max(table[i2 + 1][j2], table[i2][j2 + 1]);
+      }
+    }
+    var out = [], a = 0, b = 0;
+    while (a < n && b < m) {
+      if (before[a] === after[b]) { out.push({ kind: 'same', text: before[a], ln: b + 1 }); a++; b++; }
+      else if (table[a + 1][b] >= table[a][b + 1]) { out.push({ kind: 'del', text: before[a] }); a++; }
+      else { out.push({ kind: 'add', text: after[b], ln: b + 1 }); b++; }
+    }
+    while (a < n) { out.push({ kind: 'del', text: before[a++] }); }
+    while (b < m) { out.push({ kind: 'add', text: after[b], ln: b + 1 }); b++; }
+    return out;
+  }
+
+  function declarationDiff(dep) {
+    var from = (dep.plan || []).filter(function (p) { return p.kind === 'ServiceFabricApp'; })[0];
+    var before = declarationOf(dep, from ? from.from : dep.version);
+    var after = declarationOf(dep, dep.version);
+    var lines = diffLines(before, after);
+    var changed = lines.filter(function (l) { return l.kind !== 'same'; }).length;
+    return ui.card('Declaration diff', [
+      el('p.hint', { text: 'platform/gitops/apps/' + dep.app + '.yaml as the reconciler will read it, before and after. ' + fmt.num(changed) + ' line' + (changed === 1 ? '' : 's') + ' change.' }),
+      el('div.diffview', { role: 'region', 'aria-label': 'Unified diff of the ' + dep.app + ' declaration, ' + changed + ' changed lines' },
+        lines.map(function (l) {
+          return el('div.diffline.' + l.kind, [
+            el('span.ln', { text: l.ln ? String(l.ln) : '' }),
+            el('span.sr', { text: l.kind === 'add' ? 'added: ' : l.kind === 'del' ? 'removed: ' : '' }),
+            el('span', { 'aria-hidden': 'true', text: l.kind === 'add' ? '+' : l.kind === 'del' ? '-' : ' ' }),
+            el('span', { text: l.text })
+          ]);
+        }))
+    ]);
   }
 
   function rejectButton(dep) {
@@ -424,6 +558,18 @@
         '. Commit ' + dep.sha + '.',
       actions));
 
+    if (dep.state === 'awaiting' && frozenFor(dep)) {
+      mount.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'A change freeze is in force until ' + fmt.stamp(frozenFor(dep).until) + '.' }),
+        el('p', { text: frozenFor(dep).reason + ' Approving into production needs security sign-off with a written reason, recorded beside the approval.' })
+      ]));
+    }
+    if (dep.state === 'awaiting' && approvalsNeeded(dep) > 1) {
+      mount.appendChild(el('div.callout.info', [
+        el('strong', { text: 'Tier ' + appOf(dep).tier + ': ' + approvalsNeeded(dep) + ' approvals required.' }),
+        el('p', { text: (dep.approvals || []).length ? 'Approved so far by ' + dep.approvals.map(personName).join(', ') + '.' : 'Nobody has approved it yet.' })
+      ]));
+    }
     if (dep.state === 'awaiting' && dep.author === ME) {
       mount.appendChild(el('div.callout.warn', [
         el('strong', { text: 'You opened this deployment.' }),

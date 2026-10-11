@@ -452,6 +452,22 @@ body.is-locked .shell { filter: blur(6px); pointer-events: none; user-select: no
   background: var(--paper); border: 2px solid var(--brand); }
 .timeline-item.is-audit::before { border-color: var(--muted); }
 .timeline-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+.envpill .env-freeze { background: var(--leaf); color: var(--pine); border-radius: 999px; padding: 1px 7px; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; }
+.term-line { display: flex; align-items: center; gap: 8px; padding: 6px 16px; background: var(--pine); border-top: 1px solid rgba(var(--white-rgb), .1); }
+.term-prompt { color: var(--term-dim); font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; white-space: nowrap; }
+.term-input { flex: 1; min-height: 30px; background: rgba(var(--white-rgb), .06); border: 1px solid rgba(var(--white-rgb), .18); border-radius: 7px;
+  color: var(--term-fg); font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; padding: 5px 9px; }
+.term-input::placeholder { color: var(--term-muted); }
+.term-input:focus-visible { outline: 3px solid var(--leaf); outline-offset: 1px; }
+.term-input:disabled { opacity: .6; }
+.diffview { font-family: ui-monospace, Consolas, monospace; font-size: 12px; border: 1px solid rgba(var(--ink-rgb), .12); border-radius: 12px; overflow: auto; background: var(--paper); }
+.diffline { display: flex; gap: 10px; padding: 1px 12px; white-space: pre; }
+.diffline .ln { color: var(--muted); min-width: 2.2em; text-align: right; user-select: none; }
+.diffline.add { background: var(--ok-bg); color: var(--ok-cell-ink); }
+.diffline.del { background: var(--bad-bg); color: var(--bad-cell-ink); }
+.diffline.same { color: var(--ink-soft); }
+.budget { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.chain { display: inline-flex; align-items: center; gap: 6px; }
 .envpill.is-staging { background: linear-gradient(120deg, var(--on-white-from), var(--on-white-to)); }
 
 @media (max-width: 900px) { .who-text { display: none; } .whopill { padding: 5px; } }

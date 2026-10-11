@@ -182,15 +182,99 @@
     }
 
     mountFilter();
+    mount.appendChild(driftCard());
     mount.appendChild(filterHost);
     mount.appendChild(tableHost);
     paint();
   }
 
-  function openDeployDialog(app) {
+  function driftCard() {
+    var ahead = d.apps.filter(function (a) { return a.staging && a.staging !== a.version; });
+    if (!ahead.length) {
+      return el('div.callout.ok', [
+        el('strong', { text: 'Staging and production agree.' }),
+        el('p', { text: 'Every application runs the same version in both environments, so nothing is waiting to be promoted.' })
+      ]);
+    }
+    return ui.card('Environment drift', [
+      el('p.hint', { text: fmt.num(ahead.length) + ' application' + (ahead.length === 1 ? ' has' : 's have') + ' a staging build that production has not received. Promoting opens the pull request for it.' }),
+      el('div.stack', ahead.map(function (a) {
+        return el('div.row', [
+          A.link(a.display, 'apps', [a.name]),
+          el('span.muted', { text: 'production' }), mono(a.version),
+          el('span', { 'aria-hidden': 'true', text: '→' }),
+          el('span.sr', { text: ', staging ' }),
+          el('span.muted', { text: 'staging' }), mono(a.staging),
+          el('span.spacer'),
+          ui.btn('Promote ' + a.name, {
+            variant: 'ghost', title: 'Open a pull request that puts ' + a.staging + ' into production',
+            onClick: function () { openDeployDialog(a, { env: 'production', version: a.staging }); }
+          })
+        ]);
+      }))
+    ]);
+  }
+
+  function sloTarget(app) {
+    var byTier = (d.policy && d.policy.sloTargetByTier) || {};
+    return Object.prototype.hasOwnProperty.call(byTier, app.tier) ? byTier[app.tier] : 99.9;
+  }
+
+  function errorBudget(app) {
+    var days = (d.policy && d.policy.windowDays) || 30;
+    var minutes = days * 1440;
+    var target = sloTarget(app);
+    var budgetMin = (100 - target) / 100 * minutes;
+    var usedMin = Math.max(0, (100 - app.slo) / 100 * minutes);
+    var remainingMin = budgetMin - usedMin;
+    var err = app.trend.err || [];
+    var recent = err.slice(-6), whole = err;
+    var mean = function (xs) { return xs.length ? xs.reduce(function (s, x) { return s + x; }, 0) / xs.length : 0; };
+    var burn = mean(whole) > 0 ? mean(recent) / mean(whole) : 1;
+    return {
+      target: target, days: days, budgetMin: budgetMin, usedMin: usedMin, remainingMin: remainingMin,
+      ratioUsed: budgetMin ? usedMin / budgetMin : 0, burn: burn, exhausted: remainingMin < 0
+    };
+  }
+
+  function budgetTab(app) {
+    var b = errorBudget(app);
+    var tone = b.exhausted ? 'bad' : b.ratioUsed >= 0.75 ? 'warn' : null;
+    var hoursLeft = b.burn > 0 && b.remainingMin > 0 ? (b.remainingMin / b.burn) / 60 : null;
+    return el('div.stack', [
+      b.exhausted ? el('div.callout.bad', [
+        el('strong', { text: 'The error budget is spent.' }),
+        el('p', { text: app.display + ' has served ' + fmt.pct(app.slo, 2) + ' this window against a Tier ' + app.tier + ' objective of ' + fmt.pct(b.target, 2) + '. Policy: no feature deployment until the budget recovers; fixes only, and the deploy dialog says so.' })
+      ]) : el('div.callout.info', [
+        el('strong', { text: fmt.ratioPct(1 - b.ratioUsed, 0) + ' of the error budget remains.' }),
+        el('p', { text: 'Objective ' + fmt.pct(b.target, 2) + ' over ' + b.days + ' days for a Tier ' + app.tier + ' application, measured ' + fmt.pct(app.slo, 2) + '.' })
+      ]),
+      el('div.budget', [
+        ui.statTile('Budget', fmt.num(b.budgetMin, 0), { unit: 'min', note: 'downtime the objective allows per ' + b.days + ' days' }),
+        ui.statTile('Spent', fmt.num(b.usedMin, 0), { unit: 'min', note: fmt.ratioPct(b.ratioUsed, 0) + ' of the budget' }),
+        ui.statTile('Remaining', fmt.num(Math.max(0, b.remainingMin), 0), { unit: 'min', note: b.exhausted ? fmt.num(-b.remainingMin, 0) + ' min over' : 'before the objective is missed' }),
+        ui.statTile('Burn rate', fmt.num(b.burn, 2) + 'x', { note: hoursLeft !== null ? 'budget lasts ' + fmt.dur(hoursLeft * 3600) + ' at this rate' : b.exhausted ? 'already over' : 'nothing is burning' })
+      ]),
+      ui.card('Budget consumed', [
+        ui.bar(Math.min(1, b.ratioUsed), { tone: tone, label: fmt.ratioPct(Math.min(1, b.ratioUsed), 0) + ' of the error budget consumed' + (tone ? ', ' : '') }),
+        el('p.hint', { text: 'Burn rate compares the last six hours of error rate with the whole day. Above 1x the budget is going faster than the window allows for.' })
+      ]),
+      ui.card('Error rate, last 24 hours', [
+        el('div.row', [
+          ui.sparkline(app.trend.err, { width: 320, height: 40, label: 'Error rate of ' + app.display + ' over 24 hourly samples' }),
+          el('span.num', { text: fmt.ratioPct(app.errorRate, 2) + ' now' })
+        ])
+      ])
+    ]);
+  }
+
+  function openDeployDialog(app, preset) {
+    preset = preset || {};
     var versions = [];
     if (app.staging) versions.push(app.staging);
     if (versions.indexOf(app.version) === -1) versions.push(app.version);
+    if (preset.version && versions.indexOf(preset.version) === -1) versions.unshift(preset.version);
+    var budget = errorBudget(app);
 
     var versionSel, envSel;
 
@@ -207,9 +291,15 @@
           el('option', { value: 'staging', text: 'Staging' }),
           el('option', { value: 'production', text: 'Production' })
         ]);
-        envSel.value = A.state.env;
+        envSel.value = preset.env || A.state.env;
+        if (preset.version) versionSel.value = preset.version;
         return [
           el('p', { text: 'The console does not deploy anything itself. It opens a pull request against the declaration the reconciler applies, so the change is reviewed, signed and auditable before it runs.' }),
+          budget.exhausted ? el('div.callout.bad', [
+            el('strong', { text: 'Error budget spent: fixes only.' }),
+            el('p', { text: app.display + ' is at ' + fmt.pct(app.slo, 2) + ' against ' + fmt.pct(budget.target, 2) + '. The pull request opens, but the approver sees this and the policy says a feature release waits.' })
+          ]) : null,
+          A.freeze() && (preset.env || A.state.env) === 'production' ? el('div.callout.warn', { text: 'A change freeze is in force: ' + A.freeze().reason + '. The pull request opens, but approving it into production needs security sign-off.' }) : null,
           el('label.fieldlabel', { for: 'deploy-version', text: 'Version' }),
           versionSel,
           el('label.fieldlabel', { for: 'deploy-env', text: 'Environment' }),
@@ -754,7 +844,7 @@
       ui.statTile('p95', fmt.ms(app.p95), { note: 'over the last hour' }),
       ui.statTile('Requests', fmt.num(app.rps), { unit: '/s' }),
       ui.statTile('Error rate', fmt.ratioPct(app.errorRate, 2), { note: 'budget 0.10%' }),
-      ui.statTile('SLO this month', fmt.pct(app.slo, 2)),
+      ui.statTile('SLO this month', fmt.pct(app.slo, 2), { note: 'objective ' + fmt.pct(sloTarget(app), 2) + (errorBudget(app).exhausted ? ', budget spent' : '') }),
       ui.statTile('Uptime', fmt.num(app.uptimeDays), { unit: 'days' })
     ]));
 
@@ -764,6 +854,7 @@
       { id: 'logs', label: 'Logs', render: function () { return logsTab(app); } },
       { id: 'traces', label: 'Traces', render: function () { return tracesTab(app); } },
       { id: 'config', label: 'Config', render: function () { return configTab(app); } },
+      { id: 'budget', label: 'Error budget', render: function () { return budgetTab(app); } },
       { id: 'deploys', label: 'Deploy history', render: function () { return deployTab(app, ctx); } }
     ], {
       label: 'Sections of ' + app.display,
