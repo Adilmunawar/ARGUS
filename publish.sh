@@ -15,7 +15,7 @@ while [[ $# -gt 0 ]]; do
     --private) VISIBILITY="--private"; shift ;;
     --public)  VISIBILITY="--public";  shift ;;
     --name)    NAME="$2"; shift 2 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) printf 'usage: %s [--public|--private] [--name NAME]\n' "$0"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done

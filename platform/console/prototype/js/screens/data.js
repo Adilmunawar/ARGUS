@@ -1717,7 +1717,8 @@
         { id: 'queues', label: 'Queues', render: queuesTab }
       ], {
         label: 'Data stores',
-        initial: rest[0] || null
+        initial: rest[0] || null,
+        href: function (id) { return A.href('data', [id]); }
       }));
     }
   });

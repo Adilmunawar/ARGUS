@@ -56,7 +56,25 @@
       case 'reconcile.rollback': return who + ' rolled back ' + row.target + (row.pr ? ', deployment ' + row.pr : '') + '.';
       case 'secret.rotate': return who + ' rotated the secret ' + row.target + '.';
       case 'alert.raise': return who + ' raised an alert: ' + row.target + '.';
+      case 'alert.acknowledge': return who + ' acknowledged alert ' + row.target + '.';
       case 'reconciler.pause': return who + ' paused the reconciler: ' + row.target + '.';
+      case 'deployment.rollback': return who + ' asked for a roll back of ' + row.target + (row.pr ? ', deployment ' + row.pr : '') + '.';
+      case 'grant.deny': return who + ' declined an elevation: ' + row.target + '.';
+      case 'grant.revoke': return who + ' revoked ' + row.target + '.';
+      case 'elevation.request': return who + ' elevated ' + row.target + '.';
+      case 'elevation.release': return who + ' released the elevation of ' + row.target + '.';
+      case 'secret.revoke-leases': return who + ' revoked every lease on ' + row.target + '.';
+      case 'vuln.waive': return who + ' waived ' + row.target + '.';
+      case 'model.promote': return who + ' promoted model ' + row.target + '.';
+      case 'canary.set': return who + ' set the canary on ' + row.target + '.';
+      case 'asset.materialise': return who + ' queued a materialisation of ' + row.target + '.';
+      case 'runbook.run': return who + ' ran runbook ' + row.target + '.';
+      case 'app.restart': return who + ' asked for a restart of ' + row.target + '.';
+      case 'instance.restart': return who + ' restarted ' + row.target + '.';
+      case 'host.drain': return who + ' asked to drain ' + row.target + '.';
+      case 'host.quarantine': return who + ' quarantined ' + row.target + '.';
+      case 'person.offboard': return who + ' offboarded ' + row.target + '.';
+      case 'evidence.generate': return who + ' generated the ' + row.target + '.';
       default: return who + ' ran ' + row.action.split('.').join(' ') + ' on ' + row.target + '.';
     }
   }

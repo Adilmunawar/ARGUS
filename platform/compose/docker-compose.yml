@@ -131,6 +131,7 @@ services:
       ARGUS_S3_GUAC_SECRET:        ${ARGUS_S3_GUAC_SECRET:?run bootstrap.ps1}
       ARGUS_S3_PARITY_SECRET:      ${ARGUS_S3_PARITY_SECRET:?run bootstrap.ps1}
       ARGUS_S3_PARITY_DENY_SECRET: ${ARGUS_S3_PARITY_DENY_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_PARITY_ADMIN_SECRET: ${ARGUS_S3_PARITY_ADMIN_SECRET:?run bootstrap.ps1}
     volumes:
       - argus_seaweed_conf:/etc/seaweedfs
     mem_limit: 64m
@@ -234,6 +235,7 @@ services:
       ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
       ARGUS_SEAWEED_MASTER_URL: http://seaweed-master:9333
       ARGUS_BUCKETS_FILE: /config/buckets.yaml
+      ARGUS_S3_IDENTITIES_FILE: /config/seaweed/s3.json
       ARGUS_STATE_DIR: /state
       AWS_ACCESS_KEY_ID: argus-admin
       AWS_SECRET_ACCESS_KEY: ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
@@ -246,6 +248,7 @@ services:
     volumes:
       - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
       - argus_console_state:/state
+      - argus_seaweed_conf:/config/seaweed:ro
     mem_limit: 192m
     depends_on:
       seaweed-s3: { condition: service_healthy }
@@ -755,6 +758,8 @@ services:
     depends_on:
       prometheus: { condition: service_healthy }
       loki:       { condition: service_started }
+      postgres:   { condition: service_healthy }
+      pg-init:    { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/api/health | grep -q '\"database\": *\"ok\"' || exit 1"]
       interval: 20s
@@ -819,6 +824,9 @@ services:
       timeout: 8s
       retries: 3
       start_period: 20s
+    depends_on:
+      postgres: { condition: service_healthy }
+      pg-init:  { condition: service_completed_successfully }
 
   garnet-exporter:
     <<: *hardening
@@ -897,13 +905,6 @@ services:
       - -c
       - |
         set -eu
-        # NO su-exec: it is a PACKAGE, not part of the alpine base image, so
-        # calling it makes this one-shot exit 1 on EVERY boot -- and through
-        # service_completed_successfully, guacd then never starts at all.
-        # This matters because Guacamole does NOT fail a connection when
-        # recording-path is unwritable: the session works perfectly and records
-        # nothing. Verify the uid first if you change the guacd tag:
-        #   docker run --rm --entrypoint id guacamole/guacd:$$TAG
         for d in /recordings /drives; do
           mkdir -p "$$d"; chown 1000:1000 "$$d"; chmod 0770 "$$d"
           o=$$(stat -c %u "$$d"); [ "$$o" = "1000" ] || { echo "$$d is uid $$o, not 1000" >&2; exit 1; }
@@ -1108,6 +1109,7 @@ services:
       nats:             { condition: service_healthy }
       openbao:          { condition: service_started }
       parity-reference: { condition: service_healthy }
+      parity-pg:        { condition: service_started }
     healthcheck:
       test: ["CMD", "node", "-e", "const h=require('node:http');const t=setTimeout(()=>process.exit(1),4000);t.unref();h.get('http://127.0.0.1:9781/healthz',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s
@@ -1166,7 +1168,7 @@ services:
       - argus_parity_results:/var/lib/argus/parity
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'mkdir -p /var/lib/argus/parity/pg; while true; do psql -v ON_ERROR_STOP=1 -qtAX -f /opt/argus/pg/canary.sql > /var/lib/argus/parity/pg/latest.json.tmp 2>/var/lib/argus/parity/pg/last-error.txt && mv -f /var/lib/argus/parity/pg/latest.json.tmp /var/lib/argus/parity/pg/latest.json; sleep "$$ARGUS_PARITY_INTERVAL_S"; done'
+      - 'mkdir -p /var/lib/argus/parity/pg; chown -R 1000:1000 /var/lib/argus/parity; while true; do psql -v ON_ERROR_STOP=1 -qtAX -f /opt/argus/pg/canary.sql > /var/lib/argus/parity/pg/latest.json.tmp 2>/var/lib/argus/parity/pg/last-error.txt && mv -f /var/lib/argus/parity/pg/latest.json.tmp /var/lib/argus/parity/pg/latest.json; sleep "$$ARGUS_PARITY_INTERVAL_S"; done'
     mem_limit: 128m
     pids_limit: 64
     depends_on:

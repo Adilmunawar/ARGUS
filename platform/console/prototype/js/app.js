@@ -4,7 +4,7 @@
   var A = (window.ARGUS = window.ARGUS || {});
   var ui = A.ui, el = ui.el, clear = ui.clear;
 
-  var prefs = { density: 'comfortable', rail: false, timezone: 'utc', theme: 'light' };
+  var prefs = { density: 'comfortable', rail: false, timezone: 'utc', theme: 'system' };
   var PREF_VALUES = {
     density: ['comfortable', 'compact'],
     timezone: ['utc', 'local'],
@@ -182,13 +182,19 @@
   };
 
   A.confirmDestructive = function (opts) {
+    var lockedTitle = 'Type ' + opts.match + ' to enable this';
     var go = ui.btn(opts.confirmLabel || 'Confirm', {
       variant: 'danger',
       disabled: true,
-      title: 'Type ' + opts.match + ' to enable this',
+      title: lockedTitle,
       onClick: function () { if (close) { close(); } opts.onConfirm(); }
     });
     var close = null;
+    function setReady(ready) {
+      go.setDisabled(!ready);
+      if (ready) go.removeAttribute('title');
+      else go.title = lockedTitle;
+    }
 
     A.dialog({
       title: opts.title,
@@ -197,7 +203,12 @@
           type: 'text', id: 'confirm-name', autocomplete: 'off', spellcheck: 'false',
           'aria-describedby': 'confirm-help',
           on: {
-            input: function () { go.setDisabled(input.value.trim() !== opts.match); }
+            input: function () { setReady(input.value.trim() === opts.match); },
+            keydown: function (e) {
+              if (e.key !== 'Enter') return;
+              e.preventDefault();
+              if (!go.isDisabled()) go.click();
+            }
           }
         });
         return [
@@ -243,6 +254,40 @@
   };
 
   A.state = { env: 'production', route: 'overview', params: {} };
+
+  A.me = function () { return String(A.data.me.upn || '').split('@')[0]; };
+
+  A.record = function (action, target, pr) {
+    var me = A.data.me;
+    var row = {
+      at: new Date(A.data.now.getTime()),
+      actor: A.me(),
+      role: me.elevation ? 'Admin' : (me.role || 'Operator'),
+      action: action,
+      target: target,
+      pr: pr === undefined ? null : pr,
+      ip: '10.99.0.14'
+    };
+    A.data.audit.unshift(row);
+    return row;
+  };
+
+  A.refreshBadges = function () {
+    var d = A.data;
+    var open = d.alerts.filter(function (a) { return a.state === 'open'; }).length;
+    var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).length;
+    var alertBadge = document.getElementById('nav-alert-badge');
+    var deployBadge = document.getElementById('nav-deploy-badge');
+    var bell = document.getElementById('bell');
+    if (alertBadge) { alertBadge.textContent = open ? String(open) : ''; alertBadge.hidden = !open; }
+    if (deployBadge) { deployBadge.textContent = awaiting ? String(awaiting) : ''; deployBadge.hidden = !awaiting; }
+    if (bell) {
+      bell.setAttribute('aria-label', open ? open + ' open alert' + (open === 1 ? '' : 's') : 'No open alerts');
+      bell.title = open ? open + ' open alert' + (open === 1 ? '' : 's') : 'No open alerts';
+      var dot = bell.querySelector('.dot');
+      if (dot) dot.hidden = !open;
+    }
+  };
 
   var screens = {};
   A.screen = function (id, def) { screens[id] = def; };
@@ -333,6 +378,30 @@
 
   var mount, crumbHost, titleHost;
 
+  function paintCrumb(r, def) {
+    clear(crumbHost);
+    crumbHost.appendChild(el('a.crumb-link', { href: A.href(r.route), text: def.crumb || def.title }));
+    if (r.rest.length) {
+      crumbHost.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
+      crumbHost.appendChild(el('b', { text: r.rest.join(' / ') }));
+    }
+    var pageTitle = (r.rest.length ? r.rest[r.rest.length - 1] + ' - ' : '') + (def.title || r.route);
+    document.title = pageTitle + ' - Argus Console';
+    return pageTitle;
+  }
+
+  A.replaceHash = function (target) {
+    if (!target || window.location.hash === target) return false;
+    try { window.history.replaceState(null, '', target); } catch (e) { return false; }
+    var r = parseHash();
+    A.state.route = r.route; A.state.rest = r.rest; A.state.params = r.params;
+    var def = screens[r.route];
+    if (def && crumbHost) paintCrumb(r, def);
+    return true;
+  };
+
+  A.refresh = function () { render(); };
+
   function render(opts) {
     opts = opts || {};
     if (window.location.hash && !/^#\//.test(window.location.hash)) return;
@@ -346,6 +415,7 @@
       if (n.dataset.go === r.route) n.setAttribute('aria-current', 'page');
       else n.removeAttribute('aria-current');
     });
+    A.refreshBadges();
 
     clear(mount);
     if (!def) {
@@ -364,15 +434,7 @@
       return;
     }
 
-    clear(crumbHost);
-    crumbHost.appendChild(el('a.crumb-link', { href: A.href(r.route) , text: def.crumb || def.title }));
-    if (r.rest.length) {
-      crumbHost.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
-      crumbHost.appendChild(el('b', { text: r.rest.join(' / ') }));
-    }
-
-    var pageTitle = (r.rest.length ? r.rest[r.rest.length - 1] + ' - ' : '') + (def.title || r.route);
-    document.title = pageTitle + ' - Argus Console';
+    var pageTitle = paintCrumb(r, def);
 
     try {
       def.render(mount, { rest: r.rest, params: r.params, env: A.state.env });
@@ -419,6 +481,29 @@
     });
     d.runbooks.forEach(function (rb) {
       items.push({ kind: 'Runbook', label: rb.title, hint: rb.id, run: function () { A.go('ops', ['runbook', rb.id]); } });
+    });
+    d.deployments.forEach(function (dep) {
+      var app = d.appByName(dep.app);
+      items.push({
+        kind: 'Deployment', label: 'Deployment ' + dep.id + ' · ' + (app ? app.display : dep.app) + ' ' + dep.version,
+        hint: dep.state + ' · ' + dep.env, run: function () { A.go('deploys', [String(dep.id)]); }
+      });
+    });
+    d.alerts.forEach(function (a) {
+      if (a.state === 'resolved') return;
+      items.push({
+        kind: 'Alert', label: a.rule, hint: a.id + ' · ' + a.severity + ' · ' + a.host,
+        run: function () { A.go('security', ['alerts'], { id: a.id }); }
+      });
+    });
+    d.secrets.forEach(function (sec) {
+      items.push({
+        kind: 'Secret path', label: sec.path, hint: 'metadata only',
+        run: function () { A.go('identity', ['secrets'], { path: sec.path }); }
+      });
+    });
+    d.people.forEach(function (p) {
+      items.push({ kind: 'Person', label: p.name, hint: p.upn + ' · Tier ' + p.tier, run: function () { A.go('identity', ['people']); } });
     });
     items.push({ kind: 'Action', label: 'Switch to ' + (A.state.env === 'production' ? 'staging' : 'production'), hint: 'Environment', run: function () { A.setEnv(A.state.env === 'production' ? 'staging' : 'production'); } });
     items.push({ kind: 'Action', label: 'Toggle compact density', hint: 'Rows per screen', run: function () { A.setDensity(prefs.density === 'compact' ? 'comfortable' : 'compact'); } });
@@ -474,7 +559,14 @@
     return note;
   }
 
+  var paletteOpen = null;
+
   A.palette = function () {
+    if (paletteOpen && paletteOpen.panel && paletteOpen.panel.isConnected) {
+      var again = paletteOpen.panel.querySelector('.pal-input');
+      if (again) { again.focus(); again.select(); }
+      return paletteOpen;
+    }
     var items = paletteItems().map(indexItem);
     var results = [], active = 0;
 
@@ -562,6 +654,7 @@
         ]);
       }
     });
+    paletteOpen = dlg;
     paint();
     input.focus();
 
@@ -593,6 +686,7 @@
         source.textContent = 'Screens and actions only. The resource index could not be read.';
       });
     }
+    return dlg;
   };
 
   A.setEnv = function (env, quiet) {
@@ -624,6 +718,12 @@
         group: group, reason: reason,
         expires: new Date(Date.now() + hours * 3600000)
       };
+      var who = A.data.personByUpn(A.me());
+      if (who) {
+        who.elevated = true;
+        who.elevationExpires = new Date(A.data.now.getTime() + hours * 3600000);
+      }
+      A.record('elevation.request', A.me() + ' to ' + group + ' for ' + hours + ' h: ' + reason);
       paintElevation();
       A.flash('warn', 'Elevated to ' + group,
         'Expires in ' + hours + ' h. Every action while elevated is recorded in the audit.');
@@ -632,7 +732,11 @@
   };
 
   A.dropElevation = function () {
+    var had = A.data.me.elevation;
     A.data.me.elevation = null;
+    var who = A.data.personByUpn(A.me());
+    if (who) { who.elevated = false; who.elevationExpires = null; }
+    if (had) A.record('elevation.release', A.me() + ' from ' + had.group);
     paintElevation();
     A.flash('ok', 'Elevation released', 'You are back to your standing role.', { timeout: 5000 });
   };
@@ -672,18 +776,33 @@
       document.body.classList.add('has-drawer');
       var body = document.getElementById('drawer-body');
       clear(body);
-      var expires = new Date(A.data.now.getTime() + 2 * 3600000);
+      var elevation = A.data.me.elevation;
+      var expires = elevation && elevation.expires instanceof Date
+        ? new Date(A.data.now.getTime() + Math.max(0, elevation.expires.getTime() - Date.now()))
+        : new Date(A.data.now.getTime() + 2 * 3600000);
+      var reason = (elevation && elevation.reason) || 'unspecified';
+      var label = proto === 'POWERSHELL' ? 'PowerShell (JEA)' : proto;
+      var screenText;
+      if (proto === 'SSH') {
+        screenText = 'Last login: ' + ui.fmt.stamp(A.data.now) + ' from 10.99.0.14\n' + vm.name + ':~$ ';
+      } else if (proto === 'POWERSHELL') {
+        screenText = 'Connected to ' + vm.name + ' (' + vm.ip + ') through the constrained JEA endpoint.\n' +
+          'Only the cmdlets your role allows are available, and every command is transcribed.\n\n[' + vm.name + ']: PS> ';
+      } else if (proto === 'VNC') {
+        screenText = 'Hypervisor console attached to ' + vm.name + ' on ' + vm.host + '.\n' +
+          'The guest network is not needed for this session.\n\n';
+      } else {
+        screenText = 'Connected to ' + vm.name + ' (' + vm.ip + ')\nOne-time credential issued by OpenBao and never shown.\n\nC:\\Users\\adil> ';
+      }
+      A.record('session.start', vm.name + ' (' + label + ', recorded)');
       body.appendChild(el('div.term', [
         el('div.term-banner', { role: 'status' }, [
           el('span.rec', { 'aria-hidden': 'true' }),
           el('strong', { text: 'Recorded session' }),
-          ' · ' + vm.name + ' · ' + proto + ' · expires ' + ui.fmt.stamp(expires),
-          el('span.term-reason', { text: 'reason: restore drill' })
+          ' · ' + vm.name + ' · ' + label + ' · expires ' + ui.fmt.stamp(expires),
+          el('span.term-reason', { text: 'reason: ' + reason })
         ]),
-        el('pre.term-screen', { tabindex: '0', 'aria-label': proto + ' session on ' + vm.name },
-          proto === 'SSH'
-            ? 'Last login: ' + ui.fmt.stamp(A.data.now) + ' from 10.99.0.14\n' + vm.name + ':~$ '
-            : 'Connected to ' + vm.name + ' (' + vm.ip + ')\nOne-time credential issued by OpenBao and never shown.\n\nC:\\Users\\adil> '),
+        el('pre.term-screen', { tabindex: '0', 'aria-label': label + ' session on ' + vm.name }, screenText),
         el('div.term-foot', [
           el('span.muted', { text: 'Clipboard: in only · File transfer: blocked for your role' }),
           ui.btn('Disconnect', {
@@ -695,7 +814,7 @@
           })
         ])
       ]));
-      A.announce('Recorded ' + proto + ' session opened on ' + vm.name);
+      A.announce('Recorded ' + label + ' session opened on ' + vm.name);
     };
 
     if (!A.data.me.elevation) {
@@ -825,15 +944,31 @@
     if (s) s.hidden = true;
     var b = document.getElementById('burger');
     if (b) b.setAttribute('aria-expanded', 'false');
+    if (wasOpen) paintNavTitles();
     if (wasOpen && restoreFocus && b && document.contains(b)) b.focus();
   }
   function openDrawerNav() {
     document.body.classList.add('navopen');
     document.getElementById('scrim').hidden = false;
     document.getElementById('burger').setAttribute('aria-expanded', 'true');
+    paintNavTitles();
     var first = document.querySelector('.side .nav');
     if (first) first.focus();
   }
+
+  var narrowQuery = window.matchMedia ? window.matchMedia('(max-width: 1200px)') : null;
+
+  function paintNavTitles() {
+    var collapsed = document.body.classList.contains('railed') || !!(narrowQuery && narrowQuery.matches);
+    var drawerOpen = document.body.classList.contains('navopen');
+    document.querySelectorAll('.side .nav').forEach(function (n) {
+      var lbl = n.querySelector('.lbl');
+      if (!lbl) return;
+      if (collapsed && !drawerOpen) n.title = lbl.textContent.trim();
+      else n.removeAttribute('title');
+    });
+  }
+  A.paintNavTitles = paintNavTitles;
 
   var sessionOpener = null;
 
@@ -890,8 +1025,14 @@
       prefs.rail = document.body.classList.toggle('railed');
       savePrefs();
       this.setAttribute('aria-label', prefs.rail ? 'Expand navigation' : 'Collapse navigation');
+      paintNavTitles();
       A.announce(prefs.rail ? 'Navigation collapsed' : 'Navigation expanded');
     });
+    if (narrowQuery) {
+      if (narrowQuery.addEventListener) narrowQuery.addEventListener('change', paintNavTitles);
+      else if (narrowQuery.addListener) narrowQuery.addListener(paintNavTitles);
+    }
+    paintNavTitles();
     document.getElementById('drawer-close').addEventListener('click', A.closeSession);
     document.getElementById('helpbtn').addEventListener('click', A.shortcuts);
     document.getElementById('prefsbtn').addEventListener('click', A.settings);

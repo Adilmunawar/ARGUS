@@ -2,6 +2,39 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [0.8.0] - 2026-10-11
+
+The console looked finished and was not usable for real work: every action ended in a flash message and changed nothing, so an operator who acknowledged an alert saw it still open, with the same badge, on the next screen. Two audits ran alongside the console work, one over the API server and one over the compose stack and its scripts, each verified by executing the code rather than reading it. Everything they found is fixed below.
+
+### Fixed
+- **Actions now carry state.** Acknowledging an alert marks it acknowledged and takes it out of the open count; approving a deployment moves it into flight with its approver recorded and a rolling-upgrade progress bar; rejecting one closes it with the reason shown on the card; approving, denying or revoking an access grant changes the grant and the person's elevation; rotating a secret resets its age and revoking its leases zeroes them; promoting a model demotes the one it replaces; setting a canary moves the bar; opening a pull request from an application creates the deployment and lands on it; running a runbook records the run. Every one of these writes an audit row, so Recent activity and the Audit screen show what was just done, by whom.
+- **The navigation badges were typed into the markup.** The Deployments badge read 1 and the Security badge and bell read 4 whatever the data said. They are derived from the dataset now and repaint after every action; a count of zero hides the badge and the bell's dot and says "No open alerts".
+- **Choosing a tab did not change the URL**, so a reload, the browser's back button and a shared link all forgot where you were. Deep links had worked since 0.6.1; the reverse did not. Every tabbed screen now writes the tab into the hash, with the breadcrumb and the document title following, and without a re-render.
+- **The command palette opened on top of itself.** A second `Ctrl`+`K` stacked a second palette; it focuses the open one now. The palette also finds deployments, open alerts, secret paths and people, not only screens and infrastructure.
+- **A collapsed rail had nameless icons.** Between 900 and 1200 pixels the stylesheet collapsed the rail but left the Collapse button, which then toggled nothing, and gave the icons no tooltip. The button hides where the viewport has already collapsed the rail, and every icon carries its label as a tooltip whenever the labels are hidden.
+- **The session drawer always said "reason: restore drill"** whatever reason the operator had typed into the elevation dialog, and a PowerShell connection was rendered as a Windows desktop prompt. The banner carries the real reason, the expiry matches the grant, and JEA and VNC sessions describe themselves.
+- The destructive confirm kept "Type X to enable this" as its tooltip after the name matched, and ignored Enter in the field it had asked you to type into.
+- The waiver dialog named no vulnerability, so a waiver could not be attached to anything; it offers the unwaived findings, each row has its own Waive action, and the new waiver appears in the table.
+- The CSV export is copied to the clipboard in one click, with the old select-all path kept for where the clipboard is refused.
+- Dead stylesheet rules for a header the console no longer renders, a duplicated custom property, and two script tags indented differently from the rest.
+- **Console API: a static file that stats but cannot be opened crashed the whole process**, because the read stream's error had no listener. Reproduced with a socket under the web root; the server exited. Static files are served through `stream.pipeline`, which also closes the descriptor when the browser abandons a download.
+- **Console API: an upstream that closed mid-body hung the request forever.** All four hand-rolled readers resolved only on `end` and rejected only on request error; a Loki, Prometheus, SeaweedFS, NATS or OpenBao restart during a response left the promise pending, poisoned the cache key behind it, and froze that service's heartbeat at its last value until the process restarted. A premature close now rejects.
+- **Console API: renewing a session logged the operator out.** Rotation deleted the old session id at once, so the parallel requests a dashboard fires with the old cookie answered 401 and cleared the cookie. The superseded id stays valid for a short grace that never exceeds the renewal window, and cannot be rotated again.
+- Console API: a stream whose browser left before the close listener was attached was never torn down and counted against the stream limit for ever; `SIGTERM` with a dashboard open always exited 1 because open streams never let `server.close` finish; `HEAD` on any API route answered 404; `405` answers carried no `Allow`; the Loki tail dropped any path prefix on `ARGUS_LOKI_URL` that every other Loki call kept.
+- **`bootstrap.ps1` could not complete on a fresh clone.** The Alertmanager template needs `SMTP_FROM` and `PLATFORM_EMAIL` and `.env.example` carried neither, so the script refused to write `.env` or any secret. CI never saw it because the workflow copies `.env.example` straight to `.env`.
+- **SeaweedFS was given an Admin identity with an empty secret.** `seaweed-config` rendered `argus-parity-admin` with `"actions": ["Admin"]` but was never passed its secret, so the heredoc expanded it to nothing. The variable is passed now and is required.
+- OpenBao's `audit "file"` stanza is not a server-configuration construct; the server ignored it and the audit volume stayed empty while the configuration claimed a trail. The stanza is gone and `provision.sh` enables the file audit device through the API, idempotently.
+- The parity runner could never write its report: it runs as uid 1000 into a volume Docker creates root-owned. `parity-pg` now owns the volume to that uid before its loop, and the runner waits for it. `grafana` and `postgres-exporter` raced `pg-init` for the roles it creates and crash-looped on first start; `storage-init` never found the identities file it was told to check. `publish.sh --help` printed its own source.
+- Seven shell comments inside a compose block scalar bypassed the no-comment check, which keeps block-scalar bodies verbatim on purpose.
+
+### Added
+- The **ACT** suite: twelve regressions, one for each console behaviour above.
+- The theme follows the system by default. An explicit light or dark choice still sticks.
+- A favicon, inline, so a served console does not log a 404 on every open.
+
+### Note
+- 359 property checks, 125 sandbox checks and 217 server tests pass.
+
 ## [0.7.0] - 2026-09-12
 
 CI had been red on `main` since 2026-09-09 and every pull request was blocked by it. Fixing that surfaced a wider problem: several advertised features could not work, because nine bind mounts in `docker-compose.yml` pointed at paths the repository never contained. Docker answers a missing bind source by creating an empty directory and carrying on, so those services started unconfigured or crash-looped, and nothing said so.

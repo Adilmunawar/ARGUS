@@ -331,6 +331,18 @@ argus_openbao_seal survived). Minting a replacement."
   log "console AppRole : issued -> $APPROLE_FILE"
 }
 
+ensure_audit() {
+  if bao audit list -format=json 2>/dev/null | grep -q '"file/"'; then
+    log "audit file/ : already enabled"
+    return 0
+  fi
+  if bao audit enable file file_path=/openbao/logs/audit.log mode=0640 >/dev/null 2>&1; then
+    log "audit file/ : enabled, writing to /openbao/logs/audit.log"
+  else
+    warn "could not enable the file audit device; no request is being recorded"
+  fi
+}
+
 write_mode_marker() {
   verdict=$(sandbox_verdict)
   want="$MODE/$S_SHARES/$S_THRESHOLD/$verdict"
@@ -565,6 +577,7 @@ ensure_transit
 ensure_database
 apply_policies
 ensure_console_approle
+ensure_audit
 write_mode_marker
 
 S_PROVISIONED=true

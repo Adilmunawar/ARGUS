@@ -83,6 +83,7 @@
       checkRow(dep),
       dep.state === 'inflight' ? progressBlock(dep) : null,
       dep.state === 'rolledback' ? el('div.callout.bad', { text: 'Rolled back: ' + dep.outcome }) : null,
+      dep.state === 'rejected' ? el('div.callout.warn', { text: 'Rejected: ' + dep.outcome }) : null,
       dep.state === 'done' && dep.durationS
         ? el('p.hint', { text: 'Applied in ' + fmt.dur(dep.durationS) + ', outcome ' + dep.outcome + '.' })
         : null,
@@ -109,7 +110,7 @@
     var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).sort(byNewest);
     var inflight = d.deployments.filter(function (p) { return p.state === 'inflight'; }).sort(byNewest);
     var recent = d.deployments.filter(function (p) {
-      return p.state === 'done' || p.state === 'rolledback';
+      return p.state === 'done' || p.state === 'rolledback' || p.state === 'rejected';
     }).sort(byNewest);
 
     mount.appendChild(ui.pageHeader(
@@ -251,10 +252,15 @@
         ? 'You opened this deployment. A different Tier 1 person must approve it.'
         : 'Approving needs your security key.',
       onClick: function () {
-        A.stepUp('Approving a production deployment needs a second factor.', function () {
+        A.stepUp('Approving a ' + dep.env + ' deployment needs a second factor.', function () {
+          dep.approvals = (dep.approvals || []).concat([ME]);
+          dep.state = 'inflight';
+          dep.progress = { ud: 0, total: 5, healthy: true };
+          A.record('deployment.approve', dep.app + ' ' + dep.version + ' (' + dep.env + ')', dep.id);
           A.flash('ok', 'Approved',
             'Deployment ' + dep.id + ' for ' + appDisplay(dep) + ' ' + dep.version +
             ' is queued. The reconciler verifies the signatures on every artefact, then runs a health-gated rolling upgrade one upgrade domain at a time, and rolls back automatically if a domain fails its health policy.');
+          A.refresh();
         });
       }
     });
@@ -272,10 +278,15 @@
           variant: 'danger',
           disabled: true,
           onClick: function () {
+            var why = area.value.trim();
             close();
+            dep.state = 'rejected';
+            dep.outcome = why;
+            A.record('deployment.reject', dep.app + ' ' + dep.version + ' (' + dep.env + '): ' + why, dep.id);
             A.flash('warn', 'Rejected',
               'Deployment ' + dep.id + ' was rejected and ' + personName(dep.author) +
               ' has been told why. The reason is recorded in the audit trail.');
+            A.refresh();
           }
         };
         var go = ui.btn('Reject deployment ' + dep.id, rejectOpts);
@@ -324,6 +335,7 @@
             : 'Every instance of ' + appDisplay(dep) + ' restarts, one upgrade domain at a time.',
           confirmLabel: 'Roll back ' + appDisplay(dep),
           onConfirm: function () {
+            A.record('deployment.rollback', dep.app + ' from ' + dep.version + ' (' + dep.env + ')', dep.id);
             A.flash('warn', 'Roll back queued',
               appDisplay(dep) + ' will return to the version before ' + dep.version +
               '. The reconciler applies it one upgrade domain at a time and stops if health fails.');
@@ -333,7 +345,7 @@
     });
   }
 
-  function renderDetail(mount, id) {
+  function renderDetail(mount, id, tab) {
     var dep = d.deployments.filter(function (p) { return String(p.id) === String(id); })[0];
 
     if (!dep) {
@@ -365,19 +377,29 @@
     }
     if (dep.state === 'inflight') mount.appendChild(progressBlock(dep));
     if (dep.state === 'rolledback') mount.appendChild(el('div.callout.bad', { text: 'Rolled back: ' + dep.outcome }));
+    if (dep.state === 'rejected') {
+      mount.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'Rejected.' }),
+        el('p', { text: dep.outcome || 'No reason was recorded.' })
+      ]));
+    }
 
     mount.appendChild(ui.card(null, ui.tabs([
       { id: 'plan', label: 'Plan', render: function () { return planTab(dep); } },
       { id: 'blast', label: 'Blast radius', render: function () { return blastTab(dep); } },
       { id: 'evidence', label: 'Evidence', render: function () { return evidenceTab(dep); } }
-    ], { label: 'Deployment ' + dep.id + ' detail' }), { flush: true }));
+    ], {
+      label: 'Deployment ' + dep.id + ' detail',
+      initial: tab || null,
+      href: function (t) { return A.href('deploys', [String(dep.id), t]); }
+    }), { flush: true }));
   }
 
   var screen = {
     title: 'Deployments',
     crumb: 'Deployments',
     render: function (mount, ctx) {
-      if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx.rest[0]);
+      if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx.rest[0], ctx.rest[1]);
       else renderQueue(mount);
     }
   };

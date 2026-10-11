@@ -143,6 +143,7 @@ function startEventStream(req, res, spec, onLog) {
     try { stop(); } catch (err) { log('warn', `${spec.label} teardown failed: ${err && err.message}`); }
   }
 
+  if (res.destroyed || res.writableEnded) { end(); return; }
   res.on('close', end);
   res.on('error', end);
 

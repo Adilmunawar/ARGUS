@@ -1204,7 +1204,7 @@ async function axeOn(page, label, suite, opts) {
   rec('PREFS', 'a junk density in storage falls back to the default',
     survived.prefs.density === 'comfortable', JSON.stringify(survived.prefs));
   rec('PREFS', 'an unknown theme in storage falls back to the default',
-    survived.prefs.theme === 'light' && survived.theme === 'light',
+    survived.prefs.theme === 'system' && ['light', 'dark'].indexOf(survived.theme) !== -1,
     JSON.stringify({ pref: survived.prefs.theme, resolved: survived.theme }));
   rec('PREFS', 'a wrong-typed timezone in storage falls back to the default',
     survived.prefs.timezone === 'utc', String(survived.prefs.timezone));
@@ -1877,6 +1877,124 @@ async function axeOn(page, label, suite, opts) {
     `border ${tones.cardBorder}, shadow ${tones.cardShadow}`);
   rec('FORCED', 'no page error in forced colors', forcedErrors.length === 0, forcedErrors.slice(0, 3).join(' | '));
   await forcedCtx.close();
+
+  await goto(page, 'security/alerts');
+  const acted = await page.evaluate(async () => {
+    const d = window.ARGUS.data;
+    const openBefore = d.alerts.filter(a => a.state === 'open').length;
+    const badgeBefore = document.getElementById('nav-alert-badge').textContent;
+    const target = d.alerts.find(a => a.state === 'open');
+    const trigger = [...document.querySelectorAll('#main button')]
+      .find(b => b.textContent.trim() === 'Acknowledge ' + target.id);
+    if (!trigger) return { reason: 'no acknowledge button' };
+    trigger.click();
+    await new Promise(r => setTimeout(r, 120));
+    const note = document.getElementById('ack-note');
+    if (note) { note.value = 'looking now'; note.dispatchEvent(new Event('input', { bubbles: true })); }
+    const go = [...document.querySelectorAll('.dialog-foot button')].find(b => /^Acknowledge alert/.test(b.textContent));
+    if (!go) return { reason: 'no confirm button' };
+    go.click();
+    await new Promise(r => setTimeout(r, 300));
+    return {
+      state: target.state,
+      openAfter: d.alerts.filter(a => a.state === 'open').length,
+      openBefore,
+      badgeBefore,
+      badgeAfter: document.getElementById('nav-alert-badge').textContent,
+      bell: document.getElementById('bell').getAttribute('aria-label'),
+      audit: d.audit[0] && d.audit[0].action,
+      hash: location.hash,
+      stillOffered: !![...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Acknowledge ' + target.id)
+    };
+  });
+  rec('ACT', 'acknowledging an alert changes its state rather than only flashing',
+    acted.state === 'ack' && acted.openAfter === acted.openBefore - 1 && !acted.stillOffered, JSON.stringify(acted));
+  rec('ACT', 'the navigation badge and the bell follow the open alert count',
+    acted.badgeAfter === String(acted.openAfter) && acted.badgeBefore === String(acted.openBefore)
+      && acted.bell === acted.openAfter + ' open alerts', JSON.stringify(acted));
+  rec('ACT', 'every action writes an audit row', acted.audit === 'alert.acknowledge', String(acted.audit));
+  rec('ACT', 'the badge in the shell is derived from data, not typed into the markup',
+    /nav-alert-badge" hidden>/.test(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8')));
+
+  await goto(page, 'deploys/1847');
+  const approved = await page.evaluate(async () => {
+    const dep = window.ARGUS.data.deployments.find(x => x.id === 1847);
+    const before = document.getElementById('nav-deploy-badge').textContent;
+    const trigger = [...document.querySelectorAll('#main .pagehead-actions button')].find(b => /^Approve/.test(b.textContent));
+    if (!trigger) return { reason: 'no approve button' };
+    trigger.click();
+    await new Promise(r => setTimeout(r, 120));
+    const go = [...document.querySelectorAll('.dialog-foot button')].find(b => /Simulate/.test(b.textContent));
+    if (!go) return { reason: 'no step-up' };
+    go.click();
+    await new Promise(r => setTimeout(r, 300));
+    return {
+      state: dep.state, approvals: dep.approvals.slice(), before,
+      after: document.getElementById('nav-deploy-badge').textContent,
+      hidden: document.getElementById('nav-deploy-badge').hidden,
+      progress: !!document.querySelector('#main [role="progressbar"]')
+    };
+  });
+  rec('ACT', 'approving a deployment moves it into flight and off the queue badge',
+    approved.state === 'inflight' && approved.approvals.indexOf('adil') !== -1 && approved.progress
+      && approved.before === '1' && approved.hidden, JSON.stringify(approved));
+
+  await goto(page, 'identity');
+  const tabbed = await page.evaluate(async () => {
+    const tab = [...document.querySelectorAll('#main .tab')].find(t => /grants/i.test(t.textContent));
+    tab.click();
+    await new Promise(r => setTimeout(r, 80));
+    return { hash: location.hash, title: document.title, crumb: document.getElementById('crumb').textContent, route: window.ARGUS.state.route, rest: window.ARGUS.state.rest };
+  });
+  rec('ACT', 'choosing a tab writes it into the URL so a reload or a shared link lands on it',
+    tabbed.hash === '#/identity/grants' && /grants/.test(tabbed.title) && /grants/.test(tabbed.crumb) && tabbed.rest[0] === 'grants',
+    JSON.stringify(tabbed));
+  await page.reload({ waitUntil: 'load' });
+  await page.evaluate(AXE);
+  await page.waitForTimeout(150);
+  rec('ACT', 'the tab written into the URL survives a reload',
+    await page.evaluate(() => {
+      const sel = document.querySelector('#main .tab[aria-selected="true"]');
+      return !!sel && /grants/i.test(sel.textContent);
+    }));
+
+  await goto(page, 'overview');
+  await page.keyboard.press('Control+K');
+  await page.waitForTimeout(80);
+  await page.keyboard.press('Control+K');
+  await page.waitForTimeout(80);
+  rec('ACT', 'pressing the palette shortcut twice opens one palette, not two',
+    await page.evaluate(() => document.querySelectorAll('.pal').length === 1 && document.activeElement.classList.contains('pal-input')),
+    await page.evaluate(() => String(document.querySelectorAll('.pal').length)));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(80);
+
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await goto(page, 'overview');
+  rec('ACT', 'a collapsed rail names every icon on hover',
+    await page.evaluate(() => [...document.querySelectorAll('.side .nav[data-go]')].every(n => n.title && n.title === n.querySelector('.lbl').textContent.trim())));
+  rec('ACT', 'the rail toggle is not offered where the rail is already collapsed by the viewport',
+    await page.evaluate(() => getComputedStyle(document.getElementById('railbtn')).display === 'none'));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await goto(page, 'overview');
+  rec('ACT', 'an expanded rail carries no redundant tooltips',
+    await page.evaluate(() => [...document.querySelectorAll('.side .nav[data-go]')].every(n => !n.hasAttribute('title'))));
+
+  await goto(page, 'compute/vm/sql-01');
+  const confirmed = await page.evaluate(async () => {
+    let fired = false;
+    window.ARGUS.confirmDestructive({ title: 'T', detail: 'd', match: 'sql-01', onConfirm: () => { fired = true; } });
+    const input = document.getElementById('confirm-name');
+    input.value = 'sql-01';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const go = Array.from(document.querySelectorAll('.dialog-foot .btn')).pop();
+    const titleGone = !go.hasAttribute('title');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise(r => setTimeout(r, 60));
+    return { fired, titleGone, closed: !document.querySelector('.dialog') };
+  });
+  rec('ACT', 'Enter in a matching confirm field runs the action and the lock explanation is gone',
+    confirmed.fired && confirmed.titleGone && confirmed.closed, JSON.stringify(confirmed));
 
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));

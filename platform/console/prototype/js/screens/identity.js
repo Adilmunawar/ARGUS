@@ -35,6 +35,7 @@
         : 'The account holds no standing group membership.',
       confirmLabel: 'Offboard ' + p.upn,
       onConfirm: function () {
+        A.record('person.offboard', p.upn);
         A.flash('warn', 'Offboarding requested for ' + p.upn,
           'The prototype changes nothing. In production this disables the account, revokes active grants and writes the reason to the audit.');
       }
@@ -155,11 +156,18 @@
     ]);
   }
 
-  var GRANT_TONE = { active: 'warn', expired: 'idle', requested: 'info' };
+  var GRANT_TONE = { active: 'warn', expired: 'idle', requested: 'info', denied: 'idle', revoked: 'idle' };
   var GRANT_TITLE = {
     active: 'Live standing privilege. Every minute this grant is open is a minute the blast radius of a stolen session is larger, which is why it is amber and not green.',
     expired: 'The grant has lapsed and the group membership has been removed.',
-    requested: 'Waiting for an approver. Nothing is granted yet.'
+    requested: 'Waiting for an approver. Nothing is granted yet.',
+    denied: 'An approver declined this request. Nothing was granted.',
+    revoked: 'An approver ended this grant early. The membership has been removed.'
+  };
+  var GRANT_CLOSED_TEXT = {
+    expired: 'The membership was removed automatically when the grant lapsed. Nothing to do.',
+    denied: 'The request was declined and the requester was told. Nothing was granted.',
+    revoked: 'The membership was removed by hand before the grant lapsed. The revocation is in the audit.'
   };
 
   var ELEVATION_GROUPS = [
@@ -190,17 +198,37 @@
     return node;
   }
 
+  function setElevated(upn, on, until) {
+    var who = d.personByUpn(upn);
+    if (!who) return;
+    who.elevated = !!on;
+    who.elevationExpires = on ? until : null;
+  }
+
   function approveGrant(g) {
     A.stepUp('Approving elevation for ' + g.principal + ' into ' + g.group + ' needs a second factor.', function () {
+      g.state = 'active';
+      g.approver = ME;
+      g.granted = new Date(d.now.getTime());
+      g.expires = new Date(d.now.getTime() + 2 * 3600000);
+      setElevated(g.principal, true, g.expires);
+      A.record('grant.approve', g.principal + ' to ' + g.group + ' for 2 h: ' + g.reason);
       A.flash('ok', 'Approved elevation for ' + g.principal,
         g.principal + ' now holds ' + g.group + ' for the requested window. The approval, your identity and the reason are written to the audit, and the membership is removed automatically at expiry.');
+      A.replaceHash(A.href('identity', ['grants'], { id: g.id }));
+      A.refresh();
     });
   }
 
   function denyGrant(g) {
+    g.state = 'denied';
+    g.approver = ME;
+    A.record('grant.deny', g.principal + ' to ' + g.group + ': ' + g.reason);
     A.flash('info', 'Denied elevation for ' + g.principal,
       'The request for ' + g.group + ' is closed. ' + g.principal +
       ' is told it was declined, and the decision is written to the audit.');
+    A.replaceHash(A.href('identity', ['grants'], { id: g.id }));
+    A.refresh();
   }
 
   function revokeGrant(g) {
@@ -213,8 +241,14 @@
       blast: 'Reason on record: ' + g.reason + '. Approved by ' + g.approver + '.',
       confirmLabel: 'Revoke ' + g.group,
       onConfirm: function () {
+        g.state = 'revoked';
+        g.expires = new Date(d.now.getTime());
+        setElevated(g.principal, false, null);
+        A.record('grant.revoke', g.group + ' from ' + g.principal);
         A.flash('warn', 'Revoked ' + g.group + ' from ' + g.principal,
           'The membership is removed and the revocation is written to the audit.');
+        A.replaceHash(A.href('identity', ['grants'], { id: g.id }));
+        A.refresh();
       }
     });
   }
@@ -342,7 +376,7 @@
       ]));
     } else {
       body.push(el('p.hint', {
-        text: 'The membership was removed automatically when the grant lapsed. Nothing to do.'
+        text: GRANT_CLOSED_TEXT[g.state] || 'This grant is closed. Nothing to do.'
       }));
     }
 
@@ -416,6 +450,10 @@
 
   function rotateSecret(s) {
     A.stepUp('Rotating ' + s.path + ' needs a second factor.', function () {
+      s.rotatedDays = 0;
+      A.record('secret.rotate', s.path);
+      A.replaceHash(A.href('identity', ['secrets'], { path: s.path }));
+      A.refresh();
       A.flash('ok', 'Rotation started for ' + s.path,
         'A new version is written and the previous version stays readable until the ' +
         fmt.num(s.leases) + ' open leases renew. The value is never shown here.');
@@ -432,6 +470,11 @@
         ' reads in the last 24 hours suggests how many callers depend on this path.',
       confirmLabel: 'Revoke ' + fmt.num(s.leases) + ' leases',
       onConfirm: function () {
+        var killed = s.leases;
+        s.leases = 0;
+        A.record('secret.revoke-leases', s.path + ' (' + fmt.num(killed) + ' leases)');
+        A.replaceHash(A.href('identity', ['secrets'], { path: s.path }));
+        A.refresh();
         A.flash('warn', 'Leases revoked on ' + s.path,
           'Workloads re-authenticate on their own retry loop. The revocation is written to the audit.');
       }
@@ -541,6 +584,7 @@
       ], {
         label: 'Identity sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+        href: function (id) { return A.href('identity', [id]); },
         onSelect: function (id) {
           if (id === 'grants' && wanted.id) ui.revealRow(mount, wanted.id, { label: 'Grant ' + wanted.id + ' is highlighted' });
           if (id === 'secrets' && wanted.path) ui.revealRow(mount, wanted.path, { label: wanted.path + ' is highlighted' });

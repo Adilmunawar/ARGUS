@@ -156,12 +156,12 @@ const patterns = guarded('loki:patterns', LABELS_TTL_MS, async (options) => {
 
 function tailUrl(options) {
   const base = config.lokiUrl.replace(/^http/, 'ws');
-  const url = new URL('/loki/api/v1/tail', base);
-  url.searchParams.set('query', options.query);
-  url.searchParams.set('limit', String(options.limit));
-  if (options.delayFor) url.searchParams.set('delay_for', String(options.delayFor));
-  if (options.startNs) url.searchParams.set('start', String(options.startNs));
-  return url.toString();
+  return upstream.join(base, 'loki/api/v1/tail', {
+    query: options.query,
+    limit: options.limit,
+    delay_for: options.delayFor || undefined,
+    start: options.startNs || undefined
+  });
 }
 
 function openTail(options, handlers) {

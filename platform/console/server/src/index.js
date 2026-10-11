@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('node:crypto');
+const { pipeline } = require('stream');
 
 const config = require('./config');
 const env = require('./env');
@@ -476,7 +477,12 @@ async function serveStatic(req, res, pathname) {
       'content-length': stat.size,
       'x-content-type-options': 'nosniff'
     });
-    fs.createReadStream(target).pipe(res);
+    pipeline(fs.createReadStream(target), res, (err) => {
+      if (err) {
+        log('warn', `static ${rel} failed: ${err.message}`);
+        res.destroy();
+      }
+    });
   } catch (err) {
     sendJson(res, 404, { error: 'not found', path: rel });
   }
@@ -558,7 +564,8 @@ const server = http.createServer(async (req, res) => {
   const principal = resolved.principal;
 
   if (pathname === authRoutes.SESSION_PATH) {
-    if (req.method !== 'GET') {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.setHeader('allow', 'GET, HEAD');
       return sendJson(res, 405, { ok: false, error: 'method-not-allowed', message: 'GET this endpoint.' });
     }
     log('info', `${req.method} ${pathname} ${Date.now() - started}ms`);
@@ -589,13 +596,14 @@ const server = http.createServer(async (req, res) => {
 
   if (!config.allowWrites && !authRoutes.WRITE_PATHS.has(pathname)
       && req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('allow', 'GET, HEAD');
     return sendJson(res, 405, {
       error: 'read-only',
       message: 'This console is running read-only. Set ARGUS_ALLOW_WRITES=1 to permit changes.'
     });
   }
 
-  const key = req.method + ' ' + pathname;
+  const key = (req.method === 'HEAD' ? 'GET' : req.method) + ' ' + pathname;
   const handler = routes[key];
 
   try {
@@ -693,6 +701,8 @@ function shutdown(signal) {
   log('info', `${signal} received, closing`);
   heartbeats.stop();
   server.close(() => process.exit(0));
+  server.closeIdleConnections();
+  setTimeout(() => { server.closeAllConnections(); }, 1000).unref();
   setTimeout(() => process.exit(1), 5000).unref();
 }
 process.on('SIGINT', () => shutdown('SIGINT'));

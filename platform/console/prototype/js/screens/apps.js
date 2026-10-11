@@ -108,6 +108,7 @@
       detail: 'Every instance of ' + app.display + ' is replaced one at a time. In-flight requests on each instance are drained first, so this is not an outage, but it does reset every in-process cache the application holds.',
       blast: app.instances + ' instance' + (app.instances === 1 ? '' : 's') + ' in ' + app.env + '.',
       onConfirm: function () {
+        A.record('app.restart', app.name + ' (' + app.env + ')');
         A.flash('ok', 'Restart requested for ' + app.display,
           'The reconciler rolls the instances one at a time. Your identity and the reason are in the audit.');
       }
@@ -211,9 +212,30 @@
           ui.btn('Open pull request', {
             variant: 'primary',
             onClick: function () {
+              var version = versionSel.value, env = envSel.value;
               close();
+              var id = d.deployments.reduce(function (m, x) { return Math.max(m, Number(x.id) || 0); }, 0) + 1;
+              var sha = '';
+              var seed = 2166136261;
+              var word = app.name + '@' + version + '#' + id;
+              for (var i = 0; i < word.length; i++) seed = Math.imul(seed ^ word.charCodeAt(i), 16777619) >>> 0;
+              while (sha.length < 7) { seed = Math.imul(seed ^ (seed >>> 13), 1274126177) >>> 0; sha += (seed & 15).toString(16); }
+              d.deployments.unshift({
+                id: id, app: app.name, version: version, env: env, author: A.me(), state: 'awaiting',
+                opened: new Date(d.now.getTime()), approvals: [],
+                checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' },
+                sha: sha,
+                plan: [{ kind: 'ServiceFabricApp', name: app.name, from: app.version, to: version, action: version === app.version ? 'reapply' : 'upgrade' }],
+                blast: {
+                  services: app.services.map(function (svc) { return svc.name + ' (' + svc.instances + ')'; }),
+                  dependents: [], sessions: 0
+                }
+              });
+              A.record('deployment.open', app.name + ' ' + version + ' (' + env + ')', id);
               A.flash('ok', 'Pull request opened',
-                'The console never writes to a server. #1848 is open for review.');
+                'Deployment ' + id + ' puts ' + app.display + ' ' + version + ' into ' + env +
+                '. The console never writes to a server; a second person has to approve it.');
+              A.go('deploys', [String(id)]);
             }
           })
         ];
@@ -231,6 +253,7 @@
         ' services, currently serving ' + fmt.num(app.rps) + ' requests per second.',
       confirmLabel: 'Restart ' + app.name,
       onConfirm: function () {
+        A.record('app.restart', app.name + ' (' + ctx.env + ')');
         A.flash('warn', 'Restart requested for ' + app.display,
           'Queued for review. This prototype has restarted nothing.');
       }
@@ -333,6 +356,7 @@
             variant: 'ghost',
             title: 'Restart ' + r.service + ' instance ' + r.index + ' on ' + r.node,
             onClick: function () {
+              A.record('instance.restart', r.service + ' instance ' + r.index + ' on ' + r.node);
               A.flash('warn', 'Restart requested',
                 r.service + ' instance ' + r.index + ' on ' + r.node + '. The other instances keep serving.');
             }
@@ -620,7 +644,8 @@
     done: ['Completed', 'ok'],
     rolledback: ['Rolled back', 'bad'],
     inflight: ['In flight', 'warn'],
-    awaiting: ['Awaiting approval', 'info']
+    awaiting: ['Awaiting approval', 'info'],
+    rejected: ['Rejected', 'warn']
   };
 
   function confirmRollback(app, dep, ctx) {
@@ -632,6 +657,7 @@
       blast: fmt.num(app.instances) + ' instances of ' + app.display + ' are replaced. Anything deployed after ' + dep.version + ' is undone with it.',
       confirmLabel: 'Roll back to ' + dep.version,
       onConfirm: function () {
+        A.record('deployment.rollback', app.name + ' to ' + dep.version + ' (' + (dep.env || ctx.env) + ')', dep.id);
         A.flash('ok', 'Revert opened',
           'A revert to ' + dep.version + ' is open for review. The console never writes to a server.');
       }
@@ -730,7 +756,8 @@
       { id: 'deploys', label: 'Deploy history', render: function () { return deployTab(app, ctx); } }
     ], {
       label: 'Sections of ' + app.display,
-      initial: (ctx && ctx.params && ctx.params.tab) || (ctx && ctx.rest && ctx.rest[1]) || null
+      initial: (ctx && ctx.params && ctx.params.tab) || (ctx && ctx.rest && ctx.rest[1]) || null,
+      href: function (id) { return A.href('apps', [app.name, id]); }
     }));
   }
 

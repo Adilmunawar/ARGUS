@@ -67,6 +67,11 @@ function sysGet(name, timeoutMs) {
       timeout: timeoutMs || TIMEOUT_MS,
       headers: { accept: 'application/json' }
     }, (res) => {
+      res.on('close', () => {
+        if (!res.complete) {
+          reject(Object.assign(new Error(`${url.host}${path} closed before the response was complete.`), { reason: 'unreachable', code: 'ECONNRESET' }));
+        }
+      });
       let body = '';
       let size = 0;
       res.setEncoding('utf8');

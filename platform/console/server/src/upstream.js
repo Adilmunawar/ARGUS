@@ -79,6 +79,11 @@ function request(url, options) {
         }
         return resolve(res);
       }
+      res.on('close', () => {
+        if (!res.complete) {
+          reject(Object.assign(new Error(`${parsed.pathname} closed before the response was complete.`), { code: 'ECONNRESET' }));
+        }
+      });
       let body = '';
       let size = 0;
       res.setEncoding('utf8');

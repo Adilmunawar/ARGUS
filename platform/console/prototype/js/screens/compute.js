@@ -206,7 +206,7 @@
     ]);
   }
 
-  function renderList(mount) {
+  function renderList(mount, ctx) {
     mount.appendChild(ui.pageHeader(
       'Compute',
       'The hosts underneath everything, the machines on them, the fabric they run, and the one node with cards in it.'));
@@ -216,7 +216,11 @@
       { id: 'vms', label: 'Virtual machines', render: vmsTab },
       { id: 'fabric', label: 'Service Fabric', render: fabricTab },
       { id: 'gpu', label: 'GPU', render: gpuTab }
-    ], { label: 'Compute sections' }));
+    ], {
+      label: 'Compute sections',
+      initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+      href: function (id) { return A.href('compute', [id]); }
+    }));
   }
 
   function confirmDrain(host, ctx) {
@@ -228,6 +232,7 @@
       blast: fmt.num(vmsOn(host.name).length) + ' virtual machines move to another host. Each one pauses for a few seconds as memory is handed over.',
       confirmLabel: 'Drain ' + host.name,
       onConfirm: function () {
+        A.record('host.drain', host.name + ' (' + ctx.env + ')');
         A.flash('warn', 'Drain requested for ' + host.name,
           'Queued for review. This prototype has migrated nothing.');
       }
@@ -243,6 +248,7 @@
       blast: fmt.num(vmsOn(host.name).length) + ' virtual machines lose all network access except the SIEM and the update mirror. Anything depending on them fails until the quarantine is lifted, and security is paged whether or not this was intended.',
       confirmLabel: 'Quarantine ' + host.name,
       onConfirm: function () {
+        A.record('host.quarantine', host.name + ' (' + ctx.env + ')');
         A.flash('bad', 'Quarantine requested for ' + host.name,
           'Security has been paged and the request is recorded in the audit. This prototype has changed no VLAN.');
       }
@@ -488,7 +494,11 @@
       { id: 'performance', label: 'Performance', render: function () { return performanceTab(vm); } },
       { id: 'replica', label: 'Replica', render: function () { return replicaTab(vm); } },
       { id: 'connect', label: 'Connect', render: function () { return connectTab(vm); } }
-    ], { label: 'Sections of ' + vm.name }));
+    ], {
+      label: 'Sections of ' + vm.name,
+      initial: (ctx && ctx.rest && ctx.rest[2]) || null,
+      href: function (id) { return A.href('compute', ['vm', vm.name, id]); }
+    }));
   }
 
   registerScreen('compute', {
@@ -498,14 +508,15 @@
       var rest = ctx.rest || [];
       if (rest[0] === 'host' && rest[1]) { renderHost(mount, ctx); return; }
       if (rest[0] === 'vm' && rest[1]) { renderVm(mount, ctx); return; }
-      if (rest.length) {
+      var TABS = ['hosts', 'vms', 'fabric', 'gpu'];
+      if (rest.length && TABS.indexOf(rest[0]) === -1) {
         mount.appendChild(ui.errorState(
           'That compute link is not valid',
           'A compute link is either /compute/host/<name> or /compute/vm/<name>.',
           function () { A.go('compute'); }));
         return;
       }
-      renderList(mount);
+      renderList(mount, ctx);
     }
   });
 })();

@@ -14,8 +14,6 @@
 
   --on-white-from:#113a2b; --on-white-to:#1e6f4a;
 
-  --on-white-from:#113a2b; --on-white-to:#1e6f4a;
-
   --ok-bg:#e3f3ec; --ok-bg-soft:#eef7f2; --ok-line:#bfe3d3; --ok-stroke:#7fc4a6;
   --ok-cell:#dcefe5; --ok-cell-ink:#05543d; --ok-soft:#9fd8bb; --ok-mid:#2f8f63;
   --warn-bg:#fdf1dd; --warn-bg-soft:#fdf6e9; --warn-line:#f0d9ac; --warn-stroke:#d9a441;
@@ -124,8 +122,6 @@ body.railed .nav{justify-content:center;padding:9px 0}
 .burger{display:none;border:1px solid rgba(var(--ink-rgb),.14);background:var(--paper);border-radius:10px;
   width:44px;height:44px;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);flex:none}
 .crumbs{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
-.crumbs button{background:none;border:none;font:inherit;color:var(--muted);cursor:pointer;padding:5px 6px;margin:-5px -6px;border-radius:6px;min-height:26px}
-.crumbs button:hover{color:var(--brand);text-decoration:underline}
 .crumbs b{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crumbs .sep{color:rgba(var(--ink-rgb),.62)}
 .kbar{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--cream);border:1px solid rgba(var(--ink-rgb),.14);
@@ -134,20 +130,13 @@ body.railed .nav{justify-content:center;padding:9px 0}
 .kbar kbd{margin-left:auto;font:inherit;font-size:11px;background:var(--paper);border:1px solid rgba(var(--ink-rgb),.16);border-radius:5px;padding:2px 6px}
 .envpill{display:flex;align-items:center;gap:7px;background:linear-gradient(120deg,var(--cane),var(--pine));color:#fff;
   border:none;border-radius:999px;padding:9px 15px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;min-height:32px;white-space:nowrap;flex:none}
-.envpill i{width:7px;height:7px;border-radius:50%;background:var(--leaf);display:block;flex:none}
 .iconbtn{border:1px solid rgba(var(--ink-rgb),.14);background:var(--paper);border-radius:10px;width:40px;height:40px;
   display:grid;place-items:center;cursor:pointer;color:var(--ink);position:relative;flex:none}
 .iconbtn:hover{background:rgba(var(--wash-rgb),.26)}
-.iconbtn .n{position:absolute;top:-6px;right:-6px;background:var(--bad);color:#fff;border-radius:999px;font-size:11px;
-  min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
-.who{display:flex;align-items:center;gap:8px;font-size:12px;background:none;border:none;cursor:pointer;font:inherit;
-  padding:4px 7px 4px 4px;border-radius:999px;min-height:32px;flex:none}
-.who:hover{background:rgba(var(--wash-rgb),.26)}
-.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(140deg,var(--leaf),var(--brand));
-  display:grid;place-items:center;color:var(--pine);font-weight:700;font-size:12px;flex:none}
 
 @media (max-width: 1200px) {
   :root { --rail: 66px; }
+  .railbtn { display: none; }
   .nav .lbl, .nav .badge, .railbtn .lbl {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;

@@ -249,8 +249,13 @@
               var field = document.getElementById('ack-note');
               var note = field && field.value.trim();
               close();
+              alert.state = 'ack';
+              A.record('alert.acknowledge', alert.id + ' ' + alert.rule + ' on ' + alert.host + (note ? ': ' + note : ''));
               A.flash('ok', 'Alert ' + alert.id + ' acknowledged',
-                note ? 'Note recorded: ' + note : 'No note was recorded, so the audit shows an empty reason.');
+                (note ? 'Note recorded: ' + note : 'No note was recorded, so the audit shows an empty reason.') +
+                ' Pages for it have stopped; the alert stays listed until it is resolved at the source.');
+              A.replaceHash(A.href('security', ['alerts'], { id: alert.id }));
+              A.refresh();
             }
           })
         ];
@@ -269,6 +274,7 @@
         + 'alone so that memory can be captured; only the network is cut.',
       blast: blastFor(alert.host),
       onConfirm: function () {
+        A.record('host.quarantine', alert.host + ' for ' + alert.id + ' ' + alert.rule);
         A.flash('warn', alert.host + ' quarantined',
           'NICs moved to VLAN 90 and security paged. Follow sec-01-suspected-compromise to preserve evidence.');
       }
@@ -443,12 +449,21 @@
       {
         key: 'actions', label: 'Actions', sortable: false,
         render: function (r) {
+          if (r.state === 'resolved') {
+            return el('div.row', [
+              el('span.muted', { text: 'Resolved at the source.' }),
+              r.runbook ? ui.btn('Open runbook ' + r.runbook, {
+                variant: 'ghost',
+                onClick: function () { A.go('ops', ['runbook', r.runbook]); }
+              }) : null
+            ]);
+          }
           return el('div.row', [
-            ui.btn('Acknowledge ' + r.id, {
+            r.state === 'open' ? ui.btn('Acknowledge ' + r.id, {
               variant: 'ghost',
               title: 'Acknowledge ' + r.rule + ' on ' + r.host,
               onClick: function () { acknowledgeDialog(r); }
-            }),
+            }) : el('span.muted', { text: 'Acknowledged.' }),
             ui.btn('Quarantine ' + r.host, {
               variant: 'danger',
               title: 'Move every NIC on ' + r.host + ' to VLAN 90',
@@ -517,8 +532,16 @@
     });
   }
 
-  function addWaiverDialog() {
-    var owner = el('input.field', { type: 'text', id: 'waiver-owner', autocomplete: 'off', spellcheck: 'false' });
+  function addWaiverDialog(preselected) {
+    var d = A.data;
+    var candidates = d.vulns.filter(function (v) { return !v.waiver || v.waiver.until < d.now; });
+    var cve = el('select.field', { id: 'waiver-cve' }, candidates.map(function (v) {
+      return el('option', {
+        value: v.id, text: v.id + ' · ' + v.component + ' in ' + v.app + ' (' + v.severity + ')',
+        selected: preselected && preselected.id === v.id ? true : null
+      });
+    }));
+    var owner = el('input.field', { type: 'text', id: 'waiver-owner', autocomplete: 'off', spellcheck: 'false', value: A.me() });
     var reason = el('textarea.field', { id: 'waiver-reason', rows: '3', spellcheck: 'false' });
     var expiry = el('input.field', { type: 'date', id: 'waiver-expiry' });
 
@@ -527,9 +550,12 @@
       body: function () {
         return [
           el('p', {
-            text: 'A waiver says a named person accepted this risk until a named date. All three fields are '
+            text: 'A waiver says a named person accepted this risk until a named date. Every field is '
               + 'required, because a waiver without an owner or an expiry is just a suppressed finding.'
           }),
+          candidates.length
+            ? el('div.formrow', [el('label.fieldlabel', { for: 'waiver-cve', text: 'Vulnerability' }), cve])
+            : el('div.callout.ok', { text: 'Every open vulnerability already carries a live waiver, so there is nothing to waive.' }),
           el('div.formrow', [el('label.fieldlabel', { for: 'waiver-owner', text: 'Owner' }), owner]),
           el('div.formrow', [el('label.fieldlabel', { for: 'waiver-reason', text: 'Reason' }), reason]),
           el('div.formrow', [el('label.fieldlabel', { for: 'waiver-expiry', text: 'Expires on' }), expiry]),
@@ -543,20 +569,29 @@
           title: 'An owner, a reason and an expiry date are all required.',
           onClick: function () {
             var who = owner.value.trim(), until = expiry.value;
+            var target = d.vulns.filter(function (v) { return v.id === cve.value; })[0];
             close();
+            if (target) {
+              var untilDate = new Date(until + 'T00:00:00Z');
+              target.waiver = { owner: who, until: isFinite(untilDate.getTime()) ? untilDate : d.now, reason: reason.value.trim() };
+              A.record('vuln.waive', target.id + ' in ' + target.app + ' until ' + until + ' by ' + who);
+            }
             A.flash('ok', 'Waiver recorded',
               'Owner ' + who + ', expiring ' + until + '. It will reappear as an alert on that date.',
               { timeout: 12000 });
+            A.replaceHash(A.href('security', ['vulns']));
+            A.refresh();
           }
         });
 
         function check() {
-          submit.setDisabled(!(owner.value.trim() && reason.value.trim() && expiry.value));
+          submit.setDisabled(!(candidates.length && cve.value && owner.value.trim() && reason.value.trim() && expiry.value));
         }
-        [owner, reason, expiry].forEach(function (node) {
+        [cve, owner, reason, expiry].forEach(function (node) {
           node.addEventListener('input', check);
           node.addEventListener('change', check);
         });
+        check();
 
         return [ui.btn('Cancel', { variant: 'ghost', onClick: close }), submit];
       }
@@ -578,7 +613,19 @@
       { key: 'app', label: 'Application' },
       { key: 'fixedIn', label: 'Fixed in', render: function (v) { return el('span.mono', { text: v.fixedIn }); } },
       { key: 'found', label: 'Found', sort: function (v) { return v.found.getTime(); }, render: function (v) { return fmt.time(v.found); } },
-      { key: 'waiver', label: 'Waiver', status: true, sortable: false, render: waiverCell }
+      { key: 'waiver', label: 'Waiver', status: true, sortable: false, render: waiverCell },
+      {
+        key: 'actions', label: 'Actions', sortable: false,
+        render: function (v) {
+          var live = v.waiver && v.waiver.until >= d.now;
+          if (live) return el('span.muted', { text: 'Waived until ' + fmt.stamp(v.waiver.until) });
+          return ui.btn('Waive ' + v.id, {
+            variant: 'ghost',
+            title: 'Record a named, time-boxed waiver for ' + v.id,
+            onClick: function () { addWaiverDialog(v); }
+          });
+        }
+      }
     ];
 
     return el('div.stack', [
@@ -592,9 +639,10 @@
       ui.card('Known vulnerabilities', ui.table(cols, d.vulns, {
         caption: 'Vulnerabilities found by Trivy in deployed components, with waiver owner and expiry',
         empty: 'No vulnerabilities are open against a deployed component.',
-        sortKey: 'severity', sortDir: 'asc'
+        sortKey: 'severity', sortDir: 'asc',
+        rowKey: function (v) { return v.id; }
       }), {
-        actions: [ui.btn('Add waiver', { variant: 'ghost', onClick: addWaiverDialog })]
+        actions: [ui.btn('Add waiver', { variant: 'ghost', onClick: function () { addWaiverDialog(null); } })]
       })
     ]);
   }
@@ -777,6 +825,7 @@
       ui.clear(detail);
       var built = buildPlayer(session);
       detail.appendChild(ui.card('Recording ' + session.id, built.node));
+      try { detail.scrollIntoView({ block: 'start', behavior: 'smooth' }); } catch (e) { detail.scrollIntoView(); }
       built.focus();
     }
 
@@ -882,6 +931,7 @@
             onClick: function () {
               A.stepUp('Generating an evidence pack reads privileged grant history, so it needs a second factor.',
                 function () {
+                  A.record('evidence.generate', 'monthly pack to argus-artifacts');
                   A.flash('ok', 'Evidence pack queued',
                     'It will be written to argus-artifacts and locked for 365 days. You will get a flash when the signature is verified.');
                 });
@@ -909,6 +959,7 @@
       mount.appendChild(ui.tabs(items, {
         label: 'Security sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+        href: function (id) { return A.href('security', [id]); },
         onSelect: function (id) {
           var want = ctx && ctx.params && ctx.params.id;
           if (id === 'alerts' && want) ui.revealRow(mount, want, { label: 'Alert ' + want + ' is highlighted' });

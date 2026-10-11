@@ -67,6 +67,7 @@
             title: 'Queue a Dagster materialisation of ' + p.asset,
             onClick: function () {
               var down = downstreamOf(p.asset);
+              A.record('asset.materialise', p.asset + (down.length ? ' and ' + down.join(', ') : ''));
               A.flash('info', 'Materialising ' + p.asset,
                 down.length
                   ? 'Dagster will re-run ' + down.join(', ') + ' once it succeeds.'
@@ -123,6 +124,11 @@
       blast: 'Serving ' + m.metric + ' ' + fmt.num(m.value, 3) + ', trained on '
         + fmt.num(m.rows) + ' rows ' + fmt.ago(m.trained) + '.',
       onConfirm: function () {
+        A.data.models.forEach(function (other) { if (other.metric === m.metric) other.promoted = false; });
+        m.promoted = true;
+        A.record('model.promote', m.run + ' (' + m.metric + ' ' + fmt.num(m.value, 3) + ')');
+        A.replaceHash(A.href('ml', ['models']));
+        A.refresh();
         A.flash('warn', m.run + ' promoted',
           'Ray Serve is draining the previous replica set. Watch p95 on the Endpoints tab for the next ten minutes.');
       }
@@ -199,6 +205,10 @@
             onClick: function () {
               var v = Number(document.getElementById('canary-pct').value);
               close();
+              e.canary = v;
+              A.record('canary.set', e.name + ' to ' + fmt.pct(v, 0));
+              A.replaceHash(A.href('ml', ['endpoints']));
+              A.refresh();
               A.flash('ok', 'Canary set on ' + e.name,
                 fmt.pct(v, 0) + ' of traffic now reaches the canary replica.');
             }
@@ -348,7 +358,8 @@
         { id: 'imagery', label: 'Imagery', render: imageryTab }
       ], {
         label: 'ML and geospatial sections',
-        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+        href: function (id) { return A.href('ml', [id]); }
       }));
     }
   });

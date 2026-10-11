@@ -273,6 +273,9 @@
           if (i === lines.length - 1) {
             lastLine = line;
             runBtn.setDisabled(false);
+            rb.lastRun = new Date(d.now.getTime());
+            A.record('runbook.run', rb.id + ' (' + A.state.env + ')');
+            A.refreshBadges();
             A.flash('ok', rb.id + ' finished', line);
           }
         }, 420 * (i + 1)));
@@ -514,7 +517,8 @@
         { id: 'cost', label: 'Capacity and cost', render: costTab }
       ], {
         label: 'Operations sections',
-        initial: (ctx && ctx.rest && ctx.rest[0]) || null
+        initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+        href: function (id) { return A.href('ops', [id]); }
       }));
     }
   });

@@ -97,6 +97,7 @@
       var s = Math.round((A.data.now - d) / 1000);
       var future = s < 0; s = Math.abs(s);
       var out;
+      if (s < 5) return 'just now';
       if (s < 60) out = s + ' s';
       else if (s < 3600) out = Math.round(s / 60) + ' min';
       else if (s < 86400) out = Math.round(s / 3600) + ' h';
@@ -445,7 +446,7 @@
 
     var disposePanel = null;
 
-    function select(i, focus) {
+    function select(i, focus, byUser) {
       buttons.forEach(function (b, j) {
         b.setAttribute('aria-selected', j === i ? 'true' : 'false');
         b.tabIndex = j === i ? 0 : -1;
@@ -473,6 +474,7 @@
       }
 
       if (focus) buttons[i].focus();
+      if (byUser && opts.href && A.replaceHash) A.replaceHash(opts.href(items[i].id));
       if (opts.onSelect) opts.onSelect(items[i].id);
     }
 
@@ -483,14 +485,14 @@
         type: 'button', role: 'tab', id: listId + '-' + i,
         'aria-selected': 'false', tabindex: '-1',
         on: {
-          click: function () { select(i); },
+          click: function () { select(i, false, true); },
           keydown: function (e) {
             var next = null;
             if (e.key === 'ArrowRight') next = (i + 1) % items.length;
             if (e.key === 'ArrowLeft') next = (i - 1 + items.length) % items.length;
             if (e.key === 'Home') next = 0;
             if (e.key === 'End') next = items.length - 1;
-            if (next !== null) { e.preventDefault(); select(next, true); }
+            if (next !== null) { e.preventDefault(); select(next, true, true); }
           }
         }
       }, it.label);

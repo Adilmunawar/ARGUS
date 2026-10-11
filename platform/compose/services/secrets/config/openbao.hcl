@@ -30,18 +30,3 @@ max_lease_ttl = "24h"
 
 log_level  = "info"
 log_format = "standard"
-
-audit "file" {
-  type        = "file"
-  path        = "file"
-  description = "Argus audit trail: every request and response, HMACed"
-  local       = false
-
-  options = {
-    file_path = "/openbao/logs/audit.log"
-
-    log_raw = "false"
-
-    mode = "0640"
-  }
-}

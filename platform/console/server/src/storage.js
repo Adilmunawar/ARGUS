@@ -46,6 +46,11 @@ function getJson(url, timeoutMs) {
         res.resume();
         return reject(Object.assign(new Error(`${url} answered ${res.statusCode}`), { status: res.statusCode }));
       }
+      res.on('close', () => {
+        if (!res.complete) {
+          reject(Object.assign(new Error(`${url} closed before the response was complete.`), { code: 'ECONNRESET' }));
+        }
+      });
       let body = '';
       res.setEncoding('utf8');
       let size = 0;

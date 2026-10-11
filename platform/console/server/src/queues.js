@@ -48,6 +48,11 @@ function getJson(path, options) {
         res.resume();
         return reject(Object.assign(new Error(`${url} answered ${status}`), { status }));
       }
+      res.on('close', () => {
+        if (!res.complete) {
+          reject(Object.assign(new Error(`${url} closed before the response was complete.`), { code: 'ECONNRESET' }));
+        }
+      });
       let body = '';
       let size = 0;
       res.setEncoding('utf8');

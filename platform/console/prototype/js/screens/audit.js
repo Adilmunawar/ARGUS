@@ -57,6 +57,22 @@
       },
       actions: function (close) {
         return [
+          ui.btn('Copy the CSV', {
+            variant: 'ghost',
+            onClick: function () {
+              var t = document.getElementById('audit-csv');
+              if (!t) return;
+              var done = function () { A.flash('ok', 'CSV copied', fmt.num(rows.length) + ' events are on the clipboard.', { timeout: 5000 }); };
+              var fallback = function () { t.focus(); t.select(); A.announce('The clipboard refused the copy, so the text is selected instead. Press Ctrl C.'); };
+              try {
+                if (window.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(t.value).then(done, fallback);
+                  return;
+                }
+              } catch (e) {  }
+              fallback();
+            }
+          }),
           ui.btn('Select the CSV text', {
             variant: 'ghost',
             onClick: function () {

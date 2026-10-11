@@ -82,14 +82,21 @@ function resolve(token) {
   return { ok: true, key, session, renew: now >= session.renewAfter };
 }
 
+const ROTATION_GRACE_MS = 30000;
+
 function rotate(key) {
   const session = sessions.get(key);
   if (!session) return null;
-  sessions.delete(key);
   const token = crypto.randomBytes(TOKEN_BYTES).toString('base64url');
   const nextKey = keyFor(token);
   const now = Date.now();
   sessions.set(nextKey, { ...session, lastSeenAt: now, renewAfter: now + authConfig.renewMs });
+  const grace = Math.min(ROTATION_GRACE_MS, authConfig.renewMs);
+  sessions.set(key, {
+    ...session,
+    renewAfter: Infinity,
+    absoluteExpiresAt: Math.min(session.absoluteExpiresAt, now + grace)
+  });
   audit('auth.session.renewed', {
     subject: session.subject,
     sessionRef: ref(nextKey),
