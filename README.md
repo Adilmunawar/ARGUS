@@ -153,9 +153,8 @@ Contributions, challenges and corrections are welcome. The most valuable contrib
 
 ## Related projects
 
-* `Zarz001/Mills-Restructured-by-Zayan`: the first application to land on the platform.
-* `adilmunawar/ZD-claude-plugin`: Claude Code plugins pointed at `platform/gitops/` and `docs/runbooks/`.
-* `Adilmunawar/ZaraatDost-Models` and `AdilMunawar/sugarcane`: machine learning pipelines moving to the GPU node.
+* [ZD Claude Plugin](https://github.com/Adilmunawar/ZD-claude-plugin): Claude Code plugins for deploys, operations and security, pointed at `platform/gitops/` and `docs/runbooks/`.
+* [QGIS MCP](https://github.com/Adilmunawar/QGIS_MCP): a Model Context Protocol server that connects AI assistants to QGIS.
 
 ## Author
 
