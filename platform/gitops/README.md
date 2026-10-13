@@ -1,19 +1,48 @@
-# platform/gitops: desired state
+# GitOps desired state
 
-This directory is the *template* of the private `ZaraatDost/argus-gitops` repository (ADR-0021/0023). Its `main` branch is production. Only the reconciler writes to systems; humans write here.
+This directory is the *template* of the private `ZaraatDost/argus-gitops` repository (ADR 0021 and ADR 0023). Its `main` branch is production. Only the reconciler writes to systems; humans write here.
 
-What CI enforces (`.github/scripts/check-gitops.py`): every `*.yaml`/`*.yml` under `platform/gitops/` and `platform/policies/` must parse, and every one that carries a top-level `kind` is validated against the schema in `schemas/` whose `kind` const matches it. A document whose `kind` has no schema is listed as uncovered in the output, but that alone does **not** fail the check: the script exits non-zero only on a file that does not parse, a schema that is not valid JSON Schema 2020-12, or a document that fails its schema. Files with no `kind` (for example `apps/*/alerts.yaml`, which is Prometheus rule syntax) are parsed but not schema-checked, and `schemas/` itself is skipped.
+## What CI enforces
+
+`.github/scripts/check-gitops.py` requires every `*.yaml` and `*.yml` file under `platform/gitops/` and `platform/policies/` to parse, and validates every one that carries a top level `kind` against the schema in `schemas/` whose `kind` const matches it.
+
+A document whose `kind` has no schema is listed as uncovered in the output, but that alone does **not** fail the check. The script exits non zero only on a file that does not parse, a schema that is not valid JSON Schema `2020-12`, or a document that fails its schema. Files with no `kind` (for example `apps/*/alerts.yaml`, which is Prometheus rule syntax) are parsed but not schema checked, and `schemas/` itself is skipped.
 
 Covered kinds today: `ServiceFabricApp`, `Environment`, `ServiceAccounts`, `BucketSet`, `IpsecRules`. Keeping that list complete is a review duty, not a CI one.
 
-Schemas are JSON Schema 2020-12 and their `pattern`s must be valid ECMA-262 regular expressions, which is what the specification requires and what a JavaScript validator will hold them to. `.github/scripts/check-pattern-dialect.py` enforces that: it walks every `pattern` value and every `patternProperties` key in `schemas/` and compiles each under a real ECMA-262 engine as well as under Python's `re`, so a construct that only one dialect accepts — a leading `(?i)`, a POSIX class, `\A`/`\Z`, a possessive quantifier, a Python-spelled named group — fails the build instead of waiting to be found by hand. Negative lookahead is deliberately allowed and is used by the `ServiceFabricApp` value guard; that choice forecloses a future RE2-based validator, which has no lookahead.
+## Schema pattern dialect
 
-Every schema file is named for the `kind` it validates. The `ServiceFabricApp` schema is closed with `unevaluatedProperties: false` at every object level bar a service's `env`, whose unevaluated *values* are held to the shape rules below instead, so a field the schema does not know about is rejected rather than ignored — which is what stops a literal credential being parked in `metadata`, `spec.package` or `args` where no rule reaches it. It never mixes `additionalProperties: false` with `unevaluatedProperties` at the same level: the former short-circuits before the annotation pass and would reject fields a composed subschema legitimately supplies. Each object carries at most one `patternProperties` entry, because `jsonschema` joins all of an object's `patternProperties` keys with `|` and runs Python `re` over the result when deciding which properties count as evaluated, and that function cannot be swapped for an ECMA engine.
+Schemas are JSON Schema `2020-12`, and their `pattern`s must be valid ECMA 262 regular expressions, which is what the specification requires and what a JavaScript validator will hold them to. `.github/scripts/check-pattern-dialect.py` enforces that: it walks every `pattern` value and every `patternProperties` key in `schemas/` and compiles each under a real ECMA 262 engine as well as under Python's `re`. A construct that only one dialect accepts (a leading `(?i)`, a POSIX class, `\A`/`\Z`, a possessive quantifier, a Python spelled named group) therefore fails the build instead of waiting to be found by hand.
 
-Secret handling in `ServiceFabricApp` is two layers. A service `env` key whose name contains `password`, `passwd`, `pwd`, `passphrase`, `secret`, `key`, `token`, `credential`, `auth`, `sas`, `cert`, `pem`, `pfx` or `signature`, in any casing, must hold an OpenBao reference and nothing else. Every other `env` value, and `services[].args`, must clear a set of shape rules: no `keyword=literal` pair, no URI userinfo (`scheme://user:pass@host`), and no AWS, GitHub, Anthropic, Slack, Google, JWT or PEM private-key shape. The rules are an `allOf` of single `not` members rather than one alternation so the failure names which rule fired.
+Negative lookahead is deliberately allowed and is used by the `ServiceFabricApp` value guard; that choice forecloses a future RE2 based validator, which has no lookahead.
 
-The reference form is `{{ openbao:<path>#<key> }}` and the key is mandatory: a KV-v2 read returns an object, so a reference without a key forces the reconciler to guess which field it wanted. The path admits `A-Za-z0-9`, `/`, `_`, `.` and `-` but not `:`, which is what stops `{{ openbao:openbao:kv/x#k }}`. The pattern is anchored, so a reference must be the whole value — `"Bearer {{ openbao:... }}"` is rejected, and `spec.package.key`'s `{{ version }}` artefact template cannot be mistaken for one.
+## Schema structure
 
-What CI does *not* check: that an app pinned in `environments/*.yaml` has a spec under `apps/`, that an identity named in `storage/buckets.yaml` or `policies/firewall/ipsec-rules.yaml` exists in `identity/gmsa.yaml`, or that a declared bucket matches the S3 identities in `platform/compose/`. Those are cross-file invariants; the bucket half of the last one is verified at boot by `platform/console/tools/init-object-storage.js`.
+Every schema file is named for the `kind` it validates.
 
-Other rules, enforced by review rather than by CI: `identity/` and `network/` and `policies/` need two Tier 1 approvals; secrets are never values, only OpenBao references (`{{ openbao:<path>#<key> }}`) — the `ServiceFabricApp` schema does enforce this for service `env`, where a secret-named key must hold an OpenBao reference; artefacts are referenced by SHA-256.
+The `ServiceFabricApp` schema is closed with `unevaluatedProperties: false` at every object level except a service's `env`, whose unevaluated *values* are held to the shape rules below instead. A field the schema does not know about is rejected rather than ignored, which is what stops a literal credential being parked in `metadata`, `spec.package` or `args` where no rule reaches it.
+
+It never mixes `additionalProperties: false` with `unevaluatedProperties` at the same level: the former short circuits before the annotation pass and would reject fields a composed subschema legitimately supplies. Each object carries at most one `patternProperties` entry, because `jsonschema` joins all of an object's `patternProperties` keys with `|` and runs Python `re` over the result when deciding which properties count as evaluated, and that function cannot be swapped for an ECMA engine.
+
+## Secret handling
+
+Secret handling in `ServiceFabricApp` has two layers:
+
+* A service `env` key whose name contains `password`, `passwd`, `pwd`, `passphrase`, `secret`, `key`, `token`, `credential`, `auth`, `sas`, `cert`, `pem`, `pfx` or `signature`, in any casing, must hold an OpenBao reference and nothing else.
+* Every other `env` value, and `services[].args`, must clear a set of shape rules: no `keyword=literal` pair, no URI userinfo (`scheme://user:pass@host`), and no AWS, GitHub, Anthropic, Slack, Google, JWT or PEM private key shape. The rules are an `allOf` of single `not` members rather than one alternation, so the failure names which rule fired.
+
+The reference form is `{{ openbao:<path>#<key> }}`, and the key is mandatory: a KV v2 read returns an object, so a reference without a key forces the reconciler to guess which field it wanted. The path admits `A-Za-z0-9`, `/`, `_`, `.` and `-` but not `:`, which is what stops `{{ openbao:openbao:kv/x#k }}`. The pattern is anchored, so a reference must be the whole value: `"Bearer {{ openbao:... }}"` is rejected, and the `{{ version }}` artefact template in `spec.package.key` cannot be mistaken for one.
+
+## What CI does not check
+
+* That an app pinned in `environments/*.yaml` has a spec under `apps/`.
+* That an identity named in `storage/buckets.yaml` or `policies/firewall/ipsec-rules.yaml` exists in `identity/gmsa.yaml`.
+* That a declared bucket matches the S3 identities in `platform/compose/`.
+
+Those are cross file invariants; the bucket half of the last one is verified at boot by `platform/console/tools/init-object-storage.js`.
+
+## Rules enforced by review
+
+* `identity/`, `network/` and `policies/` need two Tier 1 approvals.
+* Secrets are never values, only OpenBao references (`{{ openbao:<path>#<key> }}`). The `ServiceFabricApp` schema does enforce this for service `env`, where a secret named key must hold an OpenBao reference.
+* Artefacts are referenced by SHA256.

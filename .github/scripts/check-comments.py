@@ -25,6 +25,7 @@ BLOCK = {
     ".tf": ("/*", "*/"),
     ".css": ("/*", "*/"),
     ".java": ("/*", "*/"),
+    ".cs": ("/*", "*/"),
     ".alloy": ("/*", "*/"),
 }
 
@@ -34,7 +35,7 @@ MARKERS = {
     ".ps1": [HASH], ".psm1": [HASH], ".psd1": [HASH], ".sql": [DASH],
     ".example": [HASH], ".gitignore": [HASH], ".gitattributes": [HASH],
     ".dockerignore": [HASH], ".css": [], ".jsonc": [SLASH],
-    ".java": [SLASH], ".alloy": [SLASH], ".tmpl": [HASH],
+    ".java": [SLASH], ".cs": [SLASH], ".alloy": [SLASH], ".tmpl": [HASH],
 }
 
 SHELL_LIKE = {".sh", ".bash", ".conf", ".yml", ".yaml", ".ps1", ".psm1", ".psd1", ".example",

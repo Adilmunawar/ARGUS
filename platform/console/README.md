@@ -1,8 +1,14 @@
 # Argus Console
 
-`Argus.Console.Api` (.NET 10 minimal API) · `Argus.Console.Web` (Next.js 16, standalone) · `Argus.Reconciler` (Service Fabric stateful service). See `docs/05-CONTROL-PLANE.md`.
+The Argus Console is the operator interface and control plane for the platform, built from three parts:
 
-Conventions are the Mills dashboard's: bare camelCase records, RFC 9457 ProblemDetails, `/api/v1` prefix, hand-rolled `Validate()`, xUnit + `WebApplicationFactory` on SQLite with fakes, config from environment variables only.
+* `Argus.Console.Api`: a .NET 10 minimal API.
+* `Argus.Console.Web`: a Next.js 16 standalone web app.
+* `Argus.Reconciler`: a Service Fabric stateful service.
+
+See [the control plane design](../../docs/05-CONTROL-PLANE.md) for the full picture.
+
+Conventions follow the Mills dashboard: bare camelCase records, RFC 9457 ProblemDetails, the `/api/v1` prefix, hand rolled `Validate()`, xUnit with `WebApplicationFactory` on SQLite with fakes, and configuration from environment variables only.
 
 ```
 src/
@@ -13,4 +19,4 @@ src/
 tests/
 ```
 
-First screens to ship (Phase 2): Deployments, Applications. Everything else is Windows Admin Center + Grafana until Phase 6.
+The first screens to ship (Phase 2) are Deployments and Applications. Everything else is served by Windows Admin Center and Grafana until Phase 6.

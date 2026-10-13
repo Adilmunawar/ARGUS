@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use Argus in your work, please cite it as below."
+title: "Argus: a sovereign, Windows first private cloud that replaces AWS on owned hardware"
+type: software
+authors:
+  - family-names: Munawar
+    given-names: Adil
+    alias: Adilmunawar
+repository-code: "https://github.com/Adilmunawar/argus"
+url: "https://github.com/Adilmunawar/argus"
+license: MIT
+version: 0.12.0
+date-released: 2026-10-11
+keywords:
+  - private cloud
+  - sovereign cloud
+  - cloud repatriation
+  - aws alternative
+  - windows server
+  - hyper v
+  - service fabric
+  - gitops
+  - zero trust
+  - architecture decision records
+abstract: >
+  Argus is the complete design record for replacing AWS with hardware you own:
+  thirty four architecture decisions, an application infrastructure map, a
+  hardware rooted security architecture, runbooks, a self hosted stack and a
+  tested web console with browser RDP.

@@ -1,6 +1,6 @@
 # Runbooks
 
-One file per operational procedure. Format:
+Each operational procedure lives in its own file, in the format below.
 
 ```
 ---
@@ -21,4 +21,4 @@ approval: none | operator | approver | security
 ## Report         (what to commit to docs/runbooks/drills/)
 ```
 
-The console renders `params` as a form and executes `Steps` over a JEA endpoint with a transcript. See `06-PHASES-AND-RUNBOOKS.md` for the initial list.
+The console renders `params` as a form and executes `Steps` over a JEA endpoint with a transcript. See [the phases and runbooks plan](../06-PHASES-AND-RUNBOOKS.md) for the initial list.

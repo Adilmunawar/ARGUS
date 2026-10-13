@@ -6,9 +6,9 @@ NAME="argus"
 VISIBILITY="--public"
 WEBSITE="https://adilmunawar.vercel.app"
 
-DESCRIPTION="Sovereign, Windows-first private cloud replacing AWS on owned hardware. 34 architecture decisions, a full application-infrastructure map, hardware-rooted security, and a tested web console with browser RDP. Includes what has been verified and what has not."
+DESCRIPTION="Open source sovereign private cloud blueprint that replaces AWS on hardware you own. Windows Server, Hyper V, Service Fabric, GitOps and zero trust security, with 34 architecture decisions, runbooks, a self hosted stack and a tested web console with browser RDP."
 
-TOPICS="private-cloud,self-hosted,windows-server,hyper-v,service-fabric,active-directory,gitops,infrastructure-as-code,architecture-decision-records,zero-trust,devops,aws-alternative,cloud-migration,disaster-recovery,openbao,seaweedfs,powershell,dotnet,design-system,accessibility"
+TOPICS="private-cloud,self-hosted,windows-server,hyper-v,service-fabric,active-directory,gitops,infrastructure-as-code,architecture-decision-records,zero-trust,devops,aws-alternative,cloud-migration,disaster-recovery,openbao,seaweedfs,powershell,dotnet,sovereign-cloud,accessibility"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
