@@ -641,6 +641,7 @@
       if (n.dataset.go === r.route) n.setAttribute('aria-current', 'page');
       else n.removeAttribute('aria-current');
     });
+    paintNavTitles();
     A.refreshBadges();
 
     clear(mount);

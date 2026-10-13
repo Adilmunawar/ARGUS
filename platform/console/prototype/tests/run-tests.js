@@ -1971,14 +1971,16 @@ async function axeOn(page, label, suite, opts) {
 
   await page.setViewportSize({ width: 1100, height: 800 });
   await goto(page, 'overview');
-  rec('ACT', 'a collapsed rail names every icon on hover',
-    await page.evaluate(() => [...document.querySelectorAll('.side .nav[data-go]')].every(n => n.title && n.title === n.querySelector('.lbl').textContent.trim())));
+  const railNamed = await page.waitForFunction(() => [...document.querySelectorAll('.side .nav[data-go]')].every(n => n.title && n.title === n.querySelector('.lbl').textContent.trim()), null, { timeout: 4000 }).then(() => true, () => false);
+  rec('ACT', 'a collapsed rail names every icon on hover', railNamed,
+    await page.evaluate(() => [...document.querySelectorAll('.side .nav[data-go]')].filter(n => !n.title).map(n => n.dataset.go).join(',') || 'all named'));
   rec('ACT', 'the rail toggle is not offered where the rail is already collapsed by the viewport',
     await page.evaluate(() => getComputedStyle(document.getElementById('railbtn')).display === 'none'));
   await page.setViewportSize({ width: 1440, height: 900 });
   await goto(page, 'overview');
-  rec('ACT', 'an expanded rail carries no redundant tooltips',
-    await page.evaluate(() => [...document.querySelectorAll('.side .nav[data-go]')].every(n => !n.hasAttribute('title'))));
+  const railPlain = await page.waitForFunction(() => [...document.querySelectorAll('.side .nav[data-go]')].every(n => !n.hasAttribute('title')), null, { timeout: 4000 }).then(() => true, () => false);
+  rec('ACT', 'an expanded rail carries no redundant tooltips', railPlain,
+    await page.evaluate(() => [...document.querySelectorAll('.side .nav[data-go]')].filter(n => n.hasAttribute('title')).map(n => n.dataset.go).join(',') || 'none titled'));
 
   await goto(page, 'compute/vm/sql-01');
   const confirmed = await page.evaluate(async () => {
