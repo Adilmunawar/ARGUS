@@ -20,6 +20,9 @@ REQUIRED_TEXT = {
     "CONTRIBUTING.md": ["Argus is not open source."],
     "CITATION.cff": ["family-names: Munawar", "given-names: Adil"],
     ".github/CODEOWNERS": ["* @Adilmunawar"],
+    "USE-POLICY.md": ["Argus is published so it can be read. It is not open source."],
+    "TRADEMARK.md": ["are used by Adil Munawar to identify this project"],
+    "ENFORCEMENT.md": ["I am Adil Munawar, the author and copyright owner"],
 }
 
 MANIFESTS = ["package.json", "platform/console/server/package.json"]

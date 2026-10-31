@@ -4,7 +4,7 @@ This repository is the design record for a platform that is being built. The mos
 
 ## Licensing
 
-Argus is not open source. Reading and discussing it on GitHub is fine; anything else, including cloning it to run, needs the author's written permission under the [licence](LICENSE). By submitting a pull request, patch or issue text you assign all rights in it to the author, as the licence states. If you cannot agree to that, open an issue describing the problem instead of sending a change.
+Argus is not open source. Reading and discussing it on GitHub is fine; anything else, including cloning it to run, needs the author's written permission under the [licence](LICENSE); the [use and permission policy](USE-POLICY.md) says how to ask. By submitting a pull request, patch or issue text you assign all rights in it to the author, as the licence states. If you cannot agree to that, open an issue describing the problem instead of sending a change.
 
 ## How a change happens
 

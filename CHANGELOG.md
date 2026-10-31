@@ -10,6 +10,9 @@ All notable changes to the Argus plan and platform. Dated, with the reason, beca
 
 ### Added
 - **Ownership enforcement.** `.github/CODEOWNERS` names the author as owner of every path. `check-ownership.py` runs in the `validate` workflow and fails the build if `LICENSE` differs from its pinned SHA-256, if the ownership text leaves the README, contributing guide or citation, if either manifest stops saying `UNLICENSED`, or if any commit since 1 November 2026 is authored by anyone else or carries a co-author trailer. The `ownership` workflow comments on, closes and locks any pull request opened from another account. The `main` branch is protected against force pushes and deletion.
+- **Use and permission policy**, `USE-POLICY.md`: what is free (reading, linking, short quotes, citation, issues), the five permission tiers from study to derivative with their usual answer and conditions, what is never granted, and the five-line request to send.
+- **Name and mark**, `TRADEMARK.md`: the Argus name and console mark reserved for cloud and infrastructure software, with what may and may not be done with them.
+- **Enforcement kit**, `ENFORCEMENT.md`: evidence capture, which route fits which copy, the takedown forms of the major platforms, a filled copyright notice template and a direct notice template, when a lawsuit is worth it and what to do in advance (Zenodo archive, signed commits, registration), a monthly monitoring routine and an action log. All three are guarded by the ownership check.
 
 ## [0.12.0] - 2026-10-11
 

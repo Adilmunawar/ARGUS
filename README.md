@@ -168,7 +168,7 @@ Copyright © 2026 Adil Munawar. **All rights reserved.**
 
 This repository is **not** open source and carries no open source licence. You may read it on GitHub. Any other use, including running the console or the compose stack, copying the documents, deploying the design, building a derivative, or using any of it to train a model, requires the author's **prior written permission**, granted case by case.
 
-To ask for permission, contact [Adil Munawar on GitHub](https://github.com/Adilmunawar) or email adilmunawarx@gmail.com with who you are, what you want to use, and for what. Silence is not permission. The full terms are in [LICENSE](LICENSE).
+To ask for permission, contact [Adil Munawar on GitHub](https://github.com/Adilmunawar) or email adilmunawarx@gmail.com with who you are, what you want to use, and for what. Silence is not permission. The full terms are in [LICENSE](LICENSE); what is usually granted, and how to ask, is in the [use and permission policy](USE-POLICY.md). The name is reserved under [TRADEMARK.md](TRADEMARK.md), and copies published without permission are handled under [ENFORCEMENT.md](ENFORCEMENT.md).
 
 Versions published before 1 November 2026 were MIT licensed; copies obtained under that licence keep it. Third party components referenced or bundled here stay under their own licences.
 
