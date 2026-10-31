@@ -2,20 +2,22 @@
 
 # Argus
 
-### The open source blueprint for a sovereign private cloud that replaces AWS on hardware you own
+### The blueprint for a sovereign private cloud that replaces AWS on hardware you own
 
 **Windows Server · Hyper V · Service Fabric · Active Directory · GitOps · Zero Trust · Browser RDP**
 
 [![validate](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml/badge.svg)](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml)
 [![console tests](https://img.shields.io/static/v1?label=console%20tests&message=408%20passing&color=046c4e)](platform/console/prototype/tests)
 [![architecture decisions](https://img.shields.io/static/v1?label=ADRs&message=34&color=1e6f4a)](docs/01-DECISIONS.md)
-[![license](https://img.shields.io/static/v1?label=license&message=MIT&color=113a2b)](LICENSE)
+[![license](https://img.shields.io/static/v1?label=license&message=all%20rights%20reserved%20%C2%B7%20permission%20required&color=8a1c1c)](LICENSE)
 [![version](https://img.shields.io/static/v1?label=version&message=v0.12.0&color=b07f23)](CHANGELOG.md)
 [![GitHub stars](https://img.shields.io/github/stars/Adilmunawar/argus?style=social)](https://github.com/Adilmunawar/argus/stargazers)
 
-[Why Argus](#why-argus) · [Features](#features) · [Quick start](#quick-start) · [Architecture](#architecture) · [Documentation](#documentation) · [Contributing](#contributing)
+[Why Argus](#why-argus) · [Features](#features) · [Quick start](#quick-start) · [Architecture](#architecture) · [Documentation](#documentation) · [Contributing](#contributing) · [License](#license)
 
 </div>
+
+> **This repository is not open source.** It is published so the design can be read and discussed. Using, copying, deploying, modifying or redistributing any part of it requires the written permission of Adil Munawar. See [License](#license).
 
 <br>
 
@@ -27,7 +29,7 @@ It also says plainly what has **not** been proven. The [validation status](docs/
 
 ## Why Argus
 
-Cloud repatriation is now a mainstream decision, yet almost nothing public shows the full picture: identity, secrets, PKI, storage, queues, observability, backups, disaster recovery, licensing and the operator experience, all in one coherent design. Argus is that picture, written down decision by decision so you can reuse it, challenge it, or fork it.
+Cloud repatriation is now a mainstream decision, yet almost nothing public shows the full picture: identity, secrets, PKI, storage, queues, observability, backups, disaster recovery, licensing and the operator experience, all in one coherent design. Argus is that picture, written down decision by decision so you can read it, challenge it, and, with permission, build on it.
 
 <table>
 <tr><td><b>Replaces</b></td><td>EC2, S3, RDS, Cognito, IAM, Secrets Manager, KMS, Lambda, SQS and SNS, ElastiCache, CloudWatch, X Ray, ECR, CodePipeline, SageMaker</td></tr>
@@ -71,7 +73,7 @@ Cloud repatriation is now a mainstream decision, yet almost nothing public shows
 
 ## Quick start
 
-Open the console prototype. No build, no server, no network:
+Running anything below is use of the Work and needs [permission](#license) first. With that in hand, open the console prototype. No build, no server, no network:
 
 ```bash
 open platform/console/prototype/index.html
@@ -149,7 +151,7 @@ Nothing about this platform changes without a commit here. A new component, a re
 
 ## Contributing
 
-Contributions, challenges and corrections are welcome. The most valuable contribution is proving an assumption wrong. Read the [contributing guide](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md), then open an issue using the *Assumption proved wrong* or *Challenge a decision* template.
+Challenges and corrections are welcome. The most valuable contribution is proving an assumption wrong. Read the [contributing guide](CONTRIBUTING.md), the [code of conduct](CODE_OF_CONDUCT.md) and the [security policy](SECURITY.md), then open an issue using the *Assumption proved wrong* or *Challenge a decision* template. Anything you submit is assigned to the author under the [licence](LICENSE).
 
 ## Related projects
 
@@ -162,10 +164,16 @@ Built and maintained by **[Adil Munawar](https://github.com/Adilmunawar)**, ML R
 
 ## License
 
-Released under the [MIT License](LICENSE).
+Copyright © 2026 Adil Munawar. **All rights reserved.**
+
+This repository is **not** open source and carries no open source licence. You may read it on GitHub. Any other use, including running the console or the compose stack, copying the documents, deploying the design, building a derivative, or using any of it to train a model, requires the author's **prior written permission**, granted case by case.
+
+To ask for permission, contact [Adil Munawar on GitHub](https://github.com/Adilmunawar) or email adilmunawarx@gmail.com with who you are, what you want to use, and for what. Silence is not permission. The full terms are in [LICENSE](LICENSE).
+
+Versions published before 1 November 2026 were MIT licensed; copies obtained under that licence keep it. Third party components referenced or bundled here stay under their own licences.
 
 <div align="center">
 
-**If this project helped you, please give it a ⭐ and share it with someone planning a cloud exit.**
+**If this project helped your thinking, please give it a ⭐ and share the link with someone planning a cloud exit.**
 
 </div>

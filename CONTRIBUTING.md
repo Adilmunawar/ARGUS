@@ -2,6 +2,10 @@
 
 This repository is the design record for a platform that is being built. The most useful contribution is a challenge to a decision, not a typo fix.
 
+## Licensing
+
+Argus is not open source. Reading and discussing it on GitHub is fine; anything else, including cloning it to run, needs the author's written permission under the [licence](LICENSE). By submitting a pull request, patch or issue text you assign all rights in it to the author, as the licence states. If you cannot agree to that, open an issue describing the problem instead of sending a change.
+
 ## How a change happens
 
 Every change to the platform is three things together: an **ADR**, a **changelog line**, and a **commit**. Nothing about the platform changes without all three, because `git log` is meant to be the answer to "why is it like this?".

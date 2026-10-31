@@ -1,21 +1,74 @@
-MIT License
+Argus Proprietary Licence
 
-Copyright (c) 2026 The Argus Project
+Copyright (c) 2026 Adil Munawar. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This repository, including its source code, documentation, architecture
+decision records, runbooks, designs, configuration, data and every other file
+(together, the "Work"), is the property of Adil Munawar (the "Owner").
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+NO RIGHTS ARE GRANTED BY DEFAULT.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+Except as expressly permitted in writing by the Owner, no person or
+organisation may:
+
+  1. use, run, execute or deploy the Work or any part of it, for any purpose,
+     commercial or non-commercial;
+  2. copy, reproduce, download for use, or store the Work beyond what GitHub
+     itself does to display it;
+  3. modify, adapt, translate or create derivative works from it;
+  4. distribute, publish, sublicense, sell, rent, lease or lend it;
+  5. incorporate it, or any design, decision or text from it, into another
+     work, product, service, training dataset or model;
+  6. remove or alter this notice or any copyright notice in the Work.
+
+Permission
+
+Any use beyond reading the Work on GitHub requires the Owner's prior written
+permission. Permission is granted case by case, may be limited in scope,
+duration or purpose, and may be withdrawn. To ask, open a discussion or
+contact the Owner at:
+
+    Adil Munawar
+    https://github.com/Adilmunawar
+    adilmunawarx@gmail.com
+
+A grant of permission is only valid if it is in writing and signed or sent by
+the Owner. Silence is not permission. Forking the repository on GitHub, starring
+it, or receiving a link to it does not grant permission.
+
+Contributions
+
+By submitting a pull request, patch, issue text or other material to this
+repository, you assign to the Owner all right, title and interest in that
+material, and you confirm that you have the authority to do so. The Owner may
+use, change, relicense or remove contributed material at the Owner's sole
+discretion.
+
+Third party components
+
+The Work refers to, configures and in places bundles third party software that
+is licensed under its own terms (for example Apache-2.0, MIT, MPL-2.0 and
+others). Nothing in this licence changes those terms, and nothing in this
+licence grants any right in those components beyond what their own licences
+grant. This licence covers only the material authored for Argus.
+
+Earlier releases
+
+Versions of this repository published before 1 November 2026 were released
+under the MIT License. Copies obtained under that licence remain subject to
+it. This licence applies to every version published on or after that date.
+
+No warranty
+
+THE WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE
+OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+WORK OR THE USE OR OTHER DEALINGS IN THE WORK.
+
+Enforcement
+
+Any use without permission is an infringement of copyright and may be pursued
+under the laws of any applicable jurisdiction. If any part of this licence is
+held unenforceable, the rest remains in force.

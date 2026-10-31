@@ -2,6 +2,15 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+## [Unreleased]
+
+### Changed
+- **Licence.** The MIT licence is withdrawn for every version from this date on. The repository is now all rights reserved: it may be read on GitHub, and any other use, copy, deployment or derivative requires the author's prior written permission, asked for and granted case by case. `LICENSE`, the README, both `package.json` manifests (`UNLICENSED`), `CITATION.cff`, `CONTRIBUTING.md` and the publish script say so. Copies obtained under the MIT licence before 1 November 2026 keep that licence; this cannot be undone for them, only for what is published from now.
+- Contributions are assigned to the author on submission, stated in `LICENSE` and `CONTRIBUTING.md`.
+
+### Added
+- **Ownership enforcement.** `.github/CODEOWNERS` names the author as owner of every path. `check-ownership.py` runs in the `validate` workflow and fails the build if `LICENSE` differs from its pinned SHA-256, if the ownership text leaves the README, contributing guide or citation, if either manifest stops saying `UNLICENSED`, or if any commit since 1 November 2026 is authored by anyone else or carries a co-author trailer. The `ownership` workflow comments on, closes and locks any pull request opened from another account. The `main` branch is protected against force pushes and deletion.
+
 ## [0.12.0] - 2026-10-11
 
 What the AWS console does that this one did not. Each of these is the Argus equivalent of a service an operator reaches for there, built on the dataset and the policies the console already holds, with the same no-comment code and the same tests.

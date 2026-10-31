@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-message: "If you use Argus in your work, please cite it as below."
+message: "Argus is not open source; use requires the author's written permission. If you have that permission and use Argus in your work, please cite it as below."
 title: "Argus: a sovereign, Windows first private cloud that replaces AWS on owned hardware"
 type: software
 authors:
@@ -8,7 +8,7 @@ authors:
     alias: Adilmunawar
 repository-code: "https://github.com/Adilmunawar/argus"
 url: "https://github.com/Adilmunawar/argus"
-license: MIT
+license-url: "https://github.com/Adilmunawar/argus/blob/main/LICENSE"
 version: 0.12.0
 date-released: 2026-10-11
 keywords:

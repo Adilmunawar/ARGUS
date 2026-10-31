@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "The Argus console API: real host telemetry and real AWS inventory, for managing the estate during and after the AWS exit.",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "type": "commonjs",
   "main": "src/index.js",
   "engines": {

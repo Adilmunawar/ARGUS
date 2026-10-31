@@ -6,7 +6,7 @@ NAME="argus"
 VISIBILITY="--public"
 WEBSITE="https://adilmunawar.vercel.app"
 
-DESCRIPTION="Open source sovereign private cloud blueprint that replaces AWS on hardware you own. Windows Server, Hyper V, Service Fabric, GitOps and zero trust security, with 34 architecture decisions, runbooks, a self hosted stack and a tested web console with browser RDP."
+DESCRIPTION="Sovereign private cloud blueprint (all rights reserved, use by permission) that replaces AWS on hardware you own. Windows Server, Hyper V, Service Fabric, GitOps and zero trust security, with 34 architecture decisions, runbooks, a self hosted stack and a tested web console with browser RDP."
 
 TOPICS="private-cloud,self-hosted,windows-server,hyper-v,service-fabric,active-directory,gitops,infrastructure-as-code,architecture-decision-records,zero-trust,devops,aws-alternative,cloud-migration,disaster-recovery,openbao,seaweedfs,powershell,dotnet,sovereign-cloud,accessibility"
 

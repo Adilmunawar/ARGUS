@@ -53,6 +53,9 @@ jobs:
       - name: No credential has ever been committed
         run: gitleaks git --no-banner --redact --config .github/gitleaks.toml --exit-code 1
 
+      - name: Licence, ownership and single-author invariants hold
+        run: python3 .github/scripts/check-ownership.py
+
       - name: Every YAML and JSON parses
         run: python3 .github/scripts/check-parses.py
 

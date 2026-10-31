@@ -1,0 +1,26 @@
+name: ownership
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  gate:
+    name: Only the owner may change this repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Close pull requests that are not from the owner
+        if: github.event.pull_request.user.login != 'Adilmunawar'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr comment "$PR" --repo "$REPO" --body "Thank you for the interest. Argus is not open source and is changed only by its author. Pull requests from other accounts are closed automatically. If you believe a decision is wrong, open an issue with the *Challenge a decision* template instead. Any use of this repository needs written permission: see LICENSE."
+          gh pr close "$PR" --repo "$REPO"
+          gh pr lock "$PR" --repo "$REPO" --reason resolved
