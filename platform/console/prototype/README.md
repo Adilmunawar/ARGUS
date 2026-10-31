@@ -33,7 +33,7 @@ Every suite runs in headless Chromium against the real rendered DOM. The checks 
 * the shell booting and every screen registering;
 * every route and deep link resolving;
 * axe core WCAG 2.1 and 2.2 A/AA on every screen and every overlay, with the 2.2 target size rule explicitly enabled because axe ships it disabled;
-* a second pass over all fourteen routes in a Windows High Contrast context, where colour contrast is meaningless and is replaced by a check that the five status tones stay distinguishable by border and glyph;
+* a second pass over all fifteen routes in a Windows High Contrast context, where colour contrast is meaningless and is replaced by a check that the five status tones stay distinguishable by border and glyph;
 * real `Tab` traversal with focus ring, focus trap and focus restoration checks;
 * the command palette, table captions and `aria-sort`;
 * a windowed table holding its scroll position and its focused row across a repaint;
@@ -45,6 +45,21 @@ Every suite runs in headless Chromium against the real rendered DOM. The checks 
 * a security pass over the source, determinism, and console errors.
 
 The security suite reads the source rather than the DOM, because the property that matters is that `innerHTML` appears nowhere at all, not that a particular render happened to be safe.
+
+## Running it against the real stack
+
+Served by the console API, the same files run in live mode. The API answers only to a signed-in operator, so the console opens with a sign-in dialog, and the operator pill, the audit actor and the data source pill all follow the session the API holds. A read that comes back 401, because the session idled out, brings the dialog back; signing out ends the session and clears the cookie.
+
+```bash
+cd platform/compose && pwsh -File ./bootstrap.ps1
+docker compose up -d
+```
+
+Then open http://127.0.0.1:8787 and sign in as the operator the bootstrap wrote into `secrets/operators.json`, with the password in `secrets/console_operator_password`. The live suite proves this path on every push without the stack: it starts the API with a temporary operator and drives the sign-in, the fifteen screens, a reload, an expired session and a sign-out through headless Chromium over http:
+
+```bash
+node platform/console/prototype/tests/live.js
+```
 
 ## What it demonstrates
 
@@ -58,7 +73,7 @@ Every screen in the sidebar, and the interaction rules from [the console design]
 
 ## What it is not
 
-There is no reconciler, no Guacamole and no write path. The screens that read the platform itself (data, object storage, stack, security, system and logs) go through the console API when one is running and say so plainly when it is not, rather than inventing a number. The rest are still fixtures shaped by [the application infrastructure map](../../../docs/02-APPLICATION-INFRASTRUCTURE-MAP.md). Opened straight from the filesystem there is no API to reach, which is the state the three suites exercise.
+There is no reconciler, no Guacamole and no write path. The screens that read the platform itself (data, object storage, stack, security, system and logs) go through the console API when one is running and say so plainly when it is not, rather than inventing a number. The rest are still fixtures shaped by [the application infrastructure map](../../../docs/02-APPLICATION-INFRASTRUCTURE-MAP.md). Opened straight from the filesystem there is no API to reach, which is the state three of the four suites exercise; the live suite is the one that starts the API.
 
 These tests prove the interface is sound. They prove nothing about the platform, which remains as [the validation status](../../../docs/09-VALIDATION-STATUS.md) describes it.
 

@@ -9,7 +9,9 @@
     base: '',
     capabilities: null,
     probedAt: null,
-    probeError: null
+    probeError: null,
+    auth: { mode: null, authenticated: false, principal: null },
+    signedOut: false
   };
 
   var inflight = {};
@@ -31,7 +33,9 @@
       lastError: health.lastError,
       reads: health.reads,
       failures: health.failures,
-      stale: stale
+      stale: stale,
+      signedOut: state.signedOut,
+      auth: state.auth
     };
   }
 
@@ -96,6 +100,13 @@
       signal: controller ? controller.signal : undefined
     }).then(function (res) {
       release();
+      if (res.status === 401 && state.auth.mode === 'session') {
+        markSignedOut();
+        return Promise.reject({
+          reason: 'unauthenticated',
+          message: 'The console API wants you to sign in again.'
+        });
+      }
       if (!res.ok) {
         return Promise.reject({
           reason: 'http-' + res.status,
@@ -118,6 +129,31 @@
     });
   }
 
+  function markSignedOut() {
+    var was = state.signedOut;
+    state.signedOut = true;
+    state.auth = { mode: state.auth.mode || 'session', authenticated: false, principal: null };
+    cached = {};
+    if (!was) notify();
+  }
+
+  function readAuth(caps) {
+    var auth = caps && caps.auth ? caps.auth : {};
+    var authenticated = auth.authenticated === true;
+    state.auth = {
+      mode: auth.mode || null,
+      authenticated: authenticated,
+      principal: authenticated ? {
+        subject: auth.subject || '',
+        displayName: auth.displayName || auth.subject || '',
+        roles: auth.roles || [],
+        expiresAt: auth.expiresAt || null,
+        idleExpiresAt: auth.idleExpiresAt || null
+      } : null
+    };
+    state.signedOut = auth.mode === 'session' && !authenticated;
+  }
+
   A.probe = function () {
     if (state.probedAt) return Promise.resolve(state);
     if (window.location.protocol === 'file:') {
@@ -131,6 +167,7 @@
       state.probing = request('/api/capabilities', { timeoutMs: 2500, abortable: false }).then(function (caps) {
         state.mode = MODE.LIVE;
         state.capabilities = caps;
+        readAuth(caps);
         state.probedAt = now();
         health.lastOkAt = now();
         notify();
@@ -158,6 +195,13 @@
       return Promise.resolve({
         ok: false, data: null, mode: MODE.SAMPLE, at: now(),
         error: { reason: 'sample-mode', message: 'The console is running on bundled sample data.' }
+      });
+    }
+
+    if (state.signedOut) {
+      return Promise.resolve({
+        ok: false, data: null, mode: MODE.LIVE, at: now(), stale: false,
+        error: { reason: 'unauthenticated', message: 'Sign in to read this from the console API.' }
       });
     }
 
@@ -407,6 +451,12 @@
         message: 'The console is running on bundled sample data, so nothing is streaming.'
       };
     }
+    if (state.signedOut) {
+      return {
+        reason: 'unauthenticated',
+        message: 'Sign in to follow this from the console API.'
+      };
+    }
     if (typeof window.EventSource !== 'function') {
       return {
         reason: 'no-eventsource',
@@ -492,6 +542,13 @@
   };
 
   A.seriesValues = function (payload) {
+    if (payload && payload.series && payload.series.length && payload.series[0].points) {
+      return payload.series[0].points.map(function (point) {
+        var v = point && point.value;
+        var n = v === null || v === undefined ? NaN : Number(v);
+        return isFinite(n) ? n : null;
+      });
+    }
     var matrix = payload && payload.data && payload.data.result ? payload.data
       : (payload && payload.result ? payload : null);
     var first = matrix && matrix.result && matrix.result[0];
@@ -502,6 +559,75 @@
     });
   };
 
+  function authRequest(path, body) {
+    if (typeof window.fetch !== 'function') {
+      return Promise.reject({ reason: 'no-fetch', message: 'This browser cannot reach the console API.' });
+    }
+    return window.fetch(state.base + path, {
+      method: 'POST',
+      headers: { accept: 'application/json', 'content-type': 'application/json', 'x-argus-console': '1' },
+      cache: 'no-store',
+      credentials: 'same-origin',
+      body: JSON.stringify(body || {})
+    }).then(function (res) {
+      if (res.status === 204 || res.status === 200) return { ok: true, status: res.status };
+      return res.json().then(function (data) {
+        return Promise.reject({
+          reason: (data && data.error) || ('http-' + res.status),
+          status: res.status,
+          retryAfter: Number(res.headers.get('retry-after')) || null,
+          message: (data && data.message) || ('The console API answered ' + res.status + '.')
+        });
+      }, function () {
+        return Promise.reject({
+          reason: 'http-' + res.status, status: res.status,
+          message: 'The console API answered ' + res.status + '.'
+        });
+      });
+    }, function () {
+      return Promise.reject({ reason: 'unreachable', message: 'The console API is not reachable.' });
+    });
+  }
+
+  function reprobe() {
+    state.probedAt = null;
+    state.probing = null;
+    state.probeError = null;
+    cached = {};
+    return A.probe();
+  }
+
+  A.signIn = function (subject, password) {
+    return authRequest('/api/auth/login', { subject: String(subject || ''), password: String(password || '') })
+      .then(function () {
+        state.signedOut = false;
+        return reprobe();
+      }).then(function () {
+        if (state.signedOut) {
+          return Promise.reject({ reason: 'unauthenticated', message: 'The console API did not keep the session. Check that cookies are allowed for this origin.' });
+        }
+        return state.auth;
+      });
+  };
+
+  A.signOut = function () {
+    return authRequest('/api/auth/logout').then(function () { return null; }, function () { return null; }).then(function () {
+      Object.keys(streams).forEach(function (k) { teardownStream(streams[k]); });
+      markSignedOut();
+      return reprobe();
+    });
+  };
+
+  A.useSample = function (why) {
+    state.mode = MODE.SAMPLE;
+    state.signedOut = false;
+    state.probeError = { reason: why || 'chosen', message: 'Bundled sample data, chosen instead of signing in. Nothing here has been measured.' };
+    cached = {};
+    notify();
+  };
+
+  A.auth = function () { return state.auth; };
+  A.reprobe = reprobe;
   A.storeMode = function () { return state.mode; };
   A.capabilities = function () { return state.capabilities; };
   A.storeState = function () { return state; };

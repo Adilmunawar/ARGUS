@@ -196,7 +196,8 @@ foreach ($k in @(
   'ARGUS_S3_PARITY_DENY_SECRET','ARGUS_S3_PARITY_ADMIN_SECRET',
   'ARGUS_PG_APP_PASSWORD','ARGUS_PG_CONSOLE_PASSWORD','ARGUS_PG_EXPORTER_PASSWORD',
   'ARGUS_PG_GUAC_PASSWORD','ARGUS_PG_GRAFANA_PASSWORD','ARGUS_PG_PARITY_PASSWORD',
-  'GARNET_CONSOLE_PASSWORD','NATS_ARGUS_PASSWORD','NATS_AGENT_PASSWORD'
+  'GARNET_CONSOLE_PASSWORD','NATS_ARGUS_PASSWORD','NATS_AGENT_PASSWORD',
+  'CONSOLE_OPERATOR_PASSWORD'
 )) { $gen[$k] = New-HexSecret 24 }
 
 $gen['GUAC_JSON_SECRET_KEY'] = New-HexSecret 16
@@ -387,6 +388,25 @@ if (-not $SkipDigests) {
   Say "wrote images.lock ($($lock.Count - 2) entries, $failed unresolved)"
 }
 
+Head "3b. Console operator"
+
+$nodeExe = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeExe) {
+  Die "node is not on PATH. The console signs operators in with a scrypt record that only the console's own code produces. Install Node 22 or later, then run this again with -Rotate."
+}
+$hashTool = Join-Path $RepoRoot 'platform\console\server\src\auth\hash-password.js'
+if (-not (Test-Path $hashTool)) { Die "$hashTool is missing, so no operator record can be produced." }
+$operatorName = Get-EnvValue 'CONSOLE_OPERATOR'
+if (-not $operatorName) { $operatorName = 'argus-admin' }
+$operatorPassword = Get-EnvValue 'CONSOLE_OPERATOR_PASSWORD'
+if (-not $operatorPassword -or $operatorPassword -eq 'replace-me') { Die "CONSOLE_OPERATOR_PASSWORD was not generated into .env." }
+$record = ($operatorPassword | & $nodeExe.Source $hashTool 2>&1 | Select-Object -Last 1)
+if ($LASTEXITCODE -ne 0 -or -not ("$record" -match '^scrypt\$')) { Die "hash-password.js did not return a scrypt record: $record" }
+$operators = @{ operators = @(@{ subject = $operatorName; displayName = 'Argus operator'; roles = @('operator', 'tier-1'); password = "$record" }) }
+Write-FileSecret 'operators.json' (($operators | ConvertTo-Json -Depth 4) + "`n")
+Write-FileSecret 'console_operator_password' $operatorPassword
+Say "wrote secrets/operators.json  (operator '$operatorName'; the password is in secrets/console_operator_password)"
+
 Head "4. Validating the compose file"
 docker compose config -q 2>&1 | ForEach-Object { Write-Host "    $_" }
 if ($LASTEXITCODE -ne 0) { Die "docker compose config rejected the file. Nothing was started." }
@@ -405,6 +425,7 @@ Write-Host "    docker compose --profile observability up -d    metrics, logs, d
 Write-Host "    docker compose --profile connect up -d          browser RDP/SSH"
 Write-Host ""
 Write-Host "  Then open  http://127.0.0.1:8787" -ForegroundColor Cyan
+Write-Host "  Sign in as '$operatorName' with the password in secrets/console_operator_password."
 Write-Host "  Use the literal 127.0.0.1, not localhost: the publishes are IPv4-only and"
 Write-Host "  Node and Windows both try ::1 first."
 Write-Host ""

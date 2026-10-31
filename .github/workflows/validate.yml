@@ -135,6 +135,13 @@ jobs:
       - name: Accessibility, responsive, density and keyboard suite
         run: node platform/console/prototype/tests/run-tests.js
 
+      - name: Install the console API so the live suite can start it
+        run: npm ci --omit=dev --no-audit --no-fund
+        working-directory: platform/console/server
+
+      - name: Live suite over http against the console API with session sign-in
+        run: node platform/console/prototype/tests/live.js
+
       - name: Full-scale sandbox
         run: node platform/console/prototype/tests/sandbox.js
 
@@ -163,6 +170,7 @@ jobs:
           path: |
             /tmp/argus-console-shots
             /tmp/argus-sandbox-shots
+            /tmp/argus-live-shots
           if-no-files-found: ignore
           retention-days: 14
 

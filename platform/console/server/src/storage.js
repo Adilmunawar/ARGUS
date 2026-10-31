@@ -14,6 +14,8 @@ const MASTER = process.env.ARGUS_SEAWEED_MASTER_URL || 'http://seaweed-master:93
 const FILER = process.env.ARGUS_SEAWEED_FILER_URL || 'http://seaweed-filer:8888';
 const S3_ENDPOINT = process.env.ARGUS_S3_ENDPOINT || 'http://seaweed-s3:8333';
 const S3_REGION = process.env.ARGUS_S3_REGION || 'us-east-1';
+const S3_ACCESS_KEY_ID = process.env.ARGUS_S3_ACCESS_KEY_ID || '';
+const S3_SECRET_ACCESS_KEY = process.env.ARGUS_S3_SECRET_ACCESS_KEY || '';
 const BUCKETS_FILE = process.env.ARGUS_BUCKETS_FILE || '/config/buckets.yaml';
 const STATE_DIR = process.env.ARGUS_STATE_DIR || '/state';
 const TIMEOUT_MS = positiveInt('ARGUS_UPSTREAM_TIMEOUT_MS', 8000);
@@ -88,7 +90,10 @@ function s3() {
       endpoint: S3_ENDPOINT,
       forcePathStyle: true,
       maxAttempts: 2,
-      requestHandler: { requestTimeout: TIMEOUT_MS, connectionTimeout: 3000 }
+      requestHandler: { requestTimeout: TIMEOUT_MS, connectionTimeout: 3000 },
+      ...(S3_ACCESS_KEY_ID && S3_SECRET_ACCESS_KEY
+        ? { credentials: { accessKeyId: S3_ACCESS_KEY_ID, secretAccessKey: S3_SECRET_ACCESS_KEY } }
+        : {})
     });
   }
   return client;

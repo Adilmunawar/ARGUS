@@ -503,9 +503,9 @@
     if (alertBadge) { alertBadge.textContent = open ? String(open) : ''; alertBadge.hidden = !open; }
     if (deployBadge) { deployBadge.textContent = awaiting ? String(awaiting) : ''; deployBadge.hidden = !awaiting; }
     if (bell) {
-      var word = needs ? needs + ' thing' + (needs === 1 ? '' : 's') + ' need' + (needs === 1 ? 's' : '') + ' you, ' + open + ' open alert' + (open === 1 ? '' : 's') : 'Nothing needs you';
+      var word = needs ? needs + ' thing' + (needs === 1 ? '' : 's') + ' need' + (needs === 1 ? 's' : '') + ' you, ' + open + ' open alert' + (open === 1 ? '' : 's') : 'Open inbox, nothing needs you';
       bell.setAttribute('aria-label', word);
-      bell.title = word;
+      bell.title = 'Open inbox';
       var dot = bell.querySelector('.dot');
       if (dot) dot.hidden = !needs;
     }
@@ -1341,13 +1341,16 @@
     if (first) first.focus();
   }
 
-  var MODE_WORD = { live: 'Live', sample: 'Sample data', stale: 'Stale', down: 'API down', unknown: 'Connecting' };
+  var MODE_WORD = { live: 'Live', sample: 'Sample data', stale: 'Stale', down: 'API down', unknown: 'Connecting', signedout: 'Signed out' };
 
   function paintMode(snap) {
     var pill = document.getElementById('modepill');
     if (!pill) return;
     var key, detail;
-    if (snap.mode === 'live' && snap.stale) {
+    if (snap.mode === 'live' && snap.signedOut) {
+      key = 'signedout';
+      detail = 'The console API is there but this browser is not signed in. Nothing live can be read until you sign in.';
+    } else if (snap.mode === 'live' && snap.stale) {
       key = snap.lastOkAt ? 'stale' : 'down';
       detail = 'The console API answered at first but the last read failed' +
         (snap.lastError && snap.lastError.message ? ': ' + snap.lastError.message : '.') +
@@ -1402,6 +1405,11 @@
       },
       actions: function (close) {
         var out = [ui.btn('Close', { variant: 'ghost', onClick: close })];
+        if (snap.auth && snap.auth.authenticated) {
+          out.push(ui.btn('Sign out', { variant: 'ghost', onClick: function () { close(); A.signOutNow(); } }));
+        } else if (snap.mode === 'live' && snap.signedOut) {
+          out.push(ui.btn('Sign in', { variant: 'primary', onClick: function () { close(); A.signInDialog(); } }));
+        }
         if (A.state.route !== 'system') {
           out.push(ui.btn('Open the System screen', { variant: 'primary', onClick: function () { close(); A.go('system'); } }));
         } else {
@@ -1412,6 +1420,131 @@
         }
         return out;
       }
+    });
+  };
+
+  var signInHandle = null;
+
+  function initialsOf(name) {
+    var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+  }
+
+  var sampleMe = null;
+
+  function paintWho(snap) {
+    var who = document.getElementById('whobtn');
+    if (!who) return;
+    var avatar = who.querySelector('.avatar');
+    var name = who.querySelector('.who-text b');
+    var role = who.querySelector('.who-text span');
+    if (!sampleMe) sampleMe = { name: A.data.me.name, upn: A.data.me.upn, text: role ? role.textContent : '' };
+    var principal = snap.auth && snap.auth.authenticated ? snap.auth.principal : null;
+    if (principal) {
+      A.data.me.name = principal.displayName || principal.subject;
+      A.data.me.upn = principal.subject;
+      if (avatar) avatar.textContent = initialsOf(A.data.me.name);
+      if (name) name.textContent = A.data.me.name;
+      if (role) role.textContent = principal.roles && principal.roles.length ? principal.roles.join(' · ') : 'Operator';
+      who.title = 'Signed in as ' + principal.subject;
+    } else {
+      A.data.me.name = sampleMe.name;
+      A.data.me.upn = sampleMe.upn;
+      if (avatar) avatar.textContent = initialsOf(sampleMe.name);
+      if (name) name.textContent = sampleMe.name;
+      if (role) role.textContent = sampleMe.text;
+      who.title = '';
+    }
+  }
+
+  A.signInDialog = function () {
+    if (signInHandle) return signInHandle;
+    if (typeof A.signIn !== 'function') return null;
+    var subject = el('input.field', { type: 'text', id: 'signin-subject', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', placeholder: 'operator' });
+    var password = el('input.field', { type: 'password', id: 'signin-password', autocomplete: 'current-password' });
+    var error = el('p.form-error', { id: 'signin-error', role: 'alert', hidden: true });
+    var busy = false;
+    var go;
+
+    function fail(err) {
+      busy = false;
+      if (go) go.setDisabled(false);
+      error.hidden = false;
+      var text = (err && err.message) || 'Sign-in failed.';
+      if (err && err.retryAfter) text += ' Try again in ' + err.retryAfter + ' seconds.';
+      error.textContent = text;
+      password.value = '';
+      password.focus();
+    }
+
+    function submit(close) {
+      if (busy) return;
+      var s = subject.value.trim();
+      if (!s || !password.value) {
+        error.hidden = false;
+        error.textContent = 'Enter the operator name and the password.';
+        (s ? password : subject).focus();
+        return;
+      }
+      busy = true;
+      if (go) go.setDisabled(true);
+      error.hidden = true;
+      A.signIn(s, password.value).then(function (auth) {
+        signInHandle = null;
+        close();
+        var who = auth && auth.principal ? (auth.principal.displayName || auth.principal.subject) : s;
+        A.announce('Signed in as ' + who);
+        A.flash('ok', 'Signed in', 'Reading the console API as ' + who + '.');
+        A.refresh();
+      }, fail);
+    }
+
+    function onKey(close) {
+      return function (e) { if (e.key === 'Enter') { e.preventDefault(); submit(close); } };
+    }
+
+    signInHandle = A.dialog({
+      title: 'Sign in to the console',
+      locked: true,
+      body: function (close) {
+        subject.addEventListener('keydown', onKey(close));
+        password.addEventListener('keydown', onKey(close));
+        return [
+          el('p', { text: 'This console is served by the Argus API, which answers only to a signed-in operator. Use the operator name and password from the stack bootstrap.' }),
+          el('label.fieldlabel', { for: 'signin-subject', text: 'Operator' }), subject,
+          el('label.fieldlabel', { for: 'signin-password', text: 'Password' }), password,
+          error,
+          el('p.hint', { text: 'Five failed attempts lock the operator for a while. The session ends after thirty minutes idle or eight hours in all.' })
+        ];
+      },
+      actions: function (close) {
+        go = ui.btn('Sign in', { variant: 'primary', onClick: function () { submit(close); } });
+        return [
+          ui.btn('Browse sample data instead', {
+            variant: 'ghost',
+            onClick: function () {
+              signInHandle = null;
+              close();
+              if (typeof A.useSample === 'function') A.useSample('signed-out');
+              A.announce('Showing sample data');
+              A.refresh();
+            }
+          }),
+          go
+        ];
+      }
+    });
+    window.setTimeout(function () { subject.focus(); }, 0);
+    return signInHandle;
+  };
+
+  A.signOutNow = function () {
+    if (typeof A.signOut !== 'function') return;
+    A.signOut().then(function () {
+      A.announce('Signed out');
+      A.flash('info', 'Signed out', 'The console API session has ended.');
+      A.refresh();
     });
   };
 
@@ -1560,7 +1693,13 @@
     var modePill = document.getElementById('modepill');
     if (modePill) {
       modePill.addEventListener('click', function () { A.dataSource(); });
-      if (typeof A.watchStore === 'function') A.watchStore(paintMode);
+      if (typeof A.watchStore === 'function') {
+        A.watchStore(paintMode);
+        A.watchStore(function (snap) {
+          paintWho(snap);
+          if (snap.mode === 'live' && snap.signedOut) A.signInDialog();
+        });
+      }
       if (typeof A.probe === 'function') A.probe();
     }
     document.getElementById('whobtn').addEventListener('click', function () { A.go('identity', ['people']); });

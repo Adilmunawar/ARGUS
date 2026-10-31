@@ -165,6 +165,7 @@
   ];
 
   var SERIES_WINDOW = '6h';
+  var SERIES_WINDOW_MS = 6 * 60 * 60 * 1000;
   var SERIES_POINTS = 220;
 
   function renderSeries(spec) {
@@ -213,7 +214,7 @@
   function seriesPanel(spec) {
     return livePanel(spec.title,
       '/api/metrics/series?name=' + encodeURIComponent(spec.name) +
-        '&window=' + encodeURIComponent(SERIES_WINDOW) + '&points=' + SERIES_POINTS,
+        '&window=' + SERIES_WINDOW_MS + '&points=' + SERIES_POINTS,
       renderSeries(spec),
       { ttlMs: 15000, errorTitle: spec.title + ' could not be read' });
   }

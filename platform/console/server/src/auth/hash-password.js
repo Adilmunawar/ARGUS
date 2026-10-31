@@ -5,6 +5,10 @@ const readline = require('node:readline');
 const hash = require('./hash');
 const authConfig = require('./config');
 
+function clean(line) {
+  return String(line).replace(/^﻿/, '').replace(/\r$/, '');
+}
+
 function readPasswordFromStdin() {
   return new Promise((resolve, reject) => {
     if (process.stdin.isTTY) {
@@ -13,7 +17,7 @@ function readPasswordFromStdin() {
     const rl = readline.createInterface({ input: process.stdin, terminal: false });
     let first = null;
     rl.on('line', (line) => {
-      if (first === null) first = line;
+      if (first === null) first = clean(line);
       rl.close();
     });
     rl.on('close', () => {

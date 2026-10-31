@@ -53,6 +53,19 @@ These are the things most likely to be wrong, in the order they will bite:
 
 The reconciler, every console screen and API endpoint beyond `/health`, every runbook body, the WDAC base policy, the GPO baselines, the Wazuh rule packs, the OpenTofu `shielded-vm` module, every DSC resource named `Argus/*`, the CI signing pipeline. The files that exist are **specifications in executable formats**, not working code.
 
+## Update, 1 November 2026: the local stack runs
+
+The compose stack was brought up for the first time on a real machine (Windows 11, Docker Desktop 29.8, WSL2) and the console was driven against it in a browser. These items move from *Reasoned* or *Not built* to **Verified**:
+
+| Item | How |
+|---|---|
+| 21 compose services reach healthy: SeaweedFS master, volume, filer and S3 gateway, PostgreSQL 17.5 with PostGIS, Garnet, NATS JetStream, OpenBao (sandbox seal), the console API, Prometheus, Alertmanager, Loki, Alloy, Grafana, Mailpit, the socket proxy and the four exporters | `docker compose --profile cache --profile queues --profile secrets --profile observability up -d`, then `docker compose ps` |
+| The console signs an operator in against the API and reads live data on Stack, Data, Object storage, System and Logs | Browser session; the live suite `tests/live.js` repeats the path in CI |
+| Object lock is enforced by the S3 gateway on this build of SeaweedFS, and bypassable through the filer | Measured by `storage-init` at boot and reported on the Object storage screen |
+| Prometheus scrapes all 13 targets; Loki receives container logs from every service through Alloy | Prometheus and Loki APIs, and the Logs screen tailing twenty containers |
+
+Seven defects that stopped the stack or the console are listed under *Fixed* in the changelog for this date. None of them was visible from the sandbox the plan was written in. The platform claims in the rest of this document are unchanged: nothing here touches Windows Server, Hyper-V, Service Fabric or Active Directory.
+
 ## What would change this document
 
 Phase 0's exit gate is the first real test. After it, this file is rewritten with what actually happened, including the assumptions that turned out wrong. That rewrite is more valuable than the original plan.

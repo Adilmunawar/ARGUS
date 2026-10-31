@@ -14,6 +14,7 @@ obj/
 platform/console/prototype/tests/last-run.json
 platform/console/prototype/tests/sandbox-last-run.json
 platform/console/prototype/tests/stress-last-run.json
+platform/console/prototype/tests/live-last-run.json
 
 # Compose file-secrets: extensionless, so *.key and *.pem do not cover them.
 platform/compose/secrets/

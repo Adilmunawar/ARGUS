@@ -98,7 +98,7 @@
   }
 
   function needsYouRow(text, link) {
-    return el('div.row', [el('span', { text: text }), link]);
+    return el('div.feed-row', [el('span', { text: text }), link]);
   }
 
   function heroBand() {
@@ -219,6 +219,14 @@
 
   function needsYouCard() {
     var items = typeof A.needsYou === 'function' ? A.needsYou() : [];
+    var shown = openAlerts().filter(function (a) { return a.severity === 'critical'; })[0];
+    if (shown) {
+      var skipped = false;
+      items = items.filter(function (it) {
+        if (!skipped && it.kind === 'Alert' && it.label === 'Open ' + shown.id) { skipped = true; return false; }
+        return true;
+      });
+    }
     var SHOW = 6;
     var rows = items.slice(0, SHOW).map(function (it) {
       return needsYouRow(it.kind + ': ' + it.text, A.link(it.label, it.route, it.rest, it.params));
@@ -240,7 +248,7 @@
 
   function activityCard() {
     var rows = d.audit.slice(0, 8).map(function (row) {
-      return el('div.row', [
+      return el('div.feed-row', [
         el('span', { text: auditSentence(row) }),
         fmt.time(row.at)
       ]);
@@ -293,11 +301,7 @@
             ['Link checks', linkHistory(s)]
           ])
         ]);
-      })),
-      el('p.hint', {
-        text: 'Every figure on this screen, these link checks included, comes from the bundled sample ' +
-          'dataset. Nothing here has been measured. The Stack screen reads the live estate.'
-      })
+      }))
     ]);
   }
 
@@ -342,17 +346,10 @@
     title: 'Overview',
     crumb: 'Overview',
     render: function (mount) {
-      var healthy = countBy(d.apps, function (app) { return app.health === 'ok'; });
-      var open = openAlerts();
-      var awaiting = awaitingDeployments();
-      var summary =
-        fmt.num(healthy) + ' of ' + fmt.num(d.apps.length) + ' applications healthy, ' +
-        fmt.num(open.length) + ' open alert' + (open.length === 1 ? '' : 's') + ', ' +
-        fmt.num(awaiting.length) + ' deployment' + (awaiting.length === 1 ? '' : 's') +
-        ' waiting for a person.';
+      var summary = 'Figures as of ' + fmt.stamp(new Date(d.now)) + '. The tiles below link to each screen.';
 
       mount.appendChild(ui.pageHeader('Overview', summary, [
-        ui.btn('Run a runbook', {
+        ui.btn('Open runbooks', {
           variant: 'ghost',
           onClick: function () { A.go('ops'); }
         })

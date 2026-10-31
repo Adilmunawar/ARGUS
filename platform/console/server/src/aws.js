@@ -52,7 +52,13 @@ function classify(err) {
       message: 'No AWS credentials were found. Configure a profile, an SSO session, or an instance role.'
     };
   }
-  if (/ExpiredToken|InvalidClientTokenId|TokenRefreshRequired/i.test(name)) {
+  if (/InvalidClientTokenId|InvalidAccessKeyId|SignatureDoesNotMatch/i.test(name)) {
+    return {
+      reason: 'invalid',
+      message: 'AWS does not recognise the access key this console was given. It is not an AWS key, or it was revoked.'
+    };
+  }
+  if (/ExpiredToken|TokenRefreshRequired/i.test(name)) {
     return { reason: 'expired', message: 'The AWS credentials have expired. Sign in again.' };
   }
   if (/AccessDenied|UnauthorizedOperation|AuthFailure|Forbidden/i.test(name)) {

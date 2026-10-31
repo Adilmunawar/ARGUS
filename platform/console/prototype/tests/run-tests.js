@@ -2506,7 +2506,7 @@ async function axeOn(page, label, suite, opts) {
     const badge = document.getElementById('nav-advisor-badge').textContent;
     const urgent = findings.filter(f => f.severity === 'critical' || f.severity === 'high').length;
     const target = findings.find(f => f.id === 'patch-hv-03');
-    const accept = [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Accept risk on patch-hv-03');
+    const accept = [...document.querySelectorAll('#main button')].find(b => b.getAttribute('aria-label') === 'Accept risk on patch-hv-03');
     accept.click();
     await new Promise(r => setTimeout(r, 120));
     const why = document.getElementById('suppress-why');

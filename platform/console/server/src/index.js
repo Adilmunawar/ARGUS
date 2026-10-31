@@ -475,6 +475,8 @@ async function serveStatic(req, res, pathname) {
     res.writeHead(200, {
       'content-type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream',
       'content-length': stat.size,
+      'cache-control': 'no-cache',
+      'last-modified': stat.mtime.toUTCString(),
       'x-content-type-options': 'nosniff'
     });
     pipeline(fs.createReadStream(target), res, (err) => {

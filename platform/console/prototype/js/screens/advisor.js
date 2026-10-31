@@ -306,11 +306,16 @@
         {
           key: 'actions', label: 'Actions', sortable: false,
           render: function (f) {
-            return el('div.row', [
-              A.link('Go to ' + f.resource, f.route, f.rest, f.params),
+            var open = A.link('Open', f.route, f.rest, f.params);
+            open.setAttribute('aria-label', 'Go to ' + f.resource);
+            open.title = 'Go to ' + f.resource;
+            var accept = ui.btn('Accept risk', { variant: 'ghost', title: 'Accept risk on ' + f.id + ' for a fixed time with a reason', onClick: function () { suppressDialog(f, function () { A.refresh(); }); } });
+            accept.setAttribute('aria-label', 'Accept risk on ' + f.id);
+            return el('div.row.cell-actions', [
+              open,
               f.suppressed
                 ? ui.btn('Reopen ' + f.id, { variant: 'ghost', onClick: function () { unsuppress(f, function () { A.refresh(); }); } })
-                : ui.btn('Accept risk on ' + f.id, { variant: 'ghost', title: 'Accept this finding for a fixed time with a reason', onClick: function () { suppressDialog(f, function () { A.refresh(); }); } })
+                : accept
             ]);
           }
         }

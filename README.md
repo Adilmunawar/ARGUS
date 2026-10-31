@@ -56,7 +56,7 @@ Cloud repatriation is now a mainstream decision, yet almost nothing public shows
 * An **Argus PowerShell module** for scripting secrets, storage, queues, logs, metrics and alerts.
 
 ### A web console benchmarked against AWS, GCP and Azure
-* Fourteen screens, a command palette, sortable and token filtered tables, and **recorded browser RDP and SSH** in a drawer that survives navigation.
+* Fifteen screens, a command palette, sortable and token filtered tables, and **recorded browser RDP and SSH** in a drawer that survives navigation.
 * **Just in time elevation** with a countdown, and the GitOps reconciler's plan and blast radius shown before any change is approved.
 * **Every action carries state.** Approve, reject, grant, revoke, rotate or promote, and the next screen, the audit trail and the navigation counts all change. Reversible actions offer Undo.
 * **Shareable views.** The tab and filter live in the URL, and views can be saved by name.

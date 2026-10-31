@@ -72,11 +72,13 @@ services:
     <<: *seaweed
     restart: "no"
     container_name: argus-seaweed-config
+    cap_add: [CHOWN]
     entrypoint: ["/bin/sh", "-euc"]
     command:
       - |
         umask 077
-        : "$${ARGUS_S3_ADMIN_SECRET:?empty}"
+        : "${ARGUS_S3_ADMIN_SECRET:?empty}"
+        rm -f /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
         cat > /etc/seaweedfs/filer.toml <<'TOML'
         [leveldb2]
         enabled = true
@@ -122,7 +124,9 @@ services:
             "actions": ["Admin"] }
         ] }
         JSON
-        echo "wrote filer.toml and s3.json"
+        chmod 0400 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
+        chown 1000:1000 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
+        echo "wrote filer.toml and s3.json, readable by root and by the console user"
     environment:
       ARGUS_S3_ADMIN_SECRET:       ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
       ARGUS_S3_CONSOLE_SECRET:     ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
@@ -493,7 +497,7 @@ services:
       args:
         NODE_TAG: ${NODE_TAG:-22-bookworm-slim}
     container_name: argus-console
-    networks: [argus]
+    networks: [argus, argus_socket]
     logging: *logging
     read_only: true
     tmpfs: ["/tmp:size=16m,mode=1777"]
@@ -504,14 +508,19 @@ services:
       ARGUS_PORT: "8787"
       ARGUS_ALLOW_WRITES: ${ARGUS_ALLOW_WRITES:-0}
       ARGUS_WEB_ROOT: ../../prototype
+      ARGUS_AUTH: session
+      ARGUS_AUTH_OPERATORS_FILE: /config/operators.json
+      ARGUS_AUTH_SECURE_COOKIES: ${ARGUS_AUTH_SECURE_COOKIES:-0}
+      ARGUS_DOCKER_PROXY_URL: ${ARGUS_DOCKER_PROXY_URL:-http://docker-socket-proxy:2375}
       ARGUS_SEAWEED_MASTER_URL: http://seaweed-master:9333
       ARGUS_SEAWEED_FILER_URL: http://seaweed-filer:8888
       ARGUS_S3_ENDPOINT: http://seaweed-s3:8333
       ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
       ARGUS_BUCKETS_FILE: /config/buckets.yaml
       ARGUS_STATE_DIR: /state
-      AWS_ACCESS_KEY_ID: argus-console
-      AWS_SECRET_ACCESS_KEY: ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_ACCESS_KEY_ID: argus-console
+      AWS_EC2_METADATA_DISABLED: "true"
+      ARGUS_S3_SECRET_ACCESS_KEY: ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       ARGUS_PG_HOST: postgres
@@ -538,6 +547,7 @@ services:
     volumes:
       - ../gitops:/config/gitops:ro
       - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
+      - ./secrets/operators.json:/config/operators.json:ro
       - argus_console_state:/state:ro
     ports: ["127.0.0.1:${CONSOLE_PORT:-8787}:8787"]
     mem_limit: 320m
@@ -576,7 +586,7 @@ services:
     volumes:
       - argus_prometheus_data:/prometheus
       - ./services/observability/prometheus:/etc/prometheus:ro
-      - ../gitops:/etc/prometheus/gitops:ro
+      - ../gitops:/gitops:ro
     ports: ["127.0.0.1:9090:9090"]
     mem_limit: 1536m
     pids_limit: 256
@@ -710,7 +720,7 @@ services:
       INFO: "1"
       POST: "0"
       EXEC: "0"
-      NETWORKS: "0"
+      NETWORKS: "1"
       VOLUMES: "0"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -786,7 +796,7 @@ services:
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
-      - /:/rootfs:ro,rslave
+      - /:/rootfs:ro
     read_only: true
     cap_drop: [ALL]
     mem_limit: 64m
