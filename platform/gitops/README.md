@@ -1,6 +1,6 @@
 # GitOps desired state
 
-This directory is the *template* of the private `ZaraatDost/argus-gitops` repository (ADR 0021 and ADR 0023). Its `main` branch is production. Only the reconciler writes to systems; humans write here.
+This directory is the *template* of the private `example-org/argus-gitops` repository (ADR 0021 and ADR 0023). Its `main` branch is production. Only the reconciler writes to systems; humans write here.
 
 ## What CI enforces
 

@@ -16,5 +16,5 @@ module "sql_01" {
   replica  = { target_cluster = "argus-hvc-b", frequency_seconds = 300 }
   dsc_role = "sql-node"
   gmsa     = "gmsa-sql$"
-  tags     = { tier = "1", app = "mills,loan,console" }
+  tags     = { tier = "1", app = "orders,billing,console" }
 }

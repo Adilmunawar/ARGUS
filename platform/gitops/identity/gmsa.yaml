@@ -2,9 +2,9 @@ apiVersion: argus/v1
 kind: ServiceAccounts
 accounts:
   - { name: gmsa-sf$,          hosts: [sf-01, sf-02, sf-03, sf-04, sf-05], tier: 1 }
-  - { name: gmsa-mills$,       hosts: [sf-*],  tier: 1, sql: [umairv3_db, FarmerFacilitatorDb], s3: [argus-survey-pictures:r] }
-  - { name: gmsa-mills-jobs$,  hosts: [sf-*],  tier: 1, sql: [umairv3_db], s3: [argus-survey-pictures:rw] }
-  - { name: gmsa-loan$,        hosts: [sf-*],  tier: 1, sql: [FarmerFacilitatorDb] }
+  - { name: gmsa-orders$,       hosts: [sf-*],  tier: 1, sql: [orders_db, billing_db], s3: [argus-uploads:r] }
+  - { name: gmsa-orders-jobs$,  hosts: [sf-*],  tier: 1, sql: [orders_db], s3: [argus-uploads:rw] }
+  - { name: gmsa-billing$,        hosts: [sf-*],  tier: 1, sql: [billing_db] }
   - { name: gmsa-console$,     hosts: [sf-*],  tier: 1, sql: [ArgusConsole] }
   - { name: gmsa-reconciler$,  hosts: [sf-*],  tier: 0, notes: "SF cluster admin; JEA to hv-*; SeaweedFS admin; OpenBao policy-admin" }
   - { name: gmsa-sql$,         hosts: [sql-01, sql-02], tier: 1 }
@@ -17,4 +17,4 @@ accounts:
   - { name: svc-ml,            hosts: [gpu-01], tier: 1, kind: linux-sssd, s3: [argus-sentinel:rw, argus-ml:rw, argus-rasters:rw] }
   - { name: gmsa-loki$,        hosts: [sf-*], tier: 1, s3: [argus-logs:rw] }
   - { name: gmsa-geo$,         hosts: [sf-*], tier: 1, sql: [argus_geo, pgstac], s3: [argus-rasters:r, argus-sentinel:r] }
-  - { name: gmsa-agis$,        hosts: [sf-*], tier: 1, sql: [argus_geo], s3: [argus-rasters:r] }
+  - { name: gmsa-maps$,        hosts: [sf-*], tier: 1, sql: [argus_geo], s3: [argus-rasters:r] }

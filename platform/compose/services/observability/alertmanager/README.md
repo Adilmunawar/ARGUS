@@ -75,7 +75,7 @@ To add the console back once it can accept the POST: give the console the route,
 
 `time_intervals` is the 0.28 top level key. The older `mute_time_intervals` top level is deprecated; the per route keys are still spelled `mute_time_intervals` and `active_time_intervals`. Only the definition list was renamed, and getting that backwards is the usual 0.28 mistake.
 
-`location: Asia/Karachi` matches the `TZ` the postgres and mailpit services are given.
+`location: UTC` matches the `TZ` the postgres and mailpit services are given.
 
 ## Inhibitions
 

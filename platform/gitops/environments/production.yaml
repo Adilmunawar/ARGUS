@@ -2,7 +2,7 @@ apiVersion: argus/v1
 kind: Environment
 name: production
 apps:
-  mills:   { version: 2026.09.08.1, sha256: "<filled by CI>" }
-  loan:    { version: 2026.09.01.3, sha256: "<filled by CI>" }
+  orders:   { version: 2026.09.08.1, sha256: "<filled by CI>" }
+  billing:    { version: 2026.09.01.3, sha256: "<filled by CI>" }
   console: { version: 0.1.0,        sha256: "<filled by CI>" }
   caddy:   { version: 2.10.0,       sha256: "<catalogued>" }

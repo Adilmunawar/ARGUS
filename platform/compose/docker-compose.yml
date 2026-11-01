@@ -91,7 +91,7 @@ services:
             "actions": ["Admin","Read","Write","List","Tagging"] },
           { "name": "argus-console",
             "credentials": [{ "accessKey": "argus-console", "secretKey": "$${ARGUS_S3_CONSOLE_SECRET}" }],
-            "actions": ["Read:argus-survey-pictures","List:argus-survey-pictures","Write:argus-survey-pictures",
+            "actions": ["Read:argus-uploads","List:argus-uploads","Write:argus-uploads",
               "Read:argus-rasters","List:argus-rasters","Write:argus-rasters",
               "Read:argus-sentinel","List:argus-sentinel","Write:argus-sentinel",
               "Read:argus-ml","List:argus-ml","Write:argus-ml",
@@ -101,7 +101,7 @@ services:
               "Read:argus-sessions","List:argus-sessions","Write:argus-sessions"] },
           { "name": "argus-app",
             "credentials": [{ "accessKey": "argus-app", "secretKey": "$${ARGUS_S3_APP_SECRET}" }],
-            "actions": ["Read:argus-survey-pictures","Write:argus-survey-pictures","List:argus-survey-pictures",
+            "actions": ["Read:argus-uploads","Write:argus-uploads","List:argus-uploads",
                         "Read:argus-rasters","Write:argus-rasters","List:argus-rasters",
                         "Read:argus-ml","Write:argus-ml","List:argus-ml",
                         "Read:argus-sentinel","Write:argus-sentinel","List:argus-sentinel",
@@ -288,7 +288,7 @@ services:
       - -c
       - huge_pages=off
     environment:
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       PGDATA: /var/lib/postgresql/data/pgdata
       POSTGRES_USER: postgres
       POSTGRES_DB: postgres
@@ -503,7 +503,7 @@ services:
     tmpfs: ["/tmp:size=16m,mode=1777"]
     cap_drop: [ALL]
     environment:
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       ARGUS_HOST: "0.0.0.0"
       ARGUS_PORT: "8787"
       ARGUS_ALLOW_WRITES: ${ARGUS_ALLOW_WRITES:-0}
@@ -637,7 +637,7 @@ services:
     networks: [argus]
     logging: *logging
     environment:
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       MP_SMTP_BIND_ADDR: 0.0.0.0:1025
       MP_UI_BIND_ADDR: 0.0.0.0:8025
       MP_MAX_MESSAGES: "2000"
@@ -996,7 +996,7 @@ services:
     environment:
       PUID: "1000"
       PGID: "1000"
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       USER_NAME: argusops
       SUDO_ACCESS: "false"
       PASSWORD_ACCESS: "true"
@@ -1015,7 +1015,7 @@ services:
     environment:
       PUID: "1000"
       PGID: "1000"
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
     mem_limit: 1024m
     pids_limit: 1024
     shm_size: 512m
@@ -1085,7 +1085,7 @@ services:
     tmpfs: ["/tmp:size=32m,mode=1777"]
     cap_drop: [ALL]
     environment:
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       NODE_PATH: /opt/argus/sdk
       ARGUS_PARITY_BIND: "0.0.0.0"
       ARGUS_PARITY_PORT: "9781"
@@ -1141,7 +1141,7 @@ services:
     networks: [argus]
     logging: *logging
     environment:
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       SERVICES: s3
       DEBUG: ${ARGUS_PARITY_REFERENCE_DEBUG:-0}
       EAGER_SERVICE_LOADING: "1"
@@ -1171,7 +1171,7 @@ services:
     logging: *logging
     init: true
     environment:
-      TZ: ${TZ:-Asia/Karachi}
+      TZ: ${TZ:-UTC}
       PGHOST: postgres
       PGDATABASE: argus_parity
       PGUSER: argus_parity

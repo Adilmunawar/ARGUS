@@ -1,39 +1,39 @@
 apiVersion: argus/v1
 kind: ServiceFabricApp
 metadata:
-  name: loan
-  display: Farmer Loan API
-  owner: zayan
-  repo: Zarz001/Zaraat-Dost-Loan-By-Zayan
+  name: billing
+  display: Billing API
+  owner: riley
+  repo: example-org/billing
   tier: 1
 spec:
   package:
     bucket: argus-artifacts
-    key: loan/{{ version }}.sfpkg
+    key: billing/{{ version }}.sfpkg
     signature: authenticode
-  identity: gmsa-loan$
+  identity: gmsa-billing$
   services:
-    - name: LoanApi
+    - name: BillingApi
       type: GuestExecutable
-      exe: Loan.Api.exe
+      exe: Billing.Api.exe
       instances: 2
       endpoints: [{ name: http, port: 5160 }]
       env:
         ASPNETCORE_URLS: http://0.0.0.0:5160
-        ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=FarmerFacilitatorDb;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;Application Name=LoanApi;"
+        ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=billing_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;Application Name=BillingApi;"
         Cache__Redis: garnet.argus.local:6379,ssl=true
         Nats__Url: nats://nats.argus.local:4222
-        SurveyImages__S3Bucket: argus-survey-pictures
-        SurveyImages__S3Prefix: loans/
+        SurveyImages__S3Bucket: argus-uploads
+        SurveyImages__S3Prefix: billing/
         OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.argus.local:4318
       resources: { cpuCores: 2, memoryMiB: 2048 }
   ingress:
-    host: loans.zaraatdost.pk
-    upstream: LoanApi
+    host: billing.example.com
+    upstream: BillingApi
     waf: owasp-crs
     rateLimit: { perIpPerMinute: 300 }
   health:
-    probe: { path: /api/v1/health, upstream: LoanApi, intervalSeconds: 10 }
+    probe: { path: /api/v1/health, upstream: BillingApi, intervalSeconds: 10 }
     upgradePolicy:
       failureAction: Rollback
       healthCheckStableDurationSeconds: 120

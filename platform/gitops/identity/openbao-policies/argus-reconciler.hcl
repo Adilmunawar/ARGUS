@@ -1,8 +1,8 @@
-path "argus-kv/data/mills/*" {
+path "argus-kv/data/orders/*" {
   capabilities = ["read"]
 }
 
-path "argus-kv/metadata/mills/*" {
+path "argus-kv/metadata/orders/*" {
   capabilities = ["read", "list"]
 }
 

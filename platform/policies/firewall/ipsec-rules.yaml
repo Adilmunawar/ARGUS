@@ -4,10 +4,10 @@ default: deny-unauthenticated-inbound
 authentication: [kerberos-machine, certificate:Argus-Issuing-CA]
 encryption: aes256-gcm
 rules:
-  - { to: "sql-01,sql-02",       port: 1433,  from: [gmsa-mills$, gmsa-mills-jobs$, gmsa-loan$, gmsa-console$, gmsa-backup$, gmsa-restore$, svc-ml, "grafana:sql-02-only"] }
-  - { to: pg-01,                 port: 5432,  from: [gmsa-geo$, svc-ml, gmsa-console$, gmsa-backup$, gmsa-agis$] }
+  - { to: "sql-01,sql-02",       port: 1433,  from: [gmsa-orders$, gmsa-orders-jobs$, gmsa-billing$, gmsa-console$, gmsa-backup$, gmsa-restore$, svc-ml, "grafana:sql-02-only"] }
+  - { to: pg-01,                 port: 5432,  from: [gmsa-geo$, svc-ml, gmsa-console$, gmsa-backup$, gmsa-maps$] }
   - { to: "sw-master-*",         port: 8333,  from: [PLATFORM, ML, "BUILD:argus-artifacts-only", gmsa-backup$] }
-  - { to: garnet,                port: 6379,  from: [gmsa-mills$, gmsa-loan$, gmsa-console$] }
+  - { to: garnet,                port: 6379,  from: [gmsa-orders$, gmsa-billing$, gmsa-console$] }
   - { to: nats,                  port: 4222,  from: [PLATFORM, ML] }
   - { to: openbao,               port: 8200,  from: [PLATFORM, ML, BUILD, gmsa-reconciler$] }
   - { to: "dc-*",                port: [53, 88, 389, 636, 445, 135, "49152-65535"], from: [ALL-DOMAIN-MEMBERS] }
@@ -18,4 +18,4 @@ rules:
   - { to: "sf-*",                port: [19000, 19080, "1025-1027"], from: [gmsa-sf$, gmsa-reconciler$, ADMIN-VPN] }
   - { to: "hv-*",                port: 5986,  from: ["gmsa-reconciler$:JEA", "ADMIN-VPN:PAW"] }
   - { to: gpu-01,                port: [8265, 10001], from: [gmsa-caddy$, ADMIN-VPN] }
-  - { to: legacy-landsurvey-01,  port: 443,   from: [gmsa-caddy$, gmsa-mills$] }
+  - { to: legacy-landsurvey-01,  port: 443,   from: [gmsa-caddy$, gmsa-orders$] }

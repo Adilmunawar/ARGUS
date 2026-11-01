@@ -1,0 +1,17 @@
+groups:
+  - name: orders
+    rules:
+      - alert: OrdersHigh5xx
+        expr: sum(rate(yarp_requests_total{app="orders",code=~"5.."}[5m])) / sum(rate(yarp_requests_total{app="orders"}[5m])) > 0.01
+        for: 5m
+        labels: { severity: page, app: orders }
+      - alert: OrdersSlowP95
+        expr: histogram_quantile(0.95, sum(rate(http_server_request_duration_seconds_bucket{app="orders"}[5m])) by (le)) > 1
+        for: 10m
+        labels: { severity: page, app: orders }
+      - alert: OrdersPrecomputeOverrun
+        expr: time() - argus_functions_last_success_timestamp{function="orders-precompute"} > 5400
+        labels: { severity: page, app: orders }
+      - alert: SamDbBackupStale
+        expr: time() - argus_sql_last_log_backup_timestamp{database="orders_db"} > 1800
+        labels: { severity: page, app: orders }

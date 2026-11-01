@@ -1,45 +1,45 @@
 apiVersion: argus/v1
 kind: ServiceFabricApp
 metadata:
-  name: mills
-  owner: zayan
-  repo: Zarz001/Mills-Restructured-by-Zayan
+  name: orders
+  owner: riley
+  repo: example-org/orders
   tier: 1
 spec:
   package:
     bucket: argus-artifacts
-    key: mills/{{ version }}.sfpkg
+    key: orders/{{ version }}.sfpkg
     signature: authenticode
-  identity: gmsa-mills$
+  identity: gmsa-orders$
   services:
-    - name: MillsGateway
+    - name: OrdersGateway
       type: GuestExecutable
-      exe: MillsDashboard.Gateway.exe
+      exe: OrdersDashboard.Gateway.exe
       instances: 2
       endpoints: [{ name: http, port: 5140 }]
       env:
         ASPNETCORE_URLS: http://0.0.0.0:5140
         ReverseProxy__Clusters__api__Destinations__api__Address: http://localhost:5141/
         ReverseProxy__Clusters__web__Destinations__web__Address: http://localhost:3100/
-    - name: MillsApi
+    - name: OrdersApi
       type: GuestExecutable
-      exe: MillsDashboard.Api.exe
+      exe: OrdersDashboard.Api.exe
       instances: 3
       endpoints: [{ name: http, port: 5141 }]
       env:
         ASPNETCORE_URLS: http://0.0.0.0:5141
-        ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=umairv3_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;MultipleActiveResultSets=False;Min Pool Size=5;Packet Size=32767;Connect Timeout=30;Application Name=MillsDashboardApi;"
-        ConnectionStrings__Finance: "Server=sql-01.argus.local,1433;Database=FarmerFacilitatorDb;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;"
-        Jwt__SigningKey: "{{ openbao:kv/mills/jwt-signing-key#value }}"
-        LegacyJwt__SigningKey: "{{ openbao:kv/mills/legacy-jwt#value }}"
-        Ai__ApiKey: "{{ openbao:kv/mills/anthropic#value }}"
+        ConnectionStrings__Default: "Server=sql-01.argus.local,1433;Database=orders_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;MultipleActiveResultSets=False;Min Pool Size=5;Packet Size=32767;Connect Timeout=30;Application Name=OrdersDashboardApi;"
+        ConnectionStrings__Finance: "Server=sql-01.argus.local,1433;Database=billing_db;Integrated Security=true;Encrypt=True;TrustServerCertificate=False;"
+        Jwt__SigningKey: "{{ openbao:kv/orders/jwt-signing-key#value }}"
+        LegacyJwt__SigningKey: "{{ openbao:kv/orders/legacy-jwt#value }}"
+        Ai__ApiKey: "{{ openbao:kv/orders/anthropic#value }}"
         OpenRouteService__BaseUrl: http://ors.argus.local:8082/ors
         Cache__Redis: garnet.argus.local:6379,ssl=true
         Nats__Url: nats://nats.argus.local:4222
-        SurveyImages__S3Bucket: argus-survey-pictures
+        SurveyImages__S3Bucket: argus-uploads
         OTEL_EXPORTER_OTLP_ENDPOINT: http://otel.argus.local:4318
       resources: { cpuCores: 2, memoryMiB: 4096 }
-    - name: MillsWeb
+    - name: OrdersWeb
       type: GuestExecutable
       exe: node.exe
       args: server.js
@@ -48,16 +48,16 @@ spec:
       env:
         PORT: "3100"
         HOSTNAME: 0.0.0.0
-        MILLS_API_BASE: http://localhost:5141/api/v1
-        EE_BASE64_KEY: "{{ openbao:kv/mills/ee-service-key#value }}"
+        ORDERS_API_BASE: http://localhost:5141/api/v1
+        EE_BASE64_KEY: "{{ openbao:kv/orders/ee-service-key#value }}"
         HTTPS_PROXY: http://egress.argus.local:3128
   ingress:
-    host: mills.zaraatdost.pk
-    upstream: MillsGateway
+    host: orders.example.com
+    upstream: OrdersGateway
     waf: owasp-crs
     rateLimit: { perIpPerMinute: 600 }
   health:
-    probe: { path: /api/v1/health, upstream: MillsApi, intervalSeconds: 10 }
+    probe: { path: /api/v1/health, upstream: OrdersApi, intervalSeconds: 10 }
     upgradePolicy:
       failureAction: Rollback
       healthCheckStableDurationSeconds: 120

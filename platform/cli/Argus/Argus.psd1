@@ -2,9 +2,9 @@
     RootModule           = 'Argus.psm1'
     ModuleVersion        = '0.3.0'
     GUID                 = '5f1c9a2e-3b7d-4c8a-9e21-7d0c1f6a8b44'
-    Author               = 'Zaraat Dost Platform'
-    CompanyName          = 'Zaraat Dost'
-    Copyright            = 'Zaraat Dost Platform'
+    Author               = 'Adil Munawar'
+    CompanyName          = 'Adil Munawar'
+    Copyright            = '(c) 2026 Adil Munawar. All rights reserved.'
     Description          = 'PowerShell client for the Argus console API. It reads the estate the console reads; the console is read-only unless ARGUS_ALLOW_WRITES is set on the server, and this module has no privileges the signed-in operator does not.'
 
     PowerShellVersion    = '5.1'
@@ -56,7 +56,7 @@
     PrivateData          = @{
         PSData = @{
             Tags         = @('Argus', 'Console', 'SelfHosted', 'Windows', 'Operations')
-            ProjectUri   = 'https://github.com/zaraatdost/argus'
+            ProjectUri   = 'https://github.com/Adilmunawar/argus'
             ReleaseNotes = 'Parity with the console route table as it now stands, including the live search index and the console own-metrics exposition, and a page cap on the only route that pages.'
         }
     }

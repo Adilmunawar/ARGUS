@@ -14,8 +14,8 @@ rule_files:
   - /etc/prometheus/rules/*.rules.yaml
   - /gitops/apps/caddy/*alerts.yaml
   - /gitops/apps/console/*alerts.yaml
-  - /gitops/apps/loan/*alerts.yaml
-  - /gitops/apps/mills/*alerts.yaml
+  - /gitops/apps/billing/*alerts.yaml
+  - /gitops/apps/orders/*alerts.yaml
 
 alerting:
   alert_relabel_configs:

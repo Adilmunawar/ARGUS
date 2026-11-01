@@ -268,7 +268,7 @@ while IFS='|' read -r stream cname filter ackwait maxdel bmin bmax bsteps desc; 
   case "$stream" in ''|'#'*) continue ;; esac
   create_consumer "$stream" "$cname" "$filter" "$ackwait" "$maxdel" "$bmin" "$bmax" "$bsteps" "$desc"
 done <<'CONSUMERS'
-ARGUS_INGEST|mills-ingest-worker|argus.ingest.mills.>|5m|5|5m|20m|5|Shapefile ingest. ack_wait 5m because a large parcel set genuinely takes minutes; a longer job must send in-progress acks rather than raise this.
+ARGUS_INGEST|orders-ingest-worker|argus.ingest.orders.>|5m|5|5m|20m|5|Shapefile ingest. ack_wait 5m because a large region set genuinely takes minutes; a longer job must send in-progress acks rather than raise this.
 ARGUS_EXPORT|export-worker|argus.export.>|2m|4|2m|10m|4|Export generation.
 ARGUS_PIPELINE|pipeline-runner|argus.pipeline.>|2m|4|2m|10m|4|Pipeline step execution.
 ARGUS_SENTINEL|scene-indexer|argus.sentinel.scene.>|1m|3|1m|5m|3|STAC/pgstac indexing of a landed scene.

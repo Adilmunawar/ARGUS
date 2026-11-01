@@ -1,14 +1,14 @@
 apiVersion: argus/v1
 kind: BucketSet
 buckets:
-  - name: argus-survey-pictures
-    owner: gmsa-mills-jobs$
-    readers: [gmsa-mills$, gmsa-loan$]
+  - name: argus-uploads
+    owner: gmsa-orders-jobs$
+    readers: [gmsa-orders$, gmsa-billing$]
     versioning: true
     backup: { tool: kopia, schedule: daily, target: argus-backups/kopia/pictures }
   - name: argus-rasters
     owner: svc-ml
-    readers: [gmsa-geo$, gmsa-agis$]
+    readers: [gmsa-geo$, gmsa-maps$]
     backup: { tool: kopia, schedule: monthly, target: argus-backups/kopia/rasters }
   - name: argus-sentinel
     owner: svc-ml
