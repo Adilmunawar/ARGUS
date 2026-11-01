@@ -8,42 +8,42 @@ const path = require('path');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'argus-sources-'));
 const gitops = path.join(dir, 'gitops');
 const runbooks = path.join(dir, 'runbooks');
-fs.mkdirSync(path.join(gitops, 'apps', 'mills'), { recursive: true });
+fs.mkdirSync(path.join(gitops, 'apps', 'orders'), { recursive: true });
 fs.mkdirSync(path.join(gitops, 'apps', 'empty'), { recursive: true });
 fs.mkdirSync(path.join(gitops, 'environments'), { recursive: true });
 fs.mkdirSync(path.join(gitops, 'identity'), { recursive: true });
 fs.mkdirSync(path.join(runbooks, 'drills'), { recursive: true });
 
-fs.writeFileSync(path.join(gitops, 'apps', 'mills', 'app.yaml'), [
+fs.writeFileSync(path.join(gitops, 'apps', 'orders', 'app.yaml'), [
   'apiVersion: argus/v1',
   'kind: ServiceFabricApp',
-  'metadata: { name: mills, owner: zayan, tier: 1, repo: org/mills }',
+  'metadata: { name: orders, owner: riley, tier: 1, repo: org/orders }',
   'spec:',
-  '  identity: gmsa-mills$',
-  '  package: { bucket: argus-artifacts, key: "mills/{{ version }}.sfpkg", signature: authenticode }',
+  '  identity: gmsa-orders$',
+  '  package: { bucket: argus-artifacts, key: "orders/{{ version }}.sfpkg", signature: authenticode }',
   '  services:',
-  '    - name: MillsApi',
+  '    - name: OrdersApi',
   '      type: GuestExecutable',
   '      instances: 3',
   '      endpoints: [{ name: http, port: 5141 }]',
   '      env:',
-  '        Jwt__SigningKey: "{{ openbao:kv/mills/jwt-signing-key#value }}"',
-  '        Ai__ApiKey: "{{ openbao:kv/mills/anthropic#value }}"',
-  '        Again: "{{ openbao:kv/mills/anthropic#value }}"',
-  '    - name: MillsWeb',
+  '        Jwt__SigningKey: "{{ openbao:kv/orders/jwt-signing-key#value }}"',
+  '        Ai__ApiKey: "{{ openbao:kv/orders/anthropic#value }}"',
+  '        Again: "{{ openbao:kv/orders/anthropic#value }}"',
+  '    - name: OrdersWeb',
   '      type: GuestExecutable',
   '      instances: 2',
-  '  ingress: { host: mills.example, upstream: MillsApi, waf: owasp-crs }',
-  '  health: { probe: { path: /health, upstream: MillsApi, intervalSeconds: 10 }, upgradePolicy: { failureAction: Rollback } }',
+  '  ingress: { host: orders.example, upstream: OrdersApi, waf: owasp-crs }',
+  '  health: { probe: { path: /health, upstream: OrdersApi, intervalSeconds: 10 }, upgradePolicy: { failureAction: Rollback } }',
   '  egress: { allow: [api.example.com] }',
   '  alerts: alerts.yaml',
   ''
 ].join('\n'));
-fs.writeFileSync(path.join(gitops, 'apps', 'mills', 'alerts.yaml'), [
+fs.writeFileSync(path.join(gitops, 'apps', 'orders', 'alerts.yaml'), [
   'groups:',
-  '  - name: mills',
+  '  - name: orders',
   '    rules:',
-  '      - alert: MillsHigh5xx',
+  '      - alert: OrdersHigh5xx',
   '        expr: up == 0',
   '        for: 5m',
   '        labels: { severity: page }',
@@ -55,7 +55,7 @@ fs.writeFileSync(path.join(gitops, 'environments', 'production.yaml'), [
   'kind: Environment',
   'name: production',
   'apps:',
-  '  mills: { version: 2026.09.08.1, sha256: "<filled by CI>" }',
+  '  orders: { version: 2026.09.08.1, sha256: "<filled by CI>" }',
   '  caddy: { version: 2.10.0, sha256: "abc123" }',
   ''
 ].join('\n'));
@@ -63,7 +63,7 @@ fs.writeFileSync(path.join(gitops, 'identity', 'gmsa.yaml'), [
   'apiVersion: argus/v1',
   'kind: ServiceAccounts',
   'accounts:',
-  '  - { name: gmsa-mills$, hosts: [sf-*], tier: 1, sql: [umairv3_db], s3: [argus-survey-pictures:r] }',
+  '  - { name: gmsa-orders$, hosts: [sf-*], tier: 1, sql: [orders_db], s3: [argus-uploads:r] }',
   '  - { name: svc-ml, hosts: [gpu-01], tier: 1, kind: linux-sssd }',
   ''
 ].join('\n'));
@@ -116,8 +116,8 @@ const check = (name, fn) => {
   check('gitops apps are read from app.yaml files', () => {
     assert.strictEqual(apps.ok, true);
     assert.strictEqual(apps.count, 1);
-    assert.strictEqual(apps.apps[0].name, 'mills');
-    assert.strictEqual(apps.apps[0].owner, 'zayan');
+    assert.strictEqual(apps.apps[0].name, 'orders');
+    assert.strictEqual(apps.apps[0].owner, 'riley');
     assert.strictEqual(apps.apps[0].tier, 1);
   });
   check('service instances and endpoints are summarised', () => {
@@ -129,15 +129,15 @@ const check = (name, fn) => {
   });
   check('secret references are counted once each and never carry a value', () => {
     const a = apps.apps[0];
-    assert.deepStrictEqual(a.secretRefs, ['kv/mills/jwt-signing-key', 'kv/mills/anthropic']);
+    assert.deepStrictEqual(a.secretRefs, ['kv/orders/jwt-signing-key', 'kv/orders/anthropic']);
     assert.ok(!JSON.stringify(a).includes('never-shown'));
   });
   check('ingress, health, egress and alert rules come through', () => {
     const a = apps.apps[0];
-    assert.strictEqual(a.ingress.host, 'mills.example');
+    assert.strictEqual(a.ingress.host, 'orders.example');
     assert.strictEqual(a.health.failureAction, 'Rollback');
     assert.deepStrictEqual(a.egress, ['api.example.com']);
-    assert.deepStrictEqual(a.alertRules, [{ name: 'MillsHigh5xx', severity: 'page', for: '5m' }]);
+    assert.deepStrictEqual(a.alertRules, [{ name: 'OrdersHigh5xx', severity: 'page', for: '5m' }]);
   });
   check('a directory without app.yaml is reported as a problem, not an app', () => {
     assert.strictEqual(apps.problems.length, 1);
@@ -150,7 +150,7 @@ const check = (name, fn) => {
     assert.strictEqual(envs.applied, false);
     const prod = envs.environments[0];
     assert.strictEqual(prod.name, 'production');
-    assert.deepStrictEqual(prod.apps.map((a) => [a.app, a.version, a.pinned]), [['caddy', '2.10.0', true], ['mills', '2026.09.08.1', false]]);
+    assert.deepStrictEqual(prod.apps.map((a) => [a.app, a.version, a.pinned]), [['caddy', '2.10.0', true], ['orders', '2026.09.08.1', false]]);
   });
 
   const accounts = await sources.serviceAccounts();
@@ -158,7 +158,7 @@ const check = (name, fn) => {
     assert.strictEqual(accounts.ok, true);
     assert.strictEqual(accounts.count, 2);
     assert.strictEqual(accounts.accounts[1].kind, 'linux-sssd');
-    assert.deepStrictEqual(accounts.accounts[0].sql, ['umairv3_db']);
+    assert.deepStrictEqual(accounts.accounts[0].sql, ['orders_db']);
   });
 
   const ids = sources.s3Identities();

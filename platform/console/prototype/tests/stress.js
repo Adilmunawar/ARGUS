@@ -20,7 +20,7 @@ const VIEWS = [
   'security/alerts', 'security/vulns', 'security/sessions', 'security/posture',
   'identity/people', 'identity/gmsas', 'identity/grants', 'identity/secrets',
   'data/databases', 'data/buckets', 'data/queues', 'data/cache',
-  'compute', 'compute/host/hv-03', 'compute/vm/sql-01', 'apps/mills',
+  'compute', 'compute/host/hv-03', 'compute/vm/sql-01', 'apps/orders',
   'ops/runbooks', 'ops/backups', 'ops/maintenance', 'ops/cost',
   'ml/pipelines', 'ml/models', 'ml/endpoints', 'ml/imagery'
 ];
@@ -468,7 +468,7 @@ async function suiteFlash(browser) {
     const samples = [];
     const host = document.getElementById('flashes');
     for (let i = 0; i < reps; i++) {
-      window.ARGUS.flash('ok', 'Restart requested', 'MillsApi on sf-0' + (i % 5 + 1) + '.');
+      window.ARGUS.flash('ok', 'Restart requested', 'OrdersApi on sf-0' + (i % 5 + 1) + '.');
       history.replaceState(null, '', '#/' + ['overview', 'apps', 'audit', 'deploys'][i % 4]);
       window.dispatchEvent(new Event('hashchange'));
       if (i % 12 === 11) samples.push({ i: i + 1, inBar: host ? host.childElementCount : -1, docNodes: document.getElementsByTagName('*').length });
@@ -562,7 +562,7 @@ async function suiteSearch(browser) {
     const input = document.querySelector('.pal-input');
     if (!input) return null;
     const times = [];
-    for (const ch of 'millsdash') {
+    for (const ch of 'ordersdash') {
       input.value += ch;
       const t0 = performance.now();
       input.dispatchEvent(new Event('input', { bubbles: true }));

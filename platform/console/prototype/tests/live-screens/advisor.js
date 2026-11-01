@@ -55,7 +55,7 @@ module.exports = async function (ctx) {
       ncLink: ncLink ? ncLink.getAttribute('href') : null,
       evidence,
       evidenceCount: findings.filter((f) => f.evidence && f.evidence.path && f.evidence.at instanceof Date && !isNaN(f.evidence.at.getTime())).length,
-      hasFixture: /patch-hv-03|WDAC|hv-03|Tuesday 22:00|argus-survey-pictures|umairv3_db/.test(text) || findings.some((f) => /^(patch|wdac|mfa|replica|gpu)-/.test(f.id)),
+      hasFixture: /patch-hv-03|WDAC|hv-03|Tuesday 22:00|argus-uploads|orders_db/.test(text) || findings.some((f) => /^(patch|wdac|mfa|replica|gpu)-/.test(f.id)),
       sampleNotice: !!main.querySelector('[data-sample-notice]'),
       errors: main.querySelectorAll('.empty.is-error').length,
       header,

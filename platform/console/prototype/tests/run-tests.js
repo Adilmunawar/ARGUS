@@ -13,9 +13,9 @@ fs.mkdirSync(SHOTS, { recursive: true });
 
 const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs', 'advisor'];
 const DEEP = [
-  'apps/mills', 'apps/agis', 'deploys/1847', 'deploys/1843',
+  'apps/orders', 'apps/maps', 'deploys/1847', 'deploys/1843',
   'compute/host/hv-03', 'compute/vm/sql-01', 'compute/vm/siem-01',
-  'data/database/umairv3_db', 'data/bucket/argus-backups', 'ops/runbook/sql-01-restore-drill'
+  'data/database/orders_db', 'data/bucket/argus-backups', 'ops/runbook/sql-01-restore-drill'
 ];
 
 const results = [];
@@ -649,7 +649,7 @@ async function axeOn(page, label, suite, opts) {
       return go.getAttribute('aria-disabled') === 'false';
     }));
 
-  await goto(page, 'apps/mills?tab=logs');
+  await goto(page, 'apps/orders?tab=logs');
   rec('GUARD', 'the applications screen opens the tab its own links name',
     await page.evaluate(() => {
       const sel = document.querySelector('#main .tab[aria-selected="true"]');
@@ -722,7 +722,7 @@ async function axeOn(page, label, suite, opts) {
       return s ? s.textContent : 'none';
     }));
 
-  await goto(page, 'data/database/umairv3_db');
+  await goto(page, 'data/database/orders_db');
   const sqlCases = [
     ['SELECT * INTO staff_copy FROM staff', true],
     ['SELECT pg_terminate_backend(1)', true],
@@ -1020,13 +1020,13 @@ async function axeOn(page, label, suite, opts) {
 
   const external = srcFiles.filter(f => /https?:\/\/(?!localhost)/.test(
     fs.readFileSync(f, 'utf8').replace(/^\s*[*/].*$/gm, '')
-      .replace(/https?:\/\/[a-z0-9.-]*(zaraatdost|argus|anthropic|earthengine|dataspace|firebase|googleapis|w3\.org|localhost)[^\s"')]*/g, '')
+      .replace(/https?:\/\/[a-z0-9.-]*(example|argus|anthropic|earthengine|dataspace|firebase|googleapis|w3\.org|localhost)[^\s"')]*/g, '')
   )).map(f => path.relative(ROOT, f));
   rec('SEC', 'no external origins are referenced from the bundle', external.length === 0, external.join(' '));
 
   rec('SEC', 'no secret value is rendered anywhere',
     await (async () => {
-      for (const r of ['identity', 'apps/mills']) {
+      for (const r of ['identity', 'apps/orders']) {
         await goto(page, r);
         const leaked = await page.evaluate(() => /(?:password|secret|token)\s*[:=]\s*['"][A-Za-z0-9+/=]{12,}/i.test(document.body.textContent));
         if (leaked) return false;
@@ -1107,7 +1107,7 @@ async function axeOn(page, label, suite, opts) {
     await page.evaluate(() => document.documentElement.getAttribute('data-theme') === 'dark'),
     await page.evaluate(() => document.documentElement.getAttribute('data-theme')));
 
-  for (const r of ['overview', 'security', 'compute', 'apps/mills']) {
+  for (const r of ['overview', 'security', 'compute', 'apps/orders']) {
     await goto(page, r);
     await axeOn(page, 'dark ' + r);
   }
@@ -2008,7 +2008,7 @@ async function axeOn(page, label, suite, opts) {
     JSON.stringify(modePill));
 
   await goto(page, 'compute/vm/sql-01');
-  await goto(page, 'apps/mills');
+  await goto(page, 'apps/orders');
   await page.keyboard.press('Control+K');
   await page.waitForTimeout(120);
   const recentFirst = await page.evaluate(() => {
@@ -2016,7 +2016,7 @@ async function axeOn(page, label, suite, opts) {
     return items.slice(0, 3);
   });
   rec('ACT', 'with nothing typed the palette offers what you were just looking at',
-    recentFirst[0] === 'Recent:Applications / mills' && recentFirst[1] === 'Recent:Compute / vm / sql-01', recentFirst.join(' | '));
+    recentFirst[0] === 'Recent:Applications / orders' && recentFirst[1] === 'Recent:Compute / vm / sql-01', recentFirst.join(' | '));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(80);
 
@@ -2318,8 +2318,8 @@ async function axeOn(page, label, suite, opts) {
   const drift = await page.evaluate(async () => {
     const ahead = window.ARGUS.data.apps.filter(a => a.staging && a.staging !== a.version).map(a => a.name);
     const buttons = [...document.querySelectorAll('#main button')].filter(b => /^Promote /.test(b.textContent)).map(b => b.textContent.replace('Promote ', ''));
-    const agis = [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Promote agis');
-    agis.click();
+    const maps = [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Promote maps');
+    maps.click();
     await new Promise(r => setTimeout(r, 120));
     const out = {
       ahead, buttons,
@@ -2331,12 +2331,12 @@ async function axeOn(page, label, suite, opts) {
     return out;
   });
   rec('ACT', 'environment drift lists every application whose staging build is ahead, and Promote presets the pull request',
-    drift.ahead.join(',') === drift.buttons.join(',') && drift.ahead.indexOf('agis') !== -1 && drift.version === '2026.09.05.1' && drift.env === 'production',
+    drift.ahead.join(',') === drift.buttons.join(',') && drift.ahead.indexOf('maps') !== -1 && drift.version === '2026.09.05.1' && drift.env === 'production',
     JSON.stringify(drift));
   rec('ACT', 'a spent error budget is said in the deploy dialog, not discovered after the fact',
     drift.budgetWarning, JSON.stringify(drift));
 
-  await goto(page, 'apps/agis/budget');
+  await goto(page, 'apps/maps/budget');
   const budget = await page.evaluate(() => ({
     spent: /error budget is spent/i.test(document.querySelector('#main .callout.bad strong').textContent),
     tiles: document.querySelectorAll('#main .budget .tile').length,
@@ -2353,7 +2353,7 @@ async function axeOn(page, label, suite, opts) {
     [...document.querySelectorAll('.dialog-foot button')].find(b => /Open pull request/.test(b.textContent)).click();
     await new Promise(r => setTimeout(r, 350));
     const dep = d.deployments[0];
-    dep.author = 'zayan';
+    dep.author = 'riley';
     window.ARGUS.refresh();
     await new Promise(r => setTimeout(r, 150));
     const notice = (document.querySelector('#main .callout.info strong') || {}).textContent || '';
@@ -2625,9 +2625,9 @@ async function axeOn(page, label, suite, opts) {
   await page.evaluate(() => { window.location.hash = '#/apps?f=tag%3Acost-centre%3Aml'; });
   await page.waitForTimeout(250);
   const tagFilter = await page.evaluate(() => [...document.querySelectorAll('#main tbody tr[data-key]')].map(t => t.dataset.key));
-  rec('ACT', 'applications filter by tag from the address', tagFilter.join(',') === 'agis', tagFilter.join(','));
+  rec('ACT', 'applications filter by tag from the address', tagFilter.join(',') === 'maps', tagFilter.join(','));
 
-  await goto(page, 'apps/mills');
+  await goto(page, 'apps/orders');
   const ranges = await page.evaluate(async () => {
     const crumb = document.getElementById('crumb').textContent;
     const boxes = document.querySelectorAll('#main .metricbox').length;
@@ -2643,7 +2643,7 @@ async function axeOn(page, label, suite, opts) {
     };
   });
   rec('ACT', 'application metrics share one time range and the breadcrumb names the application',
-    /Mills Dashboard/.test(ranges.crumb) && ranges.boxes === 3 && ranges.pressedBefore === '24 h' && ranges.pressedAfter === '1 h'
+    /Orders Dashboard/.test(ranges.crumb) && ranges.boxes === 3 && ranges.pressedBefore === '24 h' && ranges.pressedAfter === '1 h'
       && /last day/.test(ranges.labelBefore) && /last hour/.test(ranges.labelAfter) && ranges.points === 60,
     JSON.stringify(ranges));
 
@@ -2673,9 +2673,9 @@ async function axeOn(page, label, suite, opts) {
     const inboxBefore = window.ARGUS.needsYou().filter(i => i.kind === 'Alarm').length;
     [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Create alarm').click();
     await new Promise(r => setTimeout(r, 120));
-    document.getElementById('alarm-name').value = 'Loan p95 high';
+    document.getElementById('alarm-name').value = 'Billing p95 high';
     document.getElementById('alarm-name').dispatchEvent(new Event('input', { bubbles: true }));
-    document.getElementById('alarm-app').value = 'loan';
+    document.getElementById('alarm-app').value = 'billing';
     document.getElementById('alarm-app').dispatchEvent(new Event('change', { bubbles: true }));
     document.getElementById('alarm-threshold').value = '100';
     document.getElementById('alarm-threshold').dispatchEvent(new Event('input', { bubbles: true }));
@@ -2690,7 +2690,7 @@ async function axeOn(page, label, suite, opts) {
   });
   rec('ACT', 'alarms evaluate against the current values, preview before saving, and an alarm in ALARM reaches the inbox',
     alarms.states.indexOf('alm-1:ALARM') !== -1 && alarms.states.indexOf('alm-2:OK') !== -1 && /would be ALARM/.test(alarms.preview)
-      && /^#\/ops\/alarms\?id=alm-\d+$/.test(alarms.hash) && alarms.created === 'Loan p95 high > 100' && alarms.audit === 'alarm.create'
+      && /^#\/ops\/alarms\?id=alm-\d+$/.test(alarms.hash) && alarms.created === 'Billing p95 high > 100' && alarms.audit === 'alarm.create'
       && alarms.inboxAfter === alarms.inboxBefore + 1 && alarms.rows === 4,
     JSON.stringify(alarms));
 

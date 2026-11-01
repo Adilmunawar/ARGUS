@@ -1,6 +1,6 @@
 'use strict';
 
-const FIXTURE_WORDS = ['hv-03', 'umair', 'Karachi', 'Site B', 'rec-prod-01'];
+const FIXTURE_WORDS = ['hv-03', 'sam', 'Secondary region', 'Site B', 'rec-prod-01'];
 
 module.exports = async function (ctx) {
   const { page, rec } = ctx;

@@ -27,7 +27,7 @@ module.exports = async function (ctx) {
   const s = await snap();
 
   rec('DEPLOYS live: the not-in-stack callout names the reconciler', s.notInStack.indexOf('The GitOps reconciler') !== -1, s.notInStack.join(','));
-  rec('DEPLOYS live: the API declares the four environment apps', !!(apiEnv && apiEnv.ok) && ['mills', 'loan', 'console', 'caddy'].every((n) => expected.some((e) => e.app === n)), expected.length + ' declared');
+  rec('DEPLOYS live: the API declares the four environment apps', !!(apiEnv && apiEnv.ok) && ['orders', 'billing', 'console', 'caddy'].every((n) => expected.some((e) => e.app === n)), expected.length + ' declared');
   const names = s.rows.map((r) => r[1]).sort().join(',');
   const want = expected.map((e) => e.app).sort().join(',');
   rec('DEPLOYS live: the table lists exactly the apps the API returns', names === want && s.rows.length === expected.length, names);

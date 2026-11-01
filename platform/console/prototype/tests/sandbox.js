@@ -11,10 +11,10 @@ fs.mkdirSync(SHOTS, { recursive: true });
 
 const ROUTES = ['overview', 'apps', 'deploys', 'compute', 'data', 'identity', 'security', 'ml', 'ops', 'audit', 'stack', 'system', 'storage', 'logs', 'advisor'];
 const DEEP = [
-  'apps/mills', 'apps/agis', 'apps/console',
+  'apps/orders', 'apps/maps', 'apps/console',
   'deploys/1847', 'deploys/1843',
   'compute/host/hv-03', 'compute/vm/sql-01', 'compute/vm/siem-01',
-  'data/database/umairv3_db', 'data/bucket/argus-backups',
+  'data/database/orders_db', 'data/bucket/argus-backups',
   'ops/runbook/sql-01-restore-drill',
   'security/alerts', 'identity/people'
 ];

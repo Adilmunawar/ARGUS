@@ -115,7 +115,7 @@ module.exports = async function (ctx) {
   await goto(page, 'audit');
   await settle();
   const t = await snap();
-  const fixtureLeak = ['umair', 'contractor', 'reconciler', 'alert.acknowledge', 'deployment.approve', 'elevation.request'].filter((w) => t.text.toLowerCase().indexOf(w) !== -1);
+  const fixtureLeak = ['sam', 'contractor', 'reconciler', 'alert.acknowledge', 'deployment.approve', 'elevation.request'].filter((w) => t.text.toLowerCase().indexOf(w) !== -1);
   rec('AUDIT live: no fixture actor or fixture action appears on the live screen', fixtureLeak.length === 0 && t.sample === 0, fixtureLeak.join(',') || 'clean');
   rec('AUDIT live: every panel says when it was read', (t.text.match(/Read from the console API at/g) || []).length >= 3, String((t.text.match(/Read from the console API at/g) || []).length));
   rec('AUDIT live: the page shows no error state', t.errors === 0, String(t.errors));

@@ -45,12 +45,12 @@ module.exports = async (ctx) => {
     return rows[0] ? rows[0].innerText : '';
   });
   rec('accounts panel lists svc-ml with the host read from the API', /svc-ml/.test(row) && !!host && row.indexOf(host) !== -1, row.replace(/\s+/g, ' ').slice(0, 80));
-  rec('accounts panel lists the geo accounts too', /gmsa-geo\$/.test(accText) && /gmsa-agis\$/.test(accText), 'gmsa-geo$ and gmsa-agis$');
-  rec('accounts panel excludes accounts with no ML grant', !/gmsa-backup\$/.test(accText) && !/gmsa-mills\$/.test(accText), 'backup and mills absent');
+  rec('accounts panel lists the geo accounts too', /gmsa-geo\$/.test(accText) && /gmsa-maps\$/.test(accText), 'gmsa-geo$ and gmsa-maps$');
+  rec('accounts panel excludes accounts with no ML grant', !/gmsa-backup\$/.test(accText) && !/gmsa-orders\$/.test(accText), 'backup and orders absent');
   rec('accounts panel carries its read time', /read /.test(accText), 'read stamp present');
   void api;
 
-  const fixtures = ['Mills dashboard', 'ray-serve', 'Materialise', 'Dagster asset', 'NVIDIA', 'Sentinel-2 scenes'];
+  const fixtures = ['Orders dashboard', 'ray-serve', 'Materialise', 'Dagster asset', 'NVIDIA', 'Sentinel-2 scenes'];
   const pipelines = await page.evaluate(() => {
     const d = window.ARGUS.data;
     const names = [];

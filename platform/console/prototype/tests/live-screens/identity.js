@@ -40,7 +40,7 @@ module.exports = async function (ctx) {
     return out;
   });
 
-  const FIXTURE = /umair|contractor|Offboard|Argus-Tier0-Admins|Awaiting approval/i;
+  const FIXTURE = /sam|contractor|Offboard|Argus-Tier0-Admins|Awaiting approval/i;
 
   await goto(page, 'identity');
   await settle();
@@ -68,10 +68,10 @@ module.exports = async function (ctx) {
   await settle();
   const g = await snap();
   const table = (g.cards['Service accounts'] || { rows: [], text: '' });
-  const mills = table.rows.filter((r) => r[0] === 'gmsa-mills$')[0];
-  const apiMills = (apiAccounts.accounts || []).filter((a) => a.name === 'gmsa-mills$')[0];
+  const orders = table.rows.filter((r) => r[0] === 'gmsa-orders$')[0];
+  const apiOrders = (apiAccounts.accounts || []).filter((a) => a.name === 'gmsa-orders$')[0];
   rec('IDENTITY live: the service accounts table lists the API accounts', (apiAccounts.accounts || []).length > 0 && table.rows.length === apiAccounts.accounts.length, table.rows.length + ' rows');
-  rec('IDENTITY live: gmsa-mills$ shows its declared SQL databases', !!mills && !!apiMills && apiMills.sql.length > 0 && apiMills.sql.every((d) => mills[4].indexOf(d) !== -1), mills ? mills[4] : 'no row');
+  rec('IDENTITY live: gmsa-orders$ shows its declared SQL databases', !!orders && !!apiOrders && apiOrders.sql.length > 0 && apiOrders.sql.every((d) => orders[4].indexOf(d) !== -1), orders ? orders[4] : 'no row');
   rec('IDENTITY live: the table carries a declared-at stamp and the rotation note', /Declared at|Declaration time unknown/.test(table.text) && /Rotation age is not known/.test(g.text) && !/Password age/.test(g.text), 'stamp and note');
   rec('IDENTITY live: no fixture password ages or fixture accounts', !/rotation interval|Password age/.test(g.text) && g.sample === 0, 'no ages');
 
@@ -88,7 +88,7 @@ module.exports = async function (ctx) {
   const s = await snap();
   rec('IDENTITY live: the secrets tab says OpenBao is not configured', apiSeal.state === 'not-configured' && /OpenBao is not configured/.test(s.text), (apiSeal.state || '') + ' / ' + (/OpenBao is not configured/.test(s.text)));
   rec('IDENTITY live: lease counts and rotation ages are not-in-stack', s.notInStack.indexOf('Secret lease counts and rotation ages') !== -1, s.notInStack.join(','));
-  rec('IDENTITY live: no rotate or revoke buttons and no fixture secret paths', !s.buttons.some((b) => /rotate|revoke|who read|request value/i.test(b)) && !/secret\/mills|reads, 24/i.test(s.text) && s.sample === 0, s.buttons.join('|'));
+  rec('IDENTITY live: no rotate or revoke buttons and no fixture secret paths', !s.buttons.some((b) => /rotate|revoke|who read|request value/i.test(b)) && !/secret\/orders|reads, 24/i.test(s.text) && s.sample === 0, s.buttons.join('|'));
   rec('IDENTITY live: the seal panel carries its read time', /Read at/.test(s.text), 'read-at hint');
 
   await page.evaluate(() => { window.location.hash = '#/identity/people'; });

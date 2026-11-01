@@ -1,6 +1,6 @@
 'use strict';
 
-const FIXTURE_STRINGS = ['hv-01-drain-node', 'sql-02-ag-failover', 'alm-1', 'AGIS p95 above 500 ms', 'Monthly restore drill for umairv3_db', 'FarmerFacilitatorDb', 'AWS baseline'];
+const FIXTURE_STRINGS = ['hv-01-drain-node', 'sql-02-ag-failover', 'alm-1', 'Maps p95 above 500 ms', 'Monthly restore drill for orders_db', 'billing_db', 'AWS baseline'];
 
 function mainText(page) {
   return page.evaluate(() => document.getElementById('main').textContent);
@@ -108,7 +108,7 @@ module.exports = async function (ctx) {
   rec('Backups and drills is marked not in this stack and shows no fixture tiles',
     backups.marks.includes('Backups and restore drills') && backups.tiles === 0 && !/Drills passed|Worst RPO/.test(backups.text), JSON.stringify(backups.marks));
   rec('the backup buckets panel shows a not-configured or error state without SeaweedFS, never a fixture store',
-    /is not configured|could not be read|Try again/.test(backups.text) && !/FarmerFacilitatorDb|2026-08-14-sql-01-restore-drill/.test(backups.text),
+    /is not configured|could not be read|Try again/.test(backups.text) && !/billing_db|2026-08-14-sql-01-restore-drill/.test(backups.text),
     backups.text.replace(/\s+/g, ' ').slice(-160));
 
   await goto(page, 'ops/cost');

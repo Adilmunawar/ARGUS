@@ -8,7 +8,7 @@ The Argus Console is the operator interface and control plane for the platform, 
 
 See [the control plane design](../../docs/05-CONTROL-PLANE.md) for the full picture.
 
-Conventions follow the Mills dashboard: bare camelCase records, RFC 9457 ProblemDetails, the `/api/v1` prefix, hand rolled `Validate()`, xUnit with `WebApplicationFactory` on SQLite with fakes, and configuration from environment variables only.
+Conventions follow the Orders dashboard: bare camelCase records, RFC 9457 ProblemDetails, the `/api/v1` prefix, hand rolled `Validate()`, xUnit with `WebApplicationFactory` on SQLite with fakes, and configuration from environment variables only.
 
 ```
 src/
