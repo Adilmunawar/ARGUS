@@ -603,6 +603,78 @@
     }), { flush: true }));
   }
 
+  function placeholderOf(sha) {
+    var t = String(sha || '').trim();
+    return t || 'no digest declared';
+  }
+
+  function declaredVersions(body, data) {
+    var rows = [];
+    (data.environments || []).forEach(function (e) {
+      (e.apps || []).forEach(function (a) {
+        rows.push({ env: e.name, app: a.app, version: a.version, sha256: a.sha256, pinned: !!a.pinned, file: e.file });
+      });
+    });
+    body.appendChild(ui.table([
+      { key: 'env', label: 'Environment' },
+      { key: 'app', label: 'Application', render: function (r) { return A.link(r.app, 'apps', [r.app]); } },
+      { key: 'version', label: 'Version', render: function (r) { return el('code', { text: String(r.version) }); } },
+      {
+        key: 'pinned', label: 'Digest', status: true,
+        render: function (r) {
+          return r.pinned
+            ? ui.pill('Pinned', 'ok')
+            : ui.pill('Unpinned: ' + placeholderOf(r.sha256), 'warn');
+        }
+      },
+      { key: 'file', label: 'File', render: function (r) { return el('code', { text: String(r.file) }); } }
+    ], rows, {
+      caption: 'Versions declared per environment',
+      rowKey: function (r) { return r.env + '/' + r.app; },
+      empty: 'No environment declares any application.'
+    }));
+    body.appendChild(el('p.hint', { text: 'Declared in the repository, not applied. ' + (data.note || '') }));
+  }
+
+  function declaredApps(body, data) {
+    var apps = data.apps || [];
+    if (!apps.length) {
+      body.appendChild(ui.emptyState('No application is declared', 'platform/gitops/apps holds no application declaration.'));
+      return;
+    }
+    body.appendChild(ui.table([
+      { key: 'name', label: 'Application', render: function (r) { return A.link(r.name, 'apps', [r.name]); } },
+      { key: 'kind', label: 'Kind' },
+      { key: 'tier', label: 'Tier' },
+      { key: 'owner', label: 'Owner' },
+      { key: 'services', label: 'Services', render: function (r) { return fmt.num((r.services || []).length); } },
+      { key: 'directory', label: 'Directory', render: function (r) { return el('code', { text: String(r.directory || '') }); } }
+    ], apps, {
+      caption: 'Applications declared in the repository',
+      rowKey: function (r) { return r.name; }
+    }));
+    if (data.problems && data.problems.length) {
+      body.appendChild(el('div.callout.warn', [
+        el('strong', { text: fmt.num(data.problems.length) + ' declaration' + (data.problems.length === 1 ? '' : 's') + ' could not be read.' }),
+        el('p', { text: data.problems.map(function (p) { return p.directory + ': ' + p.message; }).join('; ') })
+      ]));
+    }
+  }
+
+  function renderLive(host) {
+    host.appendChild(ui.pageHeader(
+      'Deployments',
+      'What the repository declares for each environment. Nothing here has been applied.'));
+    host.appendChild(A.notInStack('The GitOps reconciler',
+      'does not run in this stack, so no deployment has been planned, approved or applied. What follows is what the repository declares.'));
+    host.appendChild(A.livePanel('Declared versions', '/api/gitops/environments', declaredVersions, {
+      errorTitle: 'The declared versions could not be read'
+    }));
+    host.appendChild(A.livePanel('Declared applications', '/api/gitops/apps', declaredApps, {
+      errorTitle: 'The declared applications could not be read'
+    }));
+  }
+
   var screen = {
     title: 'Deployments',
     crumb: 'Deployments',
@@ -612,8 +684,13 @@
       return out;
     },
     render: function (mount, ctx) {
-      if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx.rest[0], ctx.rest[1]);
-      else renderQueue(mount);
+      var host = el('div');
+      mount.appendChild(host);
+      A.whenProbed(function (mode) {
+        if (mode === 'live') { renderLive(host); return; }
+        if (ctx.rest && ctx.rest.length) renderDetail(host, ctx.rest[0], ctx.rest[1]);
+        else renderQueue(host);
+      });
     }
   };
 

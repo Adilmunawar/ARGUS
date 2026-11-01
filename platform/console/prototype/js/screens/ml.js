@@ -338,38 +338,160 @@
     ]);
   }
 
+  function sizeText(n) {
+    if (n === null || n === undefined || isNaN(n)) return null;
+    if (n < 1024) return fmt.num(n) + ' B';
+    if (n < 1048576) return fmt.num(n / 1024, 1) + ' KB';
+    if (n < 1073741824) return fmt.num(n / 1048576, 1) + ' MB';
+    if (n < 1099511627776) return fmt.num(n / 1073741824, 1) + ' GB';
+    return fmt.num(n / 1099511627776, 2) + ' TB';
+  }
+
+  var ML_BUCKET = /ml|raster|sentinel/i;
+
+  function bucketsPanel() {
+    return A.livePanel('Data buckets', '/api/storage/buckets', function (body, d, env) {
+      var rows = (d.buckets || []).filter(function (b) { return ML_BUCKET.test(b.name); });
+      if (d.topologyOk === false || d.inventorySource !== 'storage-init') {
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'The object store is not configured here.' }),
+          el('p', {
+            text: 'Bucket names come from ' + (d.inventorySource || 'the declarations') + ', so they are declared rather than verified.' +
+              (d.topologyOk === false ? ' Sizes are unknown because the SeaweedFS master could not be read.' : '')
+          })
+        ]));
+      }
+      body.appendChild(ui.table([
+        { key: 'name', label: 'Bucket', render: function (b) { return el('code.mono', { text: b.name }); } },
+        {
+          key: 'size', label: 'Size on disk', align: 'right',
+          sort: function (b) { return b.diskBytes === null || b.diskBytes === undefined ? -1 : b.diskBytes; },
+          render: function (b) {
+            var v = sizeText(b.diskBytes);
+            return v === null ? el('span.muted', { text: 'unknown' }) : el('span', { text: v });
+          }
+        },
+        {
+          key: 'versioning', label: 'Versioning',
+          render: function (b) {
+            return b.versioning === null || b.versioning === undefined
+              ? el('span.muted', { text: 'unknown' })
+              : ui.pill(b.versioning ? 'on' : 'off', b.versioning ? 'ok' : 'idle');
+          }
+        },
+        {
+          key: 'lock', label: 'Lock',
+          render: function (b) {
+            if (b.lock) return el('span', { text: b.lock + ' ' + fmt.num(b.lockDays) + ' d' });
+            return el('span.muted', { text: b.lockDeclared ? 'declared ' + b.lockDeclared + ', not applied' : 'none' });
+          }
+        },
+        {
+          key: 'owner', label: 'Owner',
+          render: function (b) { return b.owner ? el('span.mono', { text: b.owner }) : el('span.muted', { text: 'not declared' }); }
+        }
+      ], rows, {
+        caption: 'Buckets reserved for ML and imagery data, read from the object store',
+        sortKey: 'name',
+        rowKey: function (b) { return b.name; },
+        empty: 'The object store lists no bucket whose name contains ml, raster or sentinel.'
+      }));
+      body.appendChild(el('p.hint', { text: 'Read ' + fmt.stamp(new Date(env.at)) + ' from the object store. Sizes are the volume footprint, not a count of objects.' }));
+    }, {
+      errorTitle: 'The buckets could not be read',
+      notConfigured: function (body, e) {
+        body.appendChild(ui.emptyState('Object store not configured',
+          (e && e.message ? e.message + ' ' : '') + 'No bucket can be listed until the console is pointed at SeaweedFS, so no size, versioning or lock is shown.'));
+      }
+    });
+  }
+
+  function accountsPanel() {
+    return A.livePanel('Declared applications that use them', '/api/gitops/service-accounts', function (body, d, env) {
+      var rows = [];
+      (d.accounts || []).forEach(function (a) {
+        var mine = (a.s3 || []).filter(function (g) { return ML_BUCKET.test(String(g).split(':')[0]); });
+        if (mine.length) rows.push({ name: a.name, hosts: a.hosts || [], tier: a.tier, kind: a.kind, grants: mine });
+      });
+      body.appendChild(ui.table([
+        { key: 'name', label: 'Account', render: function (r) { return el('code.mono', { text: r.name }); } },
+        { key: 'hosts', label: 'Hosts', sortable: false, render: function (r) { return el('span.mono', { text: r.hosts.join(', ') }); } },
+        { key: 'grants', label: 'Bucket grants', sortable: false, render: function (r) { return el('span.mono', { text: r.grants.join(', ') }); } },
+        { key: 'tier', label: 'Tier', align: 'right', render: function (r) { return r.tier === null || r.tier === undefined ? '' : String(r.tier); } }
+      ], rows, {
+        caption: 'Service accounts declared in the gitops repository whose object-store grants name an ML or imagery bucket',
+        sortKey: 'name',
+        rowKey: function (r) { return r.name; },
+        empty: 'No declared account is granted an ML or imagery bucket.'
+      }));
+      body.appendChild(el('p.hint', {
+        text: 'Declared in the gitops repository' + (d.declaredAt ? ' as of ' + fmt.stamp(new Date(d.declaredAt)) : '') +
+          ', read ' + fmt.stamp(new Date(env.at)) + '. A declaration says who may use a bucket, not that they do.'
+      }));
+    }, {
+      errorTitle: 'The declared accounts could not be read',
+      notConfigured: function (body, e) {
+        body.appendChild(ui.emptyState('No gitops repository configured', e && e.message ? e.message : 'The console has no declarations to read.'));
+      }
+    });
+  }
+
+  function renderSample(mount, ctx) {
+    var d = A.data;
+
+    var tiles = el('div.tiles', d.gpu.cards.map(function (c) {
+      return ui.statTile('GPU ' + c.id + ' utilisation', fmt.pct(c.util, 0), {
+        note: c.model + ' · ' + fmt.num(c.memUsedGB) + ' of ' + fmt.num(c.memTotalGB)
+          + ' GB · ' + fmt.num(c.tempC) + '°C · ' + c.user
+      });
+    }).concat([
+      ui.statTile('Queued jobs', fmt.num(d.gpu.queue.length), {
+        note: d.gpu.queue.length
+          ? d.gpu.queue[0].job + ' waiting ' + fmt.dur(d.gpu.queue[0].waitingMin * 60) + ' for ' + d.gpu.queue[0].user
+          : 'Nothing is waiting for a card'
+      })
+    ]));
+
+    mount.appendChild(ui.pageHeader('ML & geospatial',
+      'Dagster assets, model runs, inference endpoints and imagery coverage, all on ' + d.gpu.name + '.'));
+    mount.appendChild(tiles);
+    mount.appendChild(ui.tabs([
+      { id: 'pipelines', label: 'Pipelines', render: pipelinesTab },
+      { id: 'models', label: 'Models', render: modelsTab },
+      { id: 'endpoints', label: 'Endpoints', render: endpointsTab },
+      { id: 'imagery', label: 'Imagery', render: imageryTab }
+    ], {
+      label: 'ML and geospatial sections',
+      initial: (ctx && ctx.rest && ctx.rest[0]) || null,
+      href: function (id) { return A.href('ml', [id]); }
+    }));
+  }
+
+  function renderLive(mount) {
+    mount.appendChild(ui.pageHeader('ML & geospatial',
+      'The ML platform is not part of this stack. What exists is the object-store buckets reserved for its data and the applications declared to use them.'));
+    mount.appendChild(el('div.stack', [
+      A.notInStack('The ML platform (GPU node, pipelines, model registry, endpoints).',
+        'Pipelines would come from Dagster, models from MLflow, endpoints and canary share from Ray Serve, and GPU utilisation and the job queue from the GPU node. None of them runs here, so those panels and their actions are not shown.'),
+      bucketsPanel(),
+      accountsPanel()
+    ]));
+  }
+
   A.screen('ml', {
     title: 'ML & geospatial',
     crumb: 'ML & geospatial',
     render: function (mount, ctx) {
-      var d = A.data;
-
-      var tiles = el('div.tiles', d.gpu.cards.map(function (c) {
-        return ui.statTile('GPU ' + c.id + ' utilisation', fmt.pct(c.util, 0), {
-          note: c.model + ' · ' + fmt.num(c.memUsedGB) + ' of ' + fmt.num(c.memTotalGB)
-            + ' GB · ' + fmt.num(c.tempC) + '°C · ' + c.user
-        });
-      }).concat([
-        ui.statTile('Queued jobs', fmt.num(d.gpu.queue.length), {
-          note: d.gpu.queue.length
-            ? d.gpu.queue[0].job + ' waiting ' + fmt.dur(d.gpu.queue[0].waitingMin * 60) + ' for ' + d.gpu.queue[0].user
-            : 'Nothing is waiting for a card'
-        })
-      ]));
-
-      mount.appendChild(ui.pageHeader('ML & geospatial',
-        'Dagster assets, model runs, inference endpoints and imagery coverage, all on ' + d.gpu.name + '.'));
-      mount.appendChild(tiles);
-      mount.appendChild(ui.tabs([
-        { id: 'pipelines', label: 'Pipelines', render: pipelinesTab },
-        { id: 'models', label: 'Models', render: modelsTab },
-        { id: 'endpoints', label: 'Endpoints', render: endpointsTab },
-        { id: 'imagery', label: 'Imagery', render: imageryTab }
-      ], {
-        label: 'ML and geospatial sections',
-        initial: (ctx && ctx.rest && ctx.rest[0]) || null,
-        href: function (id) { return A.href('ml', [id]); }
-      }));
+      if (window.location.protocol === 'file:' || A.storeMode() === 'sample') {
+        renderSample(mount, ctx);
+        return;
+      }
+      var holder = el('div');
+      mount.appendChild(holder);
+      A.whenProbed(function (mode) {
+        if (mode === 'live') renderLive(holder);
+        else renderSample(holder, ctx);
+      });
     }
   });
 })();

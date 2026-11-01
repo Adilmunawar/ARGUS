@@ -6,6 +6,7 @@ const pg = require('./pg');
 const queues = require('./queues');
 const containers = require('./containers');
 const alerts = require('./alerts');
+const sources = require('./sources');
 
 const MAX_ITEMS = 2000;
 const TTL_MS = 30000;
@@ -35,11 +36,31 @@ function source(kind, answer, project) {
 }
 
 async function build() {
-  const [bucketAnswer, databaseAnswer, streamAnswer, containerAnswer, alertAnswer] = await Promise.all([
-    storage.buckets(), pg.databases(), queues.streams(), containers.list(), alerts.active()
+  const [bucketAnswer, databaseAnswer, streamAnswer, containerAnswer, alertAnswer, appAnswer, runbookAnswer] = await Promise.all([
+    storage.buckets(), pg.databases(), queues.streams(), containers.list(), alerts.active(), sources.apps(), sources.runbooks()
   ]);
 
-  const sources = [
+  const sourceList = [
+    source('application', appAnswer, (a) => (a.apps || []).map((app) => ({
+      kind: 'Application',
+      label: app.name,
+      hint: [app.owner ? 'owner ' + app.owner : null, app.tier === null ? null : 'tier ' + app.tier, app.ingress && app.ingress.host ? app.ingress.host : null]
+        .filter(Boolean).join(' · ') || 'declared in gitops',
+      route: 'apps',
+      rest: [app.name],
+      params: {}
+    }))),
+
+    source('runbook', runbookAnswer, (a) => (a.runbooks || []).filter((r) => !r.isIndex).map((r) => ({
+      kind: 'Runbook',
+      label: r.title || r.id,
+      hint: [r.tier === null ? null : 'tier ' + r.tier, r.approval ? 'approval ' + r.approval : null, r.steps ? r.steps + ' steps' : null]
+        .filter(Boolean).join(' · ') || 'runbook',
+      route: 'ops',
+      rest: ['runbook', r.id],
+      params: {}
+    }))),
+
     source('bucket', bucketAnswer, (a) => (a.buckets || []).map((b) => ({
       kind: 'Bucket',
       label: b.name,
@@ -96,7 +117,7 @@ async function build() {
 
   const items = [];
   let dropped = 0;
-  for (const s of sources) {
+  for (const s of sourceList) {
     for (const item of s.items) {
       if (items.length >= MAX_ITEMS) { dropped += 1; continue; }
       items.push(item);
@@ -109,7 +130,7 @@ async function build() {
     truncated: dropped > 0,
     droppedForCap: dropped,
     cap: MAX_ITEMS,
-    sources: sources.map((s) => ({
+    sources: sourceList.map((s) => ({
       kind: s.kind,
       ok: s.ok,
       count: s.count,
@@ -117,7 +138,7 @@ async function build() {
       reason: s.ok ? null : s.reason,
       message: s.ok ? null : s.message
     })),
-    partial: sources.some((s) => !s.ok),
+    partial: sourceList.some((s) => !s.ok),
     at: new Date().toISOString()
   };
 }

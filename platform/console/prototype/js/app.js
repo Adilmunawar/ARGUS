@@ -1379,6 +1379,69 @@
 
   var lastSnap = null, lastKey = 'unknown', lastDetail = '';
 
+  A.livePanel = function (title, path, render, opts) {
+    opts = opts || {};
+    var body = el('div');
+    var card = ui.card(title, body, opts.card || {});
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+    body.appendChild(ui.skeleton(opts.skeletonRows || 3));
+    A.read(path, { ttlMs: opts.ttlMs === undefined ? 15000 : opts.ttlMs }).then(function (env) {
+      if (!alive) return;
+      ui.clear(body);
+      if (env.mode === A.MODE.SAMPLE) {
+        if (opts.sample) { opts.sample(body); return; }
+        body.appendChild(ui.emptyState(
+          opts.sampleTitle || 'Not available on sample data',
+          opts.sampleDetail || 'This panel reads the console API. Open the console the API serves and sign in to read it.'));
+        return;
+      }
+      if (!env.ok) {
+        var e = env.error || {};
+        if (e.reason === 'unauthenticated') {
+          body.appendChild(ui.emptyState('Sign in to read this', 'The console API answers only to a signed-in operator.'));
+          return;
+        }
+        if (e.reason === 'not-configured' && opts.notConfigured) { opts.notConfigured(body, e); return; }
+        body.appendChild(ui.errorState(
+          opts.errorTitle || 'This could not be read',
+          e.message || 'The request failed.',
+          function () { A.forget(path); A.refresh(); }));
+        return;
+      }
+      if (env.stale) {
+        body.appendChild(el('div.callout.warn', [
+          el('strong', { text: 'Showing the last value that could be read.' }),
+          el('p', { text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
+            ' The figures below are from ' + ui.fmt.stamp(new Date(env.at)) + '.' })
+        ]));
+      }
+      render(body, env.data, env);
+    });
+    return card;
+  };
+
+  A.whenProbed = function (fn) {
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+    return A.probe().then(function (snap) { if (alive) fn(A.storeMode(), snap); });
+  };
+
+  A.sampleNotice = function (what, detail) {
+    return el('div.callout.info', { 'data-sample-notice': what || '' }, [
+      el('strong', { text: 'Sample data.' }),
+      el('p', { text: (what ? what + ' ' : 'What is below ') + 'comes from the bundled sample dataset, not from this stack.' +
+        (detail ? ' ' + detail : '') })
+    ]);
+  };
+
+  A.notInStack = function (what, detail) {
+    return el('div.callout.info', { 'data-not-in-stack': what || '' }, [
+      el('strong', { text: 'Not in this stack.' }),
+      el('p', { text: what + ' ' + (detail || 'has no source the console can read here, so nothing is shown rather than a figure nobody measured.') })
+    ]);
+  };
+
   A.dataSource = function () {
     var snap = lastSnap || (typeof A.storeHealth === 'function' ? A.storeHealth() : null) || {};
     var stampOf = function (t) { return t ? ui.fmt.stamp(new Date(t)) : 'never'; };

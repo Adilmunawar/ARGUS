@@ -12,6 +12,8 @@ process.env.ARGUS_AUTH_SCRYPT_PARALLELISM = '1';
 process.env.ARGUS_AUTH_SCRYPT_MAXMEM = String(64 * 1024 * 1024);
 
 const SERVER_DIR = path.resolve(__dirname, '..', '..', 'server');
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const SCREEN_MODULES_DIR = path.join(__dirname, 'live-screens');
 const SERVER = path.join(SERVER_DIR, 'src', 'index.js');
 const hash = require(path.join(SERVER_DIR, 'src', 'auth', 'hash.js'));
 
@@ -75,6 +77,8 @@ async function launch() {
       ARGUS_HEARTBEAT_INTERVAL_MS: '3600000',
       ARGUS_PG_HOST: '',
       ARGUS_OPENBAO_ADDR: '',
+      ARGUS_GITOPS_DIR: path.join(REPO_ROOT, 'platform', 'gitops'),
+      ARGUS_RUNBOOKS_DIR: path.join(REPO_ROOT, 'docs', 'runbooks'),
       AWS_ACCESS_KEY_ID: '',
       AWS_SECRET_ACCESS_KEY: '',
       AWS_PROFILE: '__argus_live_no_such_profile__',
@@ -94,7 +98,7 @@ async function launch() {
 
 async function goto(page, route) {
   await page.evaluate((r) => { window.location.hash = '#/' + r; }, route);
-  await page.waitForFunction((r) => window.ARGUS && window.ARGUS.state.route === r, route, { timeout: 4000 });
+  await page.waitForFunction((r) => window.ARGUS && window.ARGUS.state.route === r.split('/')[0], route, { timeout: 4000 });
   await page.waitForTimeout(60);
 }
 
@@ -196,6 +200,30 @@ const dialogTitle = () => { const h = document.querySelector('.dialog h2'); retu
       const text = await page.evaluate(() => document.getElementById('main').textContent);
       const sampleWarning = /sample data|console API is not running/i.test(text);
       rec('LIVE', route + ' reads the API rather than showing the sample-mode notice', !sampleWarning, text.slice(0, 120));
+    }
+
+    const modules = fs.existsSync(SCREEN_MODULES_DIR)
+      ? fs.readdirSync(SCREEN_MODULES_DIR).filter((f) => /\.js$/.test(f)).sort()
+      : [];
+    for (const file of modules) {
+      const name = file.replace(/\.js$/, '');
+      const suite = name.toUpperCase().slice(0, 8);
+      let mod;
+      try {
+        mod = require(path.join(SCREEN_MODULES_DIR, file));
+      } catch (err) {
+        rec(suite, 'module ' + file + ' loads', false, String(err && err.message));
+        continue;
+      }
+      if (typeof mod !== 'function') {
+        rec(suite, 'module ' + file + ' exports a function', false, typeof mod);
+        continue;
+      }
+      try {
+        await mod({ page, rec: (id, pass, detail) => rec(suite, id, pass, detail), goto, waitFor, origin: ORIGIN, server, get, sleep });
+      } catch (err) {
+        rec(suite, 'module ' + file + ' ran to the end', false, String(err && err.stack || err));
+      }
     }
 
     const health = await page.evaluate(() => window.ARGUS.storeHealth());

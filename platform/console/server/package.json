@@ -12,7 +12,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node test/smoke.js && node test/auth.js && node test/streams.js && node test/storage.js",
+    "test": "node test/smoke.js && node test/auth.js && node test/streams.js && node test/storage.js && node test/sources.js",
     "test:smoke": "node test/smoke.js",
     "test:auth": "node test/auth.js",
     "test:streams": "node test/streams.js",

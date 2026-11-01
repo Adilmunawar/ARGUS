@@ -33,6 +33,7 @@ const alerts = require('./alerts');
 const containers = require('./containers');
 const heartbeats = require('./heartbeats');
 const search = require('./search');
+const sources = require('./sources');
 
 env.reportRejections();
 
@@ -414,6 +415,14 @@ const routes = {
   }),
 
   'GET /api/search/index': async () => search.index(),
+
+  'GET /api/gitops/apps': async () => sources.apps(),
+  'GET /api/gitops/environments': async () => sources.environments(),
+  'GET /api/gitops/service-accounts': async () => sources.serviceAccounts(),
+  'GET /api/identity/principals': async () => sources.principals({ pgRoles: () => pg.roles() }),
+  'GET /api/runbooks': async () => sources.runbooks(),
+  'GET /api/runbooks/body': async (q) => sources.runbookBody(q.path),
+  'GET /api/audit/recent': async (q) => sources.auditRecent(q.limit),
 
   'GET /metrics': async (q, ctx) => new RawResponse({
     status: 200,

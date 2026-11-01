@@ -342,23 +342,385 @@
     ]);
   }
 
+  function renderSample(mount) {
+    var summary = 'Figures as of ' + fmt.stamp(new Date(d.now)) + '. The tiles below link to each screen.';
+
+    mount.appendChild(ui.pageHeader('Overview', summary, [
+      ui.btn('Open runbooks', {
+        variant: 'ghost',
+        onClick: function () { A.go('ops'); }
+      })
+    ]));
+
+    mount.appendChild(heroBand());
+    mount.appendChild(tiles());
+    mount.appendChild(el('div.grid.grid-3', [needsYouCard(), activityCard(), sitesCard()]));
+    mount.appendChild(el('div.grid.grid-4', [trafficCard(), reconcilerCard(), healthCard(), recentCard()]));
+  }
+
+  function readWord(env) {
+    return env && env.at ? 'read ' + fmt.stamp(new Date(env.at)).slice(11) : 'not read';
+  }
+
+  function readSentence(env) {
+    var w = readWord(env);
+    return w.charAt(0).toUpperCase() + w.slice(1) + '.';
+  }
+
+  function agoLive(iso) {
+    var t = typeof iso === 'number' ? iso : Date.parse(iso);
+    if (!isFinite(t)) return 'at an unknown time';
+    var s = Math.round((Date.now() - t) / 1000);
+    if (s < 5) return 'just now';
+    if (s < 60) return s + ' s ago';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago';
+    return Math.round(s / 86400) + ' d ago';
+  }
+
+  function gb(bytes) {
+    if (typeof bytes !== 'number') return '-';
+    return fmt.num(bytes / 1073741824, 1) + ' GB';
+  }
+
+  function readAll(paths, ttlMs) {
+    return Promise.all(paths.map(function (p) { return A.read(p, { ttlMs: ttlMs === undefined ? 10000 : ttlMs }); }));
+  }
+
+  function stillHere() {
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+    return function () { return alive; };
+  }
+
+  function liveTile(label, paths, build, opts) {
+    opts = opts || {};
+    var node = ui.statTile(label, '…', { note: 'Reading the console API', href: opts.href, title: opts.title });
+    var alive = stillHere();
+    readAll(paths).then(function (envs) {
+      if (!alive() || !node.parentNode) return;
+      var failed = null;
+      envs.forEach(function (env) { if (!failed && !env.ok) failed = env; });
+      var spec;
+      if (failed) {
+        var e = failed.error || {};
+        spec = e.reason === 'not-configured'
+          ? { value: 'not configured', note: opts.notConfigured || e.message || 'This reader has no upstream in this stack.' }
+          : { value: '-', note: 'Could not be read: ' + (e.message || 'the request failed.') };
+      } else {
+        spec = build(envs.map(function (env) { return env.data || {}; }), envs);
+      }
+      var fresh = ui.statTile(label, spec.value, {
+        unit: spec.unit,
+        note: (spec.note ? spec.note + '. ' : '') + readWord(failed || envs[0]),
+        href: opts.href,
+        title: opts.title
+      });
+      node.parentNode.replaceChild(fresh, node);
+    });
+    return node;
+  }
+
+  var MONITOR_RANK = { 0: 0, 2: 1, 3: 3, 1: 4 };
+  function monitorRank(m) {
+    return m.status === null || m.status === undefined ? 2 : MONITOR_RANK[m.status];
+  }
+  function monitorTone(status) {
+    if (status === 1) return 'ok';
+    if (status === 0) return 'bad';
+    if (status === 3) return 'info';
+    if (status === 2) return 'warn';
+    return 'idle';
+  }
+  function monitorsOf(data) { return (data && data.monitors) || []; }
+  function monitorsDown(data) { return monitorsOf(data).filter(function (m) { return m.status === 0; }); }
+  function names(list) { return list.map(function (m) { return m.label || m.id; }).join(', '); }
+
+  function liveTiles() {
+    return el('div.tiles', [
+      liveTile('Services working', ['/api/heartbeats'], function (datas) {
+        var all = monitorsOf(datas[0]);
+        var up = all.filter(function (m) { return m.status === 1 || m.status === 3; });
+        var down = monitorsDown(datas[0]);
+        var pending = all.filter(function (m) { return m.status === 2; });
+        var unknown = all.filter(function (m) { return m.status === null || m.status === undefined; });
+        var parts = [];
+        if (down.length) parts.push('down: ' + names(down));
+        if (pending.length) parts.push('retrying: ' + names(pending));
+        if (unknown.length) parts.push(fmt.num(unknown.length) + ' not yet checked');
+        return { value: fmt.num(up.length) + ' of ' + fmt.num(all.length), note: parts.length ? parts.join('; ') : 'Every monitored service answered' };
+      }, { href: A.href('stack'), title: 'Open the stack heartbeats' }),
+      liveTile('Open alerts', ['/api/alerts/active'], function (datas) {
+        var list = datas[0].alerts || [];
+        var worst = list[0];
+        return {
+          value: fmt.num(list.length),
+          note: !worst ? 'Alertmanager reports nothing active'
+            : worst.severity !== 'none' ? 'Worst severity: ' + worst.severity
+              : 'Severity label "' + ((worst.labels || {}).severity || 'none') + '", not ranked'
+        };
+      }, { href: A.href('security', ['alerts']), title: 'Open the alerts', notConfigured: 'Alertmanager is not configured for this console' }),
+      liveTile('Declared applications', ['/api/gitops/apps'], function (datas) {
+        var apps = datas[0].apps || [];
+        var tiers = {};
+        apps.forEach(function (a) { var t = a.tier === null || a.tier === undefined ? 'untiered' : 'tier ' + a.tier; tiers[t] = (tiers[t] || 0) + 1; });
+        var breakdown = Object.keys(tiers).sort().map(function (t) { return t + ': ' + fmt.num(tiers[t]); }).join(', ');
+        var problems = (datas[0].problems || []).length;
+        return { value: fmt.num(datas[0].count === undefined ? apps.length : datas[0].count), note: (breakdown || 'no tiers declared') + (problems ? '; ' + fmt.num(problems) + ' directory without a spec' : '') };
+      }, { href: A.href('apps'), title: 'Open Applications', notConfigured: 'No GitOps directory is configured for this console' }),
+      liveTile('Containers running', ['/api/containers'], function (datas) {
+        return { value: fmt.num(datas[0].running) + ' of ' + fmt.num(datas[0].count), note: 'Read through the Docker socket proxy' };
+      }, { href: A.href('stack'), title: 'Open the stack', notConfigured: 'The Docker socket proxy is not configured for this console' }),
+      liveTile('Host CPU now', ['/api/host'], function (datas) {
+        var c = datas[0].cpu || {};
+        return { value: fmt.pct((c.usageRatio || 0) * 100, 0), note: fmt.num(c.cores) + ' cores on ' + (datas[0].hostname || 'this host') };
+      }, { href: A.href('system'), title: 'Open the host' }),
+      liveTile('Host memory now', ['/api/host'], function (datas) {
+        var m = datas[0].memory || {};
+        return { value: fmt.pct((m.usageRatio || 0) * 100, 0), note: gb(m.usedBytes) + ' of ' + gb(m.totalBytes) + ' in use' };
+      }, { href: A.href('system'), title: 'Open the host' }),
+      liveTile('Console API up for', ['/api/health', '/api/capabilities'], function (datas) {
+        var caps = datas[1] || {};
+        return { value: fmt.dur(datas[0].uptimeSeconds || 0), note: caps.writesAllowed ? 'Writes are allowed' : 'Read-only: writes are refused' };
+      }, { href: A.href('system'), title: 'Open the host and console' })
+    ]);
+  }
+
+  function alertSentence(a) {
+    var where = (a.labels || {}).host || (a.labels || {}).instance;
+    return (a.name || 'an unnamed alert') + (a.summary ? ': ' + a.summary : '') + (where ? ' (' + where + ')' : '') +
+      (a.startsAt ? ', firing since ' + agoLive(a.startsAt) : '');
+  }
+
+  function liveHero() {
+    var box = el('div');
+    var alive = stillHere();
+    readAll(['/api/alerts/active', '/api/heartbeats']).then(function (envs) {
+      if (!alive()) return;
+      var alerts = envs[0], beats = envs[1];
+      var crit = alerts.ok ? (alerts.data.alerts || []).filter(function (a) { return a.severity === 'critical'; }) : [];
+      var down = beats.ok ? monitorsDown(beats.data) : [];
+      var out;
+      if (crit.length) {
+        out = el('div.callout.bad', [
+          el('strong', { text: 'A critical alert is active: ' + crit[0].name + '.' }),
+          el('p', { text: 'Alertmanager reports ' + alertSentence(crit[0]) + '.' + (crit.length > 1 ? ' ' + fmt.num(crit.length - 1) + ' other critical alert' + (crit.length === 2 ? ' is' : 's are') + ' also active.' : '') + ' Alerts ' + readWord(alerts) + '.' }),
+          A.link('Open the alerts in Security', 'security', ['alerts'])
+        ]);
+      } else if (down.length) {
+        var m = down[0];
+        out = el('div.callout.bad', [
+          el('strong', { text: (m.label || m.id) + ' is down.' }),
+          el('p', { text: 'The console heartbeat for ' + (m.label || m.id) + ' has failed ' + fmt.num(m.consecutiveFailures) + ' time' + (m.consecutiveFailures === 1 ? '' : 's') + ' in a row' + (m.message ? ': ' + m.message : '.') + (down.length > 1 ? ' Also down: ' + names(down.slice(1)) + '.' : '') + ' Heartbeats ' + readWord(beats) + '.' }),
+          A.link('Open the stack heartbeats', 'stack')
+        ]);
+      } else if (!beats.ok && !alerts.ok) {
+        out = el('div.callout.warn', [
+          el('strong', { text: 'Nothing could be checked.' }),
+          el('p', { text: 'Neither the heartbeats nor Alertmanager answered: ' + ((beats.error || {}).message || 'no reason given') + ' ' + ((alerts.error || {}).message || '') })
+        ]);
+      } else {
+        var all = beats.ok ? monitorsOf(beats.data) : [];
+        var pending = all.filter(function (m) { return m.status === 2; });
+        var checked = beats.ok ? fmt.num(all.length) + ' service monitor' + (all.length === 1 ? '' : 's') + (all.length ? ' (' + names(all) + ')' : '') + (pending.length ? ', of which ' + fmt.num(pending.length) + (pending.length === 1 ? ' is' : ' are') + ' still retrying' : '') : 'no heartbeat monitor (' + ((beats.error || {}).message || 'unreadable') + ')';
+        var alertWord = alerts.ok
+          ? 'Alertmanager, which reports ' + fmt.num((alerts.data.alerts || []).length) + ' active alert' + ((alerts.data.alerts || []).length === 1 ? '' : 's') + ', none critical'
+          : 'not Alertmanager, which is ' + ((alerts.error || {}).reason === 'not-configured' ? 'not configured' : 'unreadable');
+        out = el('div.callout.ok', [
+          el('strong', { text: 'Nothing is failing.' }),
+          el('p', { text: 'Checked ' + checked + ' and ' + alertWord + '. ' + readSentence(beats.ok ? beats : alerts) })
+        ]);
+      }
+      ui.clear(box);
+      box.appendChild(out);
+    });
+    box.appendChild(ui.skeleton(2));
+    return box;
+  }
+
+  function alertWord(a) {
+    if (a.severity && a.severity !== 'none') return 'Alert, ' + a.severity;
+    var raw = (a.labels || {}).severity;
+    return raw ? 'Alert, label "' + raw + '"' : 'Alert';
+  }
+
+  function liveNeedsYou() {
+    var body = el('div', [ui.skeleton(3)]);
+    var alive = stillHere();
+    readAll(['/api/alerts/active', '/api/heartbeats', '/api/gitops/apps', '/api/secrets/seal-status']).then(function (envs) {
+      if (!alive()) return;
+      var alerts = envs[0], beats = envs[1], apps = envs[2], seal = envs[3];
+      var urgent = [], rest = [], later = [], unchecked = [], checked = [];
+      function skipped(env, what) {
+        var e = env.error || {};
+        unchecked.push(what + ' (' + (e.reason === 'not-configured' ? 'not configured' : e.message || 'unreadable') + ')');
+      }
+      if (alerts.ok) {
+        checked.push('Alertmanager');
+        (alerts.data.alerts || []).forEach(function (a) {
+          var row = needsYouRow(alertWord(a) + ': ' + alertSentence(a), A.link('Open alerts', 'security', ['alerts']));
+          (a.severity === 'critical' || a.severity === 'high' ? urgent : later).push(row);
+        });
+      } else skipped(alerts, 'Alertmanager');
+      if (beats.ok) {
+        checked.push('service heartbeats');
+        monitorsDown(beats.data).forEach(function (m) {
+          rest.push(needsYouRow('Service: ' + (m.label || m.id) + ' is down' + (m.message ? ', ' + m.message : '.'), A.link('Open the stack', 'stack')));
+        });
+      } else skipped(beats, 'service heartbeats');
+      if (seal.ok && seal.data.configured === false) {
+        unchecked.push('the OpenBao seal (not configured)');
+      } else if (seal.ok) {
+        checked.push('the OpenBao seal');
+        var sb = seal.data.sandbox || {};
+        if (sb.verdict === true) {
+          rest.push(needsYouRow('Secrets: ' + (sb.title || 'the vault has a sandbox seal.') + (sb.basis ? ' (' + sb.basis + ')' : ''), A.link('Open the stack', 'stack')));
+        } else if (sb.verdict === null && seal.data.configured !== false) {
+          rest.push(needsYouRow('Secrets: ' + (sb.title || 'the unseal posture has not been verified.'), A.link('Open the stack', 'stack')));
+        }
+      } else skipped(seal, 'the OpenBao seal');
+      if (apps.ok) {
+        checked.push('GitOps declarations');
+        (apps.data.problems || []).forEach(function (p) {
+          rest.push(needsYouRow('Declaration: ' + p.directory + ' ' + p.message, A.link('Open Applications', 'apps')));
+        });
+      } else skipped(apps, 'GitOps declarations');
+
+      var rows = urgent.concat(rest, later);
+      var SHOW = 8;
+      ui.clear(body);
+      if (rows.length) {
+        body.appendChild(el('div.stack', rows.slice(0, SHOW)));
+        if (rows.length > SHOW) {
+          body.appendChild(el('div.row', [
+            el('span.muted', { text: fmt.num(rows.length - SHOW) + ' more.' }),
+            A.link('Open the alerts', 'security', ['alerts'])
+          ]));
+        }
+      } else {
+        body.appendChild(ui.emptyState('Nothing is waiting for you', 'Checked ' + (checked.length ? checked.join(', ') : 'nothing') + ': no active alert, no monitor down, no sandbox seal and no declaration without a spec.'));
+      }
+      body.appendChild(el('p.hint', {
+        text: readSentence(envs.filter(function (e) { return e.ok; })[0] || envs[0]) +
+          (unchecked.length ? ' Not checked: ' + unchecked.join('; ') + '.' : '')
+      }));
+    });
+    return ui.card('Needs you', body);
+  }
+
+  function auditWho(ev) {
+    return ev.subject ? ev.subject : 'Somebody';
+  }
+
+  function liveAuditSentence(ev) {
+    var who = auditWho(ev);
+    var from = ev.sourceAddress ? ' from ' + ev.sourceAddress : '';
+    var why = ev.reason ? ' (' + ev.reason + ')' : '';
+    switch (ev.event) {
+      case 'auth.login.succeeded': return who + ' signed in' + from + '.';
+      case 'auth.login.failed': return 'A sign-in as ' + who + from + ' failed' + why + '.';
+      case 'auth.login.throttled': return 'A sign-in as ' + who + from + ' was throttled' + why + '.';
+      case 'auth.logout': return who + ' signed out' + from + '.';
+      case 'auth.account.locked': return 'The account ' + who + ' was locked' + why + '.';
+      case 'auth.denied': return 'A request' + (ev.path ? ' to ' + ev.path : '') + from + ' was refused' + why + '.';
+      case 'auth.csrf.rejected': return 'A request' + (ev.path ? ' to ' + ev.path : '') + from + ' was rejected without the console header.';
+      case 'auth.session.expired.idle': return 'The session of ' + who + ' expired after idling.';
+      case 'auth.session.expired.absolute': return 'The session of ' + who + ' reached its absolute limit.';
+      case 'auth.session.renewed': return 'The session of ' + who + ' was renewed.';
+      case 'auth.session.evicted': return 'A session of ' + who + ' was evicted' + why + '.';
+      case 'auth.session.rejected': return 'A session cookie' + from + ' was rejected' + why + '.';
+      case 'auth.session.anomaly': return 'A session of ' + who + ' changed address or agent' + why + '.';
+      case 'auth.config.rejected': return 'The console started with ' + (ev.detail ? ev.detail : 'an auth configuration it would not accept') + '';
+      default: return who + ': ' + String(ev.event || 'event').split('.').join(' ') + (ev.outcome ? ', ' + ev.outcome : '') + '.';
+    }
+  }
+
+  function liveActivity() {
+    return A.livePanel('Recent activity', '/api/audit/recent?limit=8', function (body, data, env) {
+      var events = data.events || [];
+      if (!events.length) {
+        body.appendChild(ui.emptyState('No event yet', 'The console API has recorded nothing since it started.'));
+      } else {
+        body.appendChild(el('div.stack', events.map(function (ev) {
+          return el('div.feed-row', [
+            el('span', { text: liveAuditSentence(ev) }),
+            el('time', { datetime: ev.ts, title: ev.ts, text: agoLive(ev.ts) })
+          ]);
+        })));
+      }
+      body.appendChild(el('p.hint', {
+        text: 'Held in memory since the API started ' + (data.since ? agoLive(data.since) : '') + ': ' + fmt.num(data.total || events.length) + ' event' + (data.total === 1 ? '' : 's') +
+          (data.dropped ? ', ' + fmt.num(data.dropped) + ' dropped' : '') + '. ' + readSentence(env)
+      }));
+      body.appendChild(el('div.row', A.link('All audit events', 'audit')));
+    }, { ttlMs: 5000, skeletonRows: 8, errorTitle: 'The audit ring could not be read' });
+  }
+
+  function liveHealth() {
+    return A.livePanel('Service health', '/api/heartbeats', function (body, data, env) {
+      var monitors = monitorsOf(data).slice().sort(function (a, b) { return monitorRank(a) - monitorRank(b); });
+      if (!monitors.length) {
+        body.appendChild(ui.emptyState('No monitor is being recorded', 'The console API is watching nothing.'));
+        return;
+      }
+      body.appendChild(el('div.stack', monitors.map(function (m) {
+        var beats = m.beats || [];
+        return el('div.healthrow', [
+          A.link(m.label || m.id, 'stack'),
+          ui.heartbeatBar(beats, { slots: 30, width: 200, height: 16, label: ui.heartbeatSentence(beats, { name: m.label || m.id }) }),
+          ui.pill(m.statusName || 'unknown', monitorTone(m.status))
+        ]);
+      })));
+      body.appendChild(el('p.hint', {
+        text: 'One slot per check, oldest left, worst at the top. Held in memory since ' + (data.startedAt ? agoLive(data.startedAt) : 'the API started') + '; ' + readWord(env) + '.'
+      }));
+    }, { ttlMs: 5000, skeletonRows: 5, errorTitle: 'The heartbeats could not be read' });
+  }
+
+  function liveSites() {
+    return ui.card('Sites', [
+      A.notInStack('The two-site topology', 'This stack is one machine. There is no second site, no link check and no replication lag to show.')
+    ]);
+  }
+
+  function liveTraffic() {
+    return ui.card('Traffic, last 24 hours', [
+      A.notInStack('Per-application request rates', 'The declared applications are not deployed in this stack, so no request rate is measured for them.')
+    ]);
+  }
+
+  function liveReconciler() {
+    return ui.card('Reconciler', [
+      A.notInStack('The reconciler', 'No reconciler runs in this stack. The GitOps directory holds declarations that nothing has applied.')
+    ]);
+  }
+
+  function renderLive(mount) {
+    mount.appendChild(ui.pageHeader('Overview', 'Every panel reads the console API and says when it was read. A panel whose source does not exist in this stack says so instead of showing a figure.', [
+      ui.btn('Open runbooks', {
+        variant: 'ghost',
+        onClick: function () { A.go('ops'); }
+      })
+    ]));
+    mount.appendChild(liveHero());
+    mount.appendChild(liveTiles());
+    mount.appendChild(el('div.grid.grid-3', [liveNeedsYou(), liveActivity(), liveSites()]));
+    mount.appendChild(el('div.grid.grid-4', [liveTraffic(), liveReconciler(), liveHealth(), recentCard()]));
+  }
+
   var screen = {
     title: 'Overview',
     crumb: 'Overview',
     render: function (mount) {
-      var summary = 'Figures as of ' + fmt.stamp(new Date(d.now)) + '. The tiles below link to each screen.';
-
-      mount.appendChild(ui.pageHeader('Overview', summary, [
-        ui.btn('Open runbooks', {
-          variant: 'ghost',
-          onClick: function () { A.go('ops'); }
-        })
-      ]));
-
-      mount.appendChild(heroBand());
-      mount.appendChild(tiles());
-      mount.appendChild(el('div.grid.grid-3', [needsYouCard(), activityCard(), sitesCard()]));
-      mount.appendChild(el('div.grid.grid-4', [trafficCard(), reconcilerCard(), healthCard(), recentCard()]));
+      var mode = A.storeMode();
+      if (mode === A.MODE.SAMPLE) { renderSample(mount); return; }
+      if (mode === A.MODE.LIVE) { renderLive(mount); return; }
+      var host = el('div');
+      mount.appendChild(host);
+      A.whenProbed(function (now) {
+        if (now === A.MODE.LIVE) renderLive(host);
+        else renderSample(host);
+      });
     }
   };
 

@@ -579,6 +579,219 @@
     ]);
   }
 
+  function isLive() { return A.storeMode() === A.MODE.LIVE; }
+
+  function gate(sampleFn, liveFn) {
+    return function () {
+      var mode = A.storeMode();
+      if (mode === A.MODE.LIVE) return liveFn();
+      if (mode === A.MODE.SAMPLE) return sampleFn();
+      var host = el('div');
+      host.appendChild(ui.skeleton(3));
+      A.whenProbed(function (m) {
+        ui.clear(host);
+        host.appendChild(m === A.MODE.LIVE ? liveFn() : sampleFn());
+      });
+      return host;
+    };
+  }
+
+  function whenRead(data, env) {
+    var t = (data && data.at) || (env && env.at);
+    if (!t) return null;
+    var date = new Date(t);
+    if (isNaN(date.getTime())) return null;
+    return el('p.hint', { text: 'Read at ' + fmt.stamp(date) + '.' });
+  }
+
+  function notConfiguredBlock(part, what) {
+    return el('div.stack', [
+      el('div.row', [
+        ui.pill('not configured', 'idle'),
+        el('span.muted', { text: what + ' are not configured in this stack' })
+      ]),
+      el('p', { text: (part && part.message) || 'No source is configured for this.' })
+    ]);
+  }
+
+  function partBlock(part, what) {
+    if (part && part.reason === 'not-configured') return notConfiguredBlock(part, what);
+    return el('div.callout.warn', [
+      el('strong', { text: 'This source could not be read.' }),
+      el('p', { text: (part && part.message) || 'The reader gave no reason.' })
+    ]);
+  }
+
+  function operatorsPanel(body, data, env) {
+    var part = data.console || {};
+    var me = (A.capabilities() || {}).auth || {};
+    var ops = part.operators || [];
+    if (!ops.length) {
+      body.appendChild(ui.emptyState('No console operators are declared',
+        part.required ? 'The console requires an operators file and none is loaded.' : 'No operators file is loaded, so sign-in is not required here.'));
+    } else {
+      body.appendChild(ui.table([
+        {
+          key: 'subject', label: 'Subject',
+          render: function (r) {
+            return el('span', [mono(r.subject), r.subject === me.subject ? ui.pill('you', 'info') : null]);
+          }
+        },
+        { key: 'displayName', label: 'Display name' },
+        { key: 'roles', label: 'Roles', sortable: false, render: function (r) { return chips(r.roles, 'no roles'); } },
+        { key: 'source', label: 'Source', render: function (r) { return mono(r.source || ''); } }
+      ], ops, {
+        caption: 'Console operators with subject, display name and roles',
+        sortKey: 'subject',
+        rowKey: function (r) { return r.subject; },
+        empty: 'No console operators.'
+      }));
+    }
+    (part.problems || []).forEach(function (p) {
+      body.appendChild(el('div.callout.warn', [el('strong', { text: 'Operators file problem' }), el('p', { text: String(p.message || p) })]));
+    });
+    var w = whenRead(data, env);
+    if (w) body.appendChild(w);
+  }
+
+  function pgPanel(body, data, env) {
+    var part = data.postgres || {};
+    if (part.ok === false) {
+      body.appendChild(partBlock(part, 'PostgreSQL roles'));
+      var w0 = whenRead(part.at ? part : data, env);
+      if (w0) body.appendChild(w0);
+      return;
+    }
+    var roles = (part.roles || []).filter(function (r) { return !r.predefined; });
+    body.appendChild(ui.table([
+      { key: 'name', label: 'Role', render: function (r) { return mono(r.name); } },
+      { key: 'canLogin', label: 'Login', status: true, render: function (r) { return ui.pill(r.canLogin ? 'login' : 'group', r.canLogin ? 'ok' : 'idle'); } },
+      { key: 'superuser', label: 'Superuser', status: true, render: function (r) { return r.superuser ? ui.pill('superuser', 'bad') : ui.pill('no', 'idle'); } },
+      { key: 'memberOf', label: 'Member of', sortable: false, render: function (r) { return chips(r.memberOf, 'none'); } },
+      { key: 'sessions', label: 'Sessions', align: 'right', render: function (r) { return fmt.num(r.sessions); } }
+    ], roles, { caption: 'PostgreSQL roles', sortKey: 'name', rowKey: function (r) { return r.name; }, empty: 'No roles.' }));
+    var w = whenRead(part.at ? part : data, env);
+    if (w) body.appendChild(w);
+  }
+
+  function objectStorePanel(body, data, env) {
+    var part = data.objectStore || {};
+    if (part.ok === false) {
+      body.appendChild(partBlock(part, 'Object store identities'));
+    } else {
+      body.appendChild(ui.table([
+        { key: 'name', label: 'Identity', render: function (r) { return mono(r.name); } },
+        { key: 'accessKeys', label: 'Access keys', sortable: false, render: function (r) { return chips(r.accessKeys, 'none'); } },
+        { key: 'actions', label: 'Actions', sortable: false, render: function (r) { return chips(r.actions, 'none'); } }
+      ], part.identities || [], { caption: 'Object store identities', sortKey: 'name', rowKey: function (r) { return r.name; }, empty: 'No identities.' }));
+    }
+    var w = whenRead(data, env);
+    if (w) body.appendChild(w);
+  }
+
+  function accountsTable(accounts) {
+    return ui.table([
+      { key: 'name', label: 'Account', render: function (r) { return mono(r.name); } },
+      { key: 'kind', label: 'Kind' },
+      { key: 'tier', label: 'Tier', align: 'right', render: function (r) { return 'Tier ' + r.tier; } },
+      { key: 'hosts', label: 'Hosts', sortable: false, render: function (r) { return chips(r.hosts, 'no hosts'); } },
+      { key: 'sql', label: 'SQL databases', sortable: false, render: function (r) { return chips(r.sql, 'no SQL access'); } },
+      { key: 's3', label: 'S3 grants', sortable: false, render: function (r) { return chips(r.s3, 'no bucket access'); } },
+      { key: 'codesign', label: 'Code signing', status: true, render: function (r) { return r.codesign ? ui.pill('codesign', 'warn') : ui.pill('no', 'idle'); } }
+    ], accounts, {
+      caption: 'Service accounts declared in the GitOps tree, with hosts, tier, SQL databases, S3 grants and code signing',
+      sortKey: 'name',
+      rowKey: function (r) { return r.name; },
+      empty: 'No service accounts are declared.'
+    });
+  }
+
+  function declaredAccountsPanel(body, data, env) {
+    var part = data.serviceAccounts || {};
+    if (part.ok === false) body.appendChild(partBlock(part, 'Declared service accounts'));
+    else body.appendChild(accountsTable(part.accounts || []));
+    var w = whenRead(data, env);
+    if (w) body.appendChild(w);
+  }
+
+  function principalsLive() {
+    var path = '/api/identity/principals';
+    return el('div.stack', [
+      el('div.callout.info', [
+        el('strong', { text: 'Principals this stack can actually name.' }),
+        el('p', { text: 'There is no Active Directory here. Identity is console operators, PostgreSQL roles, object store identities and the service accounts the GitOps tree declares. Each panel says when it was read and what it could not reach.' })
+      ]),
+      A.livePanel('Console operators', path, operatorsPanel, { skeletonRows: 2 }),
+      A.livePanel('PostgreSQL roles', path, pgPanel, { skeletonRows: 2 }),
+      A.livePanel('Object store identities', path, objectStorePanel, { skeletonRows: 2 }),
+      A.livePanel('Declared service accounts', path, declaredAccountsPanel, { skeletonRows: 2 })
+    ]);
+  }
+
+  function gmsaLive() {
+    return el('div.stack', [
+      el('div.callout.info', [
+        el('strong', { text: 'Rotation age is not known.' }),
+        el('p', { text: 'There is no directory to ask when a service account password was last rotated, so no age is shown. What is shown is what the GitOps tree declares each account may reach.' })
+      ]),
+      A.livePanel('Service accounts', '/api/gitops/service-accounts', function (body, data, env) {
+        body.appendChild(accountsTable(data.accounts || []));
+        var t = data.declaredAt ? new Date(data.declaredAt) : null;
+        body.appendChild(el('p.hint', {
+          text: (t && !isNaN(t.getTime()) ? 'Declared at ' + fmt.stamp(t) + '. ' : 'Declaration time unknown. ') +
+            (data.source ? 'Source: ' + data.source + '. ' : '') +
+            (env && env.at ? 'Read at ' + fmt.stamp(new Date(env.at)) + '.' : '')
+        }));
+      }, { skeletonRows: 3 })
+    ]);
+  }
+
+  function grantsLive() {
+    return el('div.stack', [
+      A.notInStack('Just-in-time group membership',
+        'needs a directory with groups and an approval workflow, and this stack has neither. There are no grants to approve, deny or revoke here.')
+    ]);
+  }
+
+  function sealRender(body, data, env) {
+    var seal = data.seal || {};
+    if (data.configured === false || data.state === 'not-configured') {
+      body.appendChild(el('div.callout.warn', [
+        el('strong', { text: 'OpenBao is not configured.' }),
+        el('p', { text: data.summary || 'This console has no OpenBao address.' }),
+        data.detail ? el('p', { text: data.detail }) : null
+      ]));
+      var w0 = whenRead(data, env);
+      if (w0) body.appendChild(w0);
+      return;
+    }
+    body.appendChild(el('div.tiles', [
+      ui.statTile('Sealed', data.sealed === null || data.sealed === undefined ? 'unknown' : (data.sealed ? 'sealed' : 'unsealed'), { note: data.summary || '' }),
+      ui.statTile('Seal type', seal.type || 'unknown', { note: seal.shares ? seal.threshold + ' of ' + seal.shares + ' shares' : '' }),
+      ui.statTile('Version', data.version || 'unknown', { note: data.clusterName || '' })
+    ]));
+    if (data.sandbox && data.sandbox.verdict === true) {
+      body.appendChild(el('div.callout.bad', [
+        el('strong', { text: data.sandbox.title || 'Sandbox unseal: this seal is 1-of-1.' }),
+        el('p', { text: data.sandbox.message || '' })
+      ]));
+    }
+    if (data.detail) body.appendChild(el('p', { text: data.detail }));
+    if (data.reachable === false) {
+      body.appendChild(el('div.callout.warn', [el('strong', { text: 'OpenBao could not be reached.' }), el('p', { text: data.message || '' })]));
+    }
+    var w = whenRead(data, env);
+    if (w) body.appendChild(w);
+  }
+
+  function secretsLive() {
+    return el('div.stack', [
+      A.livePanel('OpenBao seal status', '/api/secrets/seal-status', sealRender, { skeletonRows: 2 }),
+      A.notInStack('Secret lease counts and rotation ages',
+        'are not read: the console holds no OpenBao token that may list paths or leases, so it shows seal status only and never a path, lease or secret value. There is nothing to rotate or revoke from here.')
+    ]);
+  }
+
   A.screen('identity', {
     title: 'Identity & secrets',
     crumb: 'Identity & secrets',
@@ -586,7 +799,7 @@
       mount.appendChild(ui.pageHeader(
         'Identity & secrets',
         'Who can reach what, for how long, and on whose approval.',
-        [
+        isLive() ? [] : [
           ui.btn('Request elevation', {
             variant: 'primary',
             onClick: requestElevationDialog
@@ -595,10 +808,10 @@
 
       var wanted = (ctx && ctx.params) || {};
       mount.appendChild(ui.tabs([
-        { id: 'people', label: 'People', render: peopleTab },
-        { id: 'gmsas', label: 'Service accounts', render: gmsaTab },
-        { id: 'grants', label: 'Access grants', render: grantsTab },
-        { id: 'secrets', label: 'Secrets', render: secretsTab }
+        { id: 'people', label: isLive() ? 'Principals' : 'People', render: gate(peopleTab, principalsLive) },
+        { id: 'gmsas', label: 'Service accounts', render: gate(gmsaTab, gmsaLive) },
+        { id: 'grants', label: 'Access grants', render: gate(grantsTab, grantsLive) },
+        { id: 'secrets', label: 'Secrets', render: gate(secretsTab, secretsLive) }
       ], {
         label: 'Identity sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,

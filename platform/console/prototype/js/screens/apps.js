@@ -936,18 +936,474 @@
     }));
   }
 
+  var APPS_PATH = '/api/gitops/apps';
+  var ENVS_PATH = '/api/gitops/environments';
+  var CONTAINERS_PATH = '/api/containers';
+
+  var LIVE_FILTER_FIELDS = [
+    { key: 'name', label: 'Name' },
+    { key: 'owner', label: 'Owner' },
+    { key: 'tier', label: 'Tier' },
+    { key: 'host', label: 'Ingress host' }
+  ];
+
+  var LIVE_FILTER_ACCESSORS = {
+    name: function (a) { return a.name + ' ' + a.directory; },
+    owner: function (a) { return a.owner || ''; },
+    tier: function (a) { return a.tier === null ? '' : String(a.tier); },
+    host: function (a) { return a.ingress && a.ingress.host ? a.ingress.host : ''; }
+  };
+
+  function readAt(env, source) {
+    return el('p.hint', { text: 'Read at ' + fmt.stamp(new Date(env.at)) + (source ? ' from ' + source : '') + '.' });
+  }
+
+  function dash() { return el('span.muted', { text: 'not declared' }); }
+
+  function versionsByApp(envs) {
+    var out = Object.create(null);
+    (envs || []).forEach(function (e) {
+      (e.apps || []).forEach(function (a) {
+        if (!out[a.app]) out[a.app] = [];
+        out[a.app].push({ env: e.name, version: a.version, pinned: a.pinned, sha256: a.sha256 });
+      });
+    });
+    return out;
+  }
+
+  function productionVersion(byApp, name) {
+    var list = byApp[name] || [];
+    var hit = null;
+    list.forEach(function (v) { if (!hit && v.env === 'production') hit = v; });
+    if (!hit && list.length) hit = list[0];
+    return hit;
+  }
+
+  function liveListColumns(byApp) {
+    return [
+      {
+        key: 'name', label: 'Name',
+        sort: function (r) { return r.name; },
+        render: function (r) {
+          return el('div.col', [
+            A.link(r.name, 'apps', [r.name]),
+            el('div.muted', { text: (r.kind || 'app') + ' in ' + r.directory })
+          ]);
+        }
+      },
+      { key: 'owner', label: 'Owner', render: function (r) { return r.owner || dash(); } },
+      { key: 'tier', label: 'Tier', align: 'right', render: function (r) { return r.tier === null ? dash() : 'Tier ' + r.tier; } },
+      {
+        key: 'version', label: 'Production version',
+        sort: function (r) { var v = productionVersion(byApp, r.name); return v && v.version ? v.version : ''; },
+        csv: function (r) { var v = productionVersion(byApp, r.name); return v && v.version ? v.version : ''; },
+        render: function (r) {
+          var v = productionVersion(byApp, r.name);
+          return v && v.version ? mono(v.version) : dash();
+        }
+      },
+      { key: 'instances', label: 'Declared instances', align: 'right', render: function (r) { return fmt.num(r.instances); } },
+      { key: 'services', label: 'Services', align: 'right', sort: function (r) { return r.services.length; }, csv: function (r) { return r.services.length; }, render: function (r) { return fmt.num(r.services.length); } },
+      {
+        key: 'host', label: 'Ingress host',
+        sort: function (r) { return r.ingress && r.ingress.host ? r.ingress.host : ''; },
+        csv: function (r) { return r.ingress && r.ingress.host ? r.ingress.host : ''; },
+        render: function (r) { return r.ingress && r.ingress.host ? mono(r.ingress.host) : dash(); }
+      },
+      { key: 'secrets', label: 'Secret refs', align: 'right', sort: function (r) { return r.secretRefs.length; }, csv: function (r) { return r.secretRefs.length; }, render: function (r) { return fmt.num(r.secretRefs.length); } },
+      { key: 'alerts', label: 'Alert rules', align: 'right', sort: function (r) { return r.alertRules.length; }, csv: function (r) { return r.alertRules.length; }, render: function (r) { return fmt.num(r.alertRules.length); } }
+    ];
+  }
+
+  function problemsList(problems) {
+    if (!problems || !problems.length) return null;
+    return el('div.stack', [
+      el('h3', { text: 'Directories without a usable spec' }),
+      el('ul', problems.map(function (p) {
+        return el('li', [mono(p.directory), ' ', String(p.message || '')]);
+      }))
+    ]);
+  }
+
+  function renderLiveList(mount) {
+    mount.appendChild(ui.pageHeader(
+      'Applications',
+      'Every application declared in the GitOps repository, read from its spec. Nothing here is measured from a running cluster.'));
+
+    var tokens = ui.decodeTokens(A.state.params && A.state.params.f);
+
+    function syncUrl() {
+      A.replaceHash(A.href('apps', [], { f: ui.encodeTokens(tokens) }));
+    }
+
+    mount.appendChild(A.livePanel('Declared applications', APPS_PATH, function (body, data, env) {
+      var apps = data.apps || [];
+      var filterHost = el('div');
+      var tableHost = el('div');
+      var appTable = null;
+      body.appendChild(filterHost);
+      body.appendChild(tableHost);
+      body.appendChild(el('div.stack', [
+        problemsList(data.problems),
+        readAt(env, data.source)
+      ]));
+      var byApp = Object.create(null);
+      var envNote = el('p.hint', { text: 'Reading the declared versions from ' + ENVS_PATH + '.' });
+      body.appendChild(envNote);
+
+      function paint() {
+        if (!apps.length) {
+          appTable = null;
+          ui.clear(tableHost);
+          tableHost.appendChild(ui.emptyState(
+            'No applications declared',
+            'The GitOps apps directory holds no app.yaml.'));
+          return;
+        }
+        var rows = ui.applyTokens(apps, tokens, LIVE_FILTER_ACCESSORS);
+        if (!rows.length) {
+          appTable = null;
+          ui.clear(tableHost);
+          tableHost.appendChild(ui.emptyState(
+            'No application matches these filters',
+            'Try removing a filter.',
+            ui.btn('Clear filters', { variant: 'primary', onClick: clearFilters })));
+          return;
+        }
+        ui.clear(tableHost);
+        appTable = ui.table(liveListColumns(byApp), rows, {
+          id: 'apps.live',
+          caption: 'Declared applications, showing ' + rows.length + ' of ' + apps.length,
+          sortKey: 'name',
+          rowKey: function (r) { return r.name; },
+          onRow: function (r) { A.go('apps', [r.name]); }
+        });
+        tableHost.appendChild(appTable);
+      }
+
+      function mountFilter() {
+        ui.clear(filterHost);
+        var pf = ui.propertyFilter(LIVE_FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens });
+        tokens = pf.tokens();
+        filterHost.appendChild(el('div.row', [pf, el('span.spacer'),
+          ui.viewsBar('apps', function () { return window.location.hash; }),
+          ui.columnsButton(function () { return appTable; }, 'applications'),
+          ui.exportButton(function () { return appTable; }, 'applications')]));
+      }
+
+      function clearFilters() {
+        tokens = [];
+        mountFilter();
+        paint();
+        syncUrl();
+        A.announce('Filters cleared, ' + apps.length + ' applications shown');
+        var input = filterHost.querySelector('.pf-input');
+        if (input) input.focus();
+      }
+
+      mountFilter();
+      paint();
+
+      var alive = true;
+      A.onLeave(function () { alive = false; });
+      A.read(ENVS_PATH).then(function (envEnv) {
+        if (!alive) return;
+        ui.clear(envNote);
+        if (!envEnv.ok) {
+          envNote.textContent = 'Declared versions could not be read: ' + ((envEnv.error && envEnv.error.message) || 'the environments answer failed.');
+          return;
+        }
+        byApp = versionsByApp(envEnv.data.environments);
+        envNote.textContent = 'Versions are the declarations in ' + (envEnv.data.source || 'the environments directory') +
+          ', read at ' + fmt.stamp(new Date(envEnv.at)) + '. ' + (envEnv.data.note || '');
+        paint();
+      });
+    }, { skeletonRows: 5, errorTitle: 'The application specs could not be read', notConfigured: function (body, e) {
+      body.appendChild(ui.emptyState('GitOps repository not configured', e.message || 'ARGUS_GITOPS_DIR is not set on the console API.'));
+    } }));
+  }
+
+  function findApp(data, name) {
+    var hit = null;
+    ((data && data.apps) || []).forEach(function (a) { if (!hit && a.name === name) hit = a; });
+    return hit;
+  }
+
+  function notDeclared(name) {
+    return ui.emptyState('No such application',
+      'Nothing in the GitOps repository is declared as "' + name + '".',
+      ui.btn('All applications', { variant: 'ghost', onClick: function () { A.go('apps'); } }));
+  }
+
+  function specPanel(name) {
+    return A.livePanel('Declaration', APPS_PATH, function (body, data, env) {
+      var app = findApp(data, name);
+      if (!app) { body.appendChild(notDeclared(name)); return; }
+      var pkg = app.package || {};
+      body.appendChild(ui.dl([
+        ['Kind', app.kind || dash()],
+        ['Owner', app.owner || dash()],
+        ['Tier', app.tier === null ? dash() : 'Tier ' + app.tier],
+        ['Repository', app.repo ? mono(app.repo) : dash()],
+        ['Identity', app.identity ? mono(app.identity) : dash()],
+        ['Package bucket', pkg.bucket ? mono(pkg.bucket) : dash()],
+        ['Package key', pkg.key ? mono(pkg.key) : dash()],
+        ['Signature', pkg.signature ? mono(pkg.signature) : dash()],
+        ['Declared instances', fmt.num(app.instances)],
+        ['Spec file', mono(app.file)],
+        ['Spec changed', fmt.stamp(new Date(app.declaredAt))]
+      ]));
+      body.appendChild(readAt(env, data.source));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function gitopsMissing(body, e) {
+    body.appendChild(ui.emptyState('GitOps repository not configured', e.message || 'ARGUS_GITOPS_DIR is not set on the console API.'));
+  }
+
+  function servicesPanel(name) {
+    var cols = [
+      { key: 'name', label: 'Service', render: function (r) { return el('div.col', [el('strong', { text: r.name || '' }), el('div.muted', { text: r.type || '' })]); } },
+      { key: 'exe', label: 'Executable', render: function (r) { return r.exe ? mono(r.exe) : dash(); } },
+      { key: 'instances', label: 'Instances', align: 'right', render: function (r) { return r.instances === null ? dash() : fmt.num(r.instances); } },
+      {
+        key: 'endpoints', label: 'Endpoints',
+        sort: function (r) { return (r.endpoints || []).map(function (e) { return e.name + ':' + e.port; }).join(' '); },
+        csv: function (r) { return (r.endpoints || []).map(function (e) { return e.name + ':' + e.port; }).join(' '); },
+        render: function (r) {
+          if (!r.endpoints || !r.endpoints.length) return dash();
+          return el('div.col', r.endpoints.map(function (e) { return mono((e.name || 'endpoint') + ' ' + e.port); }));
+        }
+      },
+      {
+        key: 'resources', label: 'Resources',
+        sort: function (r) { return r.resources ? JSON.stringify(r.resources) : ''; },
+        csv: function (r) { return r.resources ? JSON.stringify(r.resources) : ''; },
+        render: function (r) {
+          if (!r.resources) return dash();
+          return Object.keys(r.resources).map(function (k) { return k + ' ' + r.resources[k]; }).join(', ');
+        }
+      },
+      { key: 'envKeys', label: 'Env keys', align: 'right', render: function (r) { return fmt.num(r.envKeys); } }
+    ];
+    return A.livePanel('Services', APPS_PATH, function (body, data, env) {
+      var app = findApp(data, name);
+      if (!app) { body.appendChild(notDeclared(name)); return; }
+      if (!app.services.length) { body.appendChild(ui.emptyState('No services declared', 'The spec lists no services.')); return; }
+      body.appendChild(ui.table(cols, app.services, {
+        caption: 'Services declared for ' + name,
+        sortKey: 'name',
+        rowKey: function (r) { return String(r.name); }
+      }));
+      body.appendChild(readAt(env, app.file));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function ingressPanel(name) {
+    return A.livePanel('Ingress and health probe', APPS_PATH, function (body, data, env) {
+      var app = findApp(data, name);
+      if (!app) { body.appendChild(notDeclared(name)); return; }
+      var ing = app.ingress, h = app.health;
+      body.appendChild(ui.dl([
+        ['Ingress host', ing && ing.host ? mono(ing.host) : dash()],
+        ['Ingress upstream', ing && ing.upstream ? mono(ing.upstream) : dash()],
+        ['WAF', ing && ing.waf ? mono(ing.waf) : dash()],
+        ['Rate limit', ing && ing.rateLimit ? Object.keys(ing.rateLimit).map(function (k) { return k + ' ' + ing.rateLimit[k]; }).join(', ') : dash()],
+        ['Probe path', h && h.path ? mono(h.path) : dash()],
+        ['Probe upstream', h && h.upstream ? mono(h.upstream) : dash()],
+        ['Probe interval', h && h.intervalSeconds ? fmt.num(h.intervalSeconds) + ' s' : dash()],
+        ['On failure', h && h.failureAction ? h.failureAction : dash()]
+      ]));
+      body.appendChild(readAt(env, app.file));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function egressPanel(name) {
+    return A.livePanel('Egress allow-list', APPS_PATH, function (body, data, env) {
+      var app = findApp(data, name);
+      if (!app) { body.appendChild(notDeclared(name)); return; }
+      if (!app.egress.length) {
+        body.appendChild(ui.emptyState('No egress declared', 'The spec allows this application no outbound host.'));
+      } else {
+        body.appendChild(el('ul', app.egress.map(function (h) { return el('li', [mono(h)]); })));
+      }
+      body.appendChild(readAt(env, app.file));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function secretsPanel(name) {
+    return A.livePanel('Secret references', APPS_PATH, function (body, data, env) {
+      var app = findApp(data, name);
+      if (!app) { body.appendChild(notDeclared(name)); return; }
+      body.appendChild(el('div.callout.info', { text: 'Only the OpenBao paths the spec references are shown. The console never reads a secret value.' }));
+      if (!app.secretRefs.length) {
+        body.appendChild(ui.emptyState('No secret references', 'The spec references nothing in OpenBao.'));
+      } else {
+        body.appendChild(el('ul', app.secretRefs.map(function (p) {
+          return el('li', [mono(p), ' ', ui.pill('value never fetched', 'idle')]);
+        })));
+      }
+      body.appendChild(readAt(env, app.file));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function severityPill(sev) {
+    if (!sev) return dash();
+    var tone = sev === 'page' || sev === 'critical' ? 'bad' : sev === 'warning' || sev === 'ticket' ? 'warn' : 'info';
+    return ui.pill(sev, tone);
+  }
+
+  function alertsPanel(name) {
+    var cols = [
+      { key: 'name', label: 'Rule', render: function (r) { return r.name ? mono(r.name) : el('span.muted', { text: r.error || 'unreadable' }); } },
+      { key: 'severity', label: 'Severity', status: true, render: function (r) { return severityPill(r.severity); } },
+      { key: 'for', label: 'For', render: function (r) { return r.for ? mono(r.for) : el('span.muted', { text: 'immediately' }); } }
+    ];
+    return A.livePanel('Alert rules', APPS_PATH, function (body, data, env) {
+      var app = findApp(data, name);
+      if (!app) { body.appendChild(notDeclared(name)); return; }
+      if (!app.alertsFile) {
+        body.appendChild(ui.emptyState('No alert rules declared', 'The spec names no alerts file.'));
+        body.appendChild(readAt(env, app.file));
+        return;
+      }
+      if (!app.alertRules.length) {
+        body.appendChild(ui.emptyState('No alert rules', app.alertsFile + ' holds no rules.'));
+        body.appendChild(readAt(env, app.file));
+        return;
+      }
+      body.appendChild(ui.table(cols, app.alertRules, {
+        caption: 'Alert rules declared for ' + name + ' in ' + app.alertsFile,
+        sortKey: 'name',
+        rowKey: function (r) { return String(r.name || r.error); }
+      }));
+      body.appendChild(el('p.hint', { text: 'Declared in ' + app.alertsFile + '. Whether Prometheus has loaded them is a question for the security screen.' }));
+      body.appendChild(readAt(env, app.file));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function versionsPanel(name) {
+    var cols = [
+      { key: 'env', label: 'Environment' },
+      { key: 'version', label: 'Declared version', render: function (r) { return r.version ? mono(r.version) : dash(); } },
+      { key: 'pinned', label: 'Digest', status: true, render: function (r) { return r.pinned ? ui.pill('pinned', 'ok') : ui.pill('not pinned', 'idle', { title: r.sha256 || '' }); } }
+    ];
+    return A.livePanel('Declared versions', ENVS_PATH, function (body, data, env) {
+      var rows = versionsByApp(data.environments)[name] || [];
+      if (!rows.length) {
+        body.appendChild(ui.emptyState('Not declared in any environment', 'No environment file names ' + name + '.'));
+      } else {
+        body.appendChild(ui.table(cols, rows, {
+          caption: 'Versions declared for ' + name + ' per environment',
+          sortKey: 'env',
+          rowKey: function (r) { return r.env; }
+        }));
+      }
+      if (data.note) body.appendChild(el('p.hint', { text: data.note }));
+      body.appendChild(readAt(env, data.source));
+    }, { notConfigured: gitopsMissing });
+  }
+
+  function containerMatches(c, name) {
+    return (c.names || []).some(function (n) { return String(n).indexOf(name) !== -1; });
+  }
+
+  function runningPanel(name) {
+    var cols = [
+      { key: 'name', label: 'Container', sort: function (r) { return (r.names || []).join(' '); }, csv: function (r) { return (r.names || []).join(' '); }, render: function (r) { return mono((r.names || []).join(', ')); } },
+      { key: 'image', label: 'Image', render: function (r) { return r.image ? mono(r.image) : dash(); } },
+      { key: 'state', label: 'State', status: true, render: function (r) { return ui.pill(r.state || 'unknown', r.state === 'running' ? 'ok' : 'warn'); } },
+      { key: 'health', label: 'Health', status: true, render: function (r) { return r.health ? ui.pill(r.health, r.health === 'healthy' ? 'ok' : r.health === 'starting' ? 'info' : 'bad') : el('span.muted', { text: 'no healthcheck' }); } },
+      { key: 'status', label: 'Status' }
+    ];
+    return A.livePanel('Running here', CONTAINERS_PATH, function (body, data, env) {
+      var rows = (data.containers || []).filter(function (c) { return containerMatches(c, name); });
+      if (!rows.length) {
+        body.appendChild(ui.emptyState('No container of this name',
+          'None of the ' + fmt.num(data.count || 0) + ' containers the runtime lists has a name containing "' + name + '".'));
+      } else {
+        body.appendChild(ui.table(cols, rows, {
+          caption: 'Containers on this host whose name contains ' + name,
+          sortKey: 'name',
+          rowKey: function (r) { return r.id || (r.names || []).join(','); }
+        }));
+      }
+      body.appendChild(readAt(env, 'the container runtime'));
+    }, {
+      errorTitle: 'Containers could not be listed',
+      notConfigured: function (body, e) {
+        body.appendChild(ui.emptyState('Container runtime not configured', e.message || 'The console API has no Docker proxy to ask.'));
+      }
+    });
+  }
+
+  function notInStackPanel(name) {
+    return ui.card('Not in this stack', [
+      A.notInStack('Running instances of ' + name, 'need a Service Fabric cluster, and this stack has none; the only process list the console can read is the container runtime, in Running here.'),
+      A.notInStack('Request, latency and error metrics for ' + name, 'need an application that exports them to Prometheus, and nothing declared here does yet.'),
+      A.notInStack('Deployment history and promotion for ' + name, 'need a reconciler that applies the declarations, and this stack has none, so there is no Deploy or Promote action.'),
+      A.notInStack('Restarting ' + name, 'needs a reconciler to receive the request, and this stack has none, so the console offers no Restart.')
+    ]);
+  }
+
+  function renderLiveDetail(mount, ctx) {
+    var name = ctx.rest[0];
+    mount.appendChild(ui.pageHeader(name, 'Declared in the GitOps repository. What is below is the spec as written, not what is running.'));
+    var holder = el('div.stack');
+    mount.appendChild(holder);
+    holder.appendChild(ui.skeleton(4));
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+    A.read(APPS_PATH).then(function (env) {
+      if (!alive) return;
+      ui.clear(holder);
+      if (env.ok && !findApp(env.data, name)) {
+        holder.appendChild(notDeclared(name));
+        holder.appendChild(readAt(env, env.data.source));
+        return;
+      }
+      holder.appendChild(el('div.grid.grid-2', [specPanel(name), versionsPanel(name)]));
+      holder.appendChild(servicesPanel(name));
+      holder.appendChild(el('div.grid.grid-2', [ingressPanel(name), egressPanel(name)]));
+      holder.appendChild(el('div.grid.grid-2', [secretsPanel(name), alertsPanel(name)]));
+      holder.appendChild(runningPanel(name));
+      holder.appendChild(notInStackPanel(name));
+    });
+  }
+
+  function renderSample(mount, ctx) {
+    if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx);
+    else renderList(mount, ctx);
+  }
+
+  function renderLive(mount, ctx) {
+    if (ctx.rest && ctx.rest.length) renderLiveDetail(mount, ctx);
+    else renderLiveList(mount, ctx);
+  }
+
   registerScreen('apps', {
     title: 'Applications',
     crumb: 'Applications',
     crumbs: function (rest) {
+      if (A.storeMode() === 'live') return [rest[0]];
       var app = d.appByName(rest[0]);
       var out = [app ? app.display : rest[0]];
       if (rest[1]) out.push(rest[1].charAt(0).toUpperCase() + rest[1].slice(1));
       return out;
     },
     render: function (mount, ctx) {
-      if (ctx.rest && ctx.rest.length) renderDetail(mount, ctx);
-      else renderList(mount, ctx);
+      var mode = A.storeMode();
+      if (mode === 'live') { renderLive(mount, ctx); return; }
+      if (mode !== 'sample') {
+        var host = el('div');
+        mount.appendChild(host);
+        A.whenProbed(function (m) {
+          if (m === 'live') renderLive(host, ctx);
+          else renderSample(host, ctx);
+        });
+        return;
+      }
+      renderSample(mount, ctx);
     }
   });
 })();

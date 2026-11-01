@@ -768,6 +768,376 @@
     ]);
   }
 
+  function stampIso(iso) {
+    if (!iso) return null;
+    var t = typeof iso === 'number' ? iso : Date.parse(iso);
+    if (isNaN(t)) return String(iso);
+    return fmt.stamp(new Date(t));
+  }
+
+  function readAt(env) {
+    return el('p.hint', { text: 'Read from the console API at ' + (stampIso(env && env.at) || 'an unknown time') + '.' });
+  }
+
+  function liveOnly(sampleRender, liveRender) {
+    if (A.storeMode() === A.MODE.SAMPLE) return sampleRender();
+    var box = el('div.stack');
+    A.whenProbed(function (mode) {
+      ui.clear(box);
+      ui.append(box, mode === A.MODE.LIVE ? liveRender() : sampleRender());
+    });
+    return box;
+  }
+
+  function notConfiguredCallout(what) {
+    return function (body, e) {
+      body.appendChild(el('div.callout.warn', [
+        el('strong', { text: what + ' is not configured.' }),
+        el('p', { text: (e && e.message) || 'The console API has no address for it, so nothing here has been read.' })
+      ]));
+    };
+  }
+
+  function inline(text) {
+    return String(text).replace(/\*\*/g, '').replace(/`/g, '');
+  }
+
+  function markdownNodes(body) {
+    var lines = String(body || '').split(/\r?\n/);
+    var out = [];
+    var para = [];
+    var list = null;
+    var code = null;
+
+    function flushPara() {
+      if (para.length) out.push(el('p', { text: inline(para.join(' ')) }));
+      para = [];
+    }
+    function flushList() {
+      if (list) out.push(list.node);
+      list = null;
+    }
+    function flushAll() { flushPara(); flushList(); }
+
+    lines.forEach(function (raw) {
+      var line = raw.replace(/\s+$/, '');
+      if (code) {
+        if (/^\s*```/.test(line)) { out.push(code.node); code = null; return; }
+        code.node.appendChild(el('div.logline', { text: raw }));
+        return;
+      }
+      if (/^\s*```/.test(line)) {
+        flushAll();
+        code = { node: el('div.logview', { role: 'group', 'aria-label': 'Code block' }) };
+        return;
+      }
+      var h = line.match(/^(#{1,6})\s+(.+)$/);
+      if (h) {
+        flushAll();
+        var level = Math.min(h[1].length + 1, 6);
+        out.push(el('h' + level, { text: inline(h[2]) }));
+        return;
+      }
+      var num = line.match(/^\s*\d+\.\s+(.+)$/);
+      var bullet = line.match(/^\s*[-*]\s+(.+)$/);
+      if (num || bullet) {
+        flushPara();
+        var kind = num ? 'ol' : 'ul';
+        if (!list || list.kind !== kind) { flushList(); list = { kind: kind, node: el(kind) }; }
+        list.node.appendChild(el('li', { text: inline(num ? num[1] : bullet[1]) }));
+        return;
+      }
+      if (!line.trim()) { flushAll(); return; }
+      if (/^\s*\|/.test(line)) { flushAll(); out.push(el('div.mono', { text: line.trim() })); return; }
+      if (list && /^\s{2,}/.test(raw)) {
+        var last = list.node.lastChild;
+        if (last) last.textContent += ' ' + inline(line.trim());
+        return;
+      }
+      para.push(line.trim());
+    });
+    if (code) out.push(code.node);
+    flushAll();
+    return out;
+  }
+
+  function approvalPill(approval) {
+    if (!approval || approval === 'none') return ui.pill('none declared', 'idle');
+    return ui.pill(APPROVAL_TEXT[approval] || String(approval), APPROVAL_TONE[approval] || 'idle');
+  }
+
+  function orderedRunbooks(list) {
+    return (list || []).slice().sort(function (a, b) {
+      var ix = Number(!!a.isIndex) - Number(!!b.isIndex);
+      if (ix !== 0) return ix;
+      return String(a.path || '').localeCompare(String(b.path || ''));
+    });
+  }
+
+  function backButton() {
+    return ui.btn('Back to runbooks', { variant: 'ghost', onClick: function () { A.go('ops'); } });
+  }
+
+  function liveRunbooksTab() {
+    var cols = [
+      {
+        key: 'id', label: 'Runbook',
+        render: function (rb) {
+          var a = A.link(rb.id, 'ops', ['runbook', rb.id]);
+          a.classList.add('mono');
+          return a;
+        }
+      },
+      {
+        key: 'title', label: 'Title',
+        render: function (rb) {
+          return rb.isIndex ? el('span', [el('span', { text: rb.title + ' ' }), ui.pill('index', 'idle')]) : rb.title;
+        }
+      },
+      {
+        key: 'tier', label: 'Tier', align: 'right',
+        render: function (rb) { return rb.tier === null || rb.tier === undefined ? el('span.muted', { text: 'none' }) : 'Tier ' + fmt.num(rb.tier); }
+      },
+      { key: 'approval', label: 'Approval', status: true, render: function (rb) { return approvalPill(rb.approval); } },
+      { key: 'steps', label: 'Steps', align: 'right', render: function (rb) { return fmt.num(rb.steps || 0); } },
+      {
+        key: 'sections', label: 'Sections', sortable: false,
+        csv: function (rb) { return (rb.sections || []).join('; '); },
+        render: function (rb) { return (rb.sections || []).length ? rb.sections.join(', ') : el('span.muted', { text: 'none' }); }
+      },
+      { key: 'updatedAt', label: 'Updated', render: function (rb) { return el('span.mono', { text: stampIso(rb.updatedAt) || 'unknown' }); } }
+    ];
+
+    return el('div.stack', [
+      A.livePanel('Runbooks', '/api/runbooks', function (body, data, env) {
+        var rows = orderedRunbooks(data.runbooks);
+        body.appendChild(el('div.callout.info', [
+          el('strong', { text: 'Runbooks are documents here, not scripts the console can run.' }),
+          el('p', { text: (data.note || 'The endpoint that would execute a runbook does not exist yet.') + ' Source: ' + (data.source || 'unknown') + '.' })
+        ]));
+        body.appendChild(ui.table(cols, rows, {
+          caption: 'Runbooks read from the runbooks directory, with their tier, approval, step count and sections',
+          empty: 'The runbooks directory holds no markdown file.',
+          rowKey: function (rb) { return rb.path; },
+          onRow: function (rb) { A.go('ops', ['runbook', rb.id]); }
+        }));
+        body.appendChild(readAt(env));
+      }, { notConfigured: notConfiguredCallout('The runbooks directory'), skeletonRows: 5 })
+    ]);
+  }
+
+  function liveRunbookDetail(mount, id) {
+    var box = el('div.stack', [ui.skeleton(4)]);
+    mount.appendChild(box);
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+
+    A.read('/api/runbooks', { ttlMs: 15000 }).then(function (env) {
+      if (!alive) return;
+      ui.clear(box);
+      if (!env.ok) {
+        var e = env.error || {};
+        box.appendChild(ui.pageHeader('Runbook ' + id, 'The runbook list could not be read.', [backButton()]));
+        if (e.reason === 'unauthenticated') {
+          box.appendChild(ui.emptyState('Sign in to read this', 'The console API answers only to a signed-in operator.'));
+        } else if (e.reason === 'not-configured') {
+          notConfiguredCallout('The runbooks directory')(box, e);
+        } else {
+          box.appendChild(ui.errorState('The runbooks could not be read', e.message || 'The request failed.',
+            function () { A.forget('/api/runbooks'); A.refresh(); }));
+        }
+        return;
+      }
+
+      var list = orderedRunbooks(env.data.runbooks);
+      var rb = list.filter(function (r) { return r.id === id; })[0];
+
+      if (!rb) {
+        box.appendChild(ui.pageHeader('Runbook not found', id, [backButton()]));
+        box.appendChild(ui.emptyState(
+          'No runbook has that identifier',
+          'The runbooks directory read at ' + (stampIso(env.at) || 'an unknown time') + ' holds ' + fmt.num(list.length)
+            + ' document' + (list.length === 1 ? '' : 's') + ', and none is called ' + id
+            + '. The link may come from the sample dataset or from an older version of the console.'));
+        if (list.length) {
+          box.appendChild(ui.card('Runbooks that exist', el('ul', list.map(function (r) {
+            var a = A.link(r.id, 'ops', ['runbook', r.id]);
+            a.classList.add('mono');
+            return el('li', [a, el('span.muted', { text: ' ' + r.title })]);
+          }))));
+        }
+        return;
+      }
+
+      box.appendChild(ui.pageHeader(rb.title, rb.id, [backButton()]));
+
+      var meta = ui.dl([
+        ['Path', el('span.mono', { text: rb.path })],
+        ['Tier', rb.tier === null || rb.tier === undefined ? 'none declared' : 'Tier ' + fmt.num(rb.tier)],
+        ['Approval', approvalPill(rb.approval)],
+        ['Numbered steps', fmt.num(rb.steps || 0)],
+        ['Sections', (rb.sections || []).length ? rb.sections.join(', ') : 'none'],
+        ['Updated', stampIso(rb.updatedAt) || 'unknown'],
+        ['Size', fmt.num(rb.bytes || 0) + ' bytes'],
+        ['Read', stampIso(env.at) || 'unknown']
+      ]);
+
+      var params = rb.params || [];
+      var paramsNode = params.length
+        ? ui.table([
+          { key: 'name', label: 'Parameter', render: function (p) { return el('span.mono', { text: p.name || '(unnamed)' }); } },
+          { key: 'type', label: 'Type', render: function (p) { return p.type || 'unspecified'; } },
+          { key: 'default', label: 'Default', render: function (p) { return p.default === null || p.default === undefined ? el('span.muted', { text: 'none' }) : String(p.default); } }
+        ], params, { caption: 'Parameters the runbook declares in its front matter', rowKey: function (p) { return p.name; } })
+        : el('p.muted', { text: 'This runbook declares no parameters.' });
+
+      box.appendChild(ui.card('About this runbook', [
+        meta,
+        el('div.callout.info', [
+          el('strong', { text: env.data.executable === false ? 'This runbook cannot be run from the console.' : 'Running is not available from this screen.' }),
+          el('p', { text: (env.data.note || 'The endpoint that would execute it does not exist yet.') + ' Reading it here records nothing, because the console has no write path.' })
+        ]),
+        paramsNode
+      ]));
+
+      box.appendChild(A.livePanel('Runbook', '/api/runbooks/body?path=' + encodeURIComponent(rb.path), function (body, data, env2) {
+        var nodes = markdownNodes(data.body);
+        if (!nodes.length) {
+          body.appendChild(ui.emptyState('The runbook is empty', 'The file holds front matter and nothing else.'));
+        } else {
+          body.appendChild(el('div.prose', nodes));
+        }
+        body.appendChild(readAt(env2));
+      }, { skeletonRows: 8, errorTitle: 'The runbook body could not be read' }));
+    });
+  }
+
+  function matcherText(m) { return m.name + (m.isRegex ? '=~' : '=') + m.value; }
+
+  function liveAlarmsTab() {
+    var ruleCols = [
+      { key: 'name', label: 'Rule', render: function (r) { return el('span.mono', { text: r.name || '(unnamed)' }); } },
+      { key: 'group', label: 'Group' },
+      { key: 'type', label: 'Type', status: true, render: function (r) { return ui.pill(r.type || 'unknown', r.type === 'alerting' ? 'info' : 'idle'); } },
+      {
+        key: 'state', label: 'State', status: true,
+        render: function (r) {
+          if (!r.state) return el('span.muted', { text: 'n/a' });
+          return ui.pill(r.state, r.state === 'firing' ? 'bad' : r.state === 'pending' ? 'warn' : r.state === 'inactive' ? 'ok' : 'idle');
+        }
+      },
+      {
+        key: 'health', label: 'Health', status: true,
+        render: function (r) { return ui.pill(r.health || 'unknown', r.health === 'ok' ? 'ok' : r.health === 'err' ? 'bad' : 'idle', { title: r.lastError || null }); }
+      },
+      { key: 'file', label: 'File', render: function (r) { return el('span.mono', { text: r.file || '' }); } }
+    ];
+
+    var silenceCols = [
+      { key: 'id', label: 'Silence', render: function (s) { return el('span.mono', { text: s.id || '(no id)' }); } },
+      { key: 'comment', label: 'Comment', render: function (s) { return s.comment || el('span.muted', { text: 'none' }); } },
+      { key: 'createdBy', label: 'By', render: function (s) { return s.createdBy || el('span.muted', { text: 'unknown' }); } },
+      { key: 'state', label: 'State', status: true, render: function (s) { return ui.pill(s.state || 'unknown', s.state === 'active' ? 'warn' : 'idle'); } },
+      { key: 'endsAt', label: 'Ends', render: function (s) { return el('span.mono', { text: stampIso(s.endsAt) || 'unknown' }); } },
+      {
+        key: 'matchers', label: 'Matchers', sortable: false,
+        csv: function (s) { return (s.matchers || []).map(matcherText).join('; '); },
+        render: function (s) { return el('span.mono', { text: (s.matchers || []).map(matcherText).join(', ') }); }
+      }
+    ];
+
+    return el('div.stack', [
+      el('div.callout.info', [
+        el('strong', { text: 'An alarm here is a Prometheus rule in Git.' }),
+        el('p', { text: 'The console reads the rules Prometheus has loaded and the silences Alertmanager holds. It has no write path, so there is nothing to create, edit or delete on this screen; a rule changes through a pull request.' })
+      ]),
+      A.livePanel('Alerting and recording rules', '/api/metrics/rules', function (body, data, env) {
+        var rows = [];
+        (data.groups || []).forEach(function (g) {
+          (g.rules || []).forEach(function (r) {
+            rows.push({ group: g.name, file: g.file, name: r.name, type: r.type, state: r.state, health: r.health, lastError: r.lastError });
+          });
+        });
+        rows.sort(function (a, b) {
+          var t = Number(b.type === 'alerting') - Number(a.type === 'alerting');
+          if (t !== 0) return t;
+          return String(a.name || '').localeCompare(String(b.name || ''));
+        });
+        var firing = rows.filter(function (r) { return r.state === 'firing'; }).length;
+        var alerting = rows.filter(function (r) { return r.type === 'alerting'; }).length;
+        body.appendChild(el('div.tiles', [
+          ui.statTile('Rule groups', fmt.num((data.groups || []).length), { note: 'loaded by Prometheus' }),
+          ui.statTile('Alerting rules', fmt.num(alerting), { note: 'of ' + fmt.num(rows.length) + ' rules in total' }),
+          ui.statTile('Firing', fmt.num(firing), { note: firing ? 'alerting rules in the firing state' : 'no alerting rule is firing' })
+        ]));
+        body.appendChild(ui.table(ruleCols, rows, {
+          caption: 'Rules loaded by Prometheus, alerting rules first, with their state and health',
+          empty: 'Prometheus answered and has no rule loaded.',
+          rowKey: function (r) { return r.group + '/' + r.name; }
+        }));
+        body.appendChild(readAt(env));
+      }, { notConfigured: notConfiguredCallout('Prometheus'), skeletonRows: 4 }),
+      A.livePanel('Silences', '/api/alerts/silences', function (body, data, env) {
+        body.appendChild(ui.table(silenceCols, data.silences || [], {
+          caption: 'Active silences held by Alertmanager',
+          empty: 'Alertmanager answered and holds no active silence.',
+          rowKey: function (s) { return s.id; }
+        }));
+        body.appendChild(readAt(env));
+      }, { notConfigured: notConfiguredCallout('Alertmanager'), skeletonRows: 2 })
+    ]);
+  }
+
+  function liveMaintenanceTab() {
+    return el('div.stack', [
+      A.notInStack('Change freezes', 'are a console-only policy with no source in this stack: nothing records one, so none can be declared, lifted or shown here.'),
+      A.notInStack('Maintenance windows', 'have no calendar in this stack. There is no patch schedule the console can read, so none is drawn rather than a picture nobody keeps.')
+    ]);
+  }
+
+  function liveBackupsTab() {
+    var cols = [
+      { key: 'name', label: 'Bucket', render: function (b) { var a = A.link(b.name, 'data', ['bucket', b.name]); a.classList.add('mono'); return a; } },
+      { key: 'owner', label: 'Owner', render: function (b) { return b.owner || el('span.muted', { text: 'undeclared' }); } },
+      {
+        key: 'lock', label: 'Object lock',
+        render: function (b) {
+          if (b.lock) return b.lock + (b.lockDays ? ' ' + fmt.num(b.lockDays) + ' d' : '');
+          return b.lockDeclared ? 'declared ' + b.lockDeclared : el('span.muted', { text: 'none' });
+        }
+      },
+      {
+        key: 'versioning', label: 'Versioning',
+        render: function (b) { return b.versioning === null || b.versioning === undefined ? el('span.muted', { text: 'unknown' }) : (b.versioning ? 'on' : 'off'); }
+      },
+      {
+        key: 'diskBytes', label: 'On disk', align: 'right',
+        render: function (b) { return b.diskBytes === null || b.diskBytes === undefined ? el('span.muted', { text: 'unknown' }) : fmt.bytesTB(b.diskBytes / 1099511627776); }
+      },
+      { key: 'replication', label: 'Replication', render: function (b) { return b.replication || 'not configured'; } }
+    ];
+    return el('div.stack', [
+      A.notInStack('Backups and restore drills', 'have no source here: no Kopia, no wal-g and no drill record run in this stack, so no backup age, drill outcome or RPO is shown.'),
+      A.livePanel('Buckets named for backups', '/api/storage/buckets', function (body, data, env) {
+        var rows = (data.buckets || []).filter(function (b) { return /backup/i.test(b.name || ''); });
+        body.appendChild(el('p.hint', { text: 'The only backup-shaped thing the console can read is the object store. These are the buckets whose name contains "backup"; whether anything writes to them is not known from here.' }));
+        if (data.declaredError) body.appendChild(el('p.muted', { text: 'Declared buckets could not be read: ' + data.declaredError }));
+        body.appendChild(ui.table(cols, rows, {
+          caption: 'Buckets in the object store whose name contains backup',
+          empty: 'The object store answered and no bucket is named for backups.',
+          rowKey: function (b) { return b.name; }
+        }));
+        body.appendChild(readAt(env));
+      }, { notConfigured: notConfiguredCallout('The object store'), skeletonRows: 2 })
+    ]);
+  }
+
+  function liveCostTab() {
+    return el('div.stack', [
+      A.notInStack('Capacity and cost', 'have no source in this stack: there is no billing, no amortisation schedule and no capacity forecast the console can read, so no figure is shown.')
+    ]);
+  }
+
   A.screen('ops', {
     title: 'Operations',
     crumb: 'Operations',
@@ -777,18 +1147,24 @@
     },
     render: function (mount, ctx) {
       if (ctx.rest[0] === 'runbook' && ctx.rest[1]) {
-        runbookDetail(mount, ctx.rest[1]);
+        if (A.storeMode() === A.MODE.SAMPLE) { runbookDetail(mount, ctx.rest[1]); return; }
+        var holder = el('div');
+        mount.appendChild(holder);
+        A.whenProbed(function (mode) {
+          if (mode === A.MODE.LIVE) liveRunbookDetail(holder, ctx.rest[1]); else runbookDetail(holder, ctx.rest[1]);
+        });
         return;
       }
 
-      mount.appendChild(ui.pageHeader('Operations',
-        'Runbooks you can actually run, backups somebody has actually restored, and what the estate costs to own.'));
+      mount.appendChild(ui.pageHeader('Operations', A.storeMode() === A.MODE.LIVE
+        ? 'The runbooks this stack holds, the rules Prometheus has loaded, and a plain statement of what has no source here.'
+        : 'Runbooks you can actually run, backups somebody has actually restored, and what the estate costs to own.'));
       mount.appendChild(ui.tabs([
-        { id: 'runbooks', label: 'Runbooks', render: runbooksTab },
-        { id: 'backups', label: 'Backups and drills', render: backupsTab },
-        { id: 'maintenance', label: 'Maintenance', render: maintenanceTab },
-        { id: 'alarms', label: 'Alarms', render: alarmsTab },
-        { id: 'cost', label: 'Capacity and cost', render: costTab }
+        { id: 'runbooks', label: 'Runbooks', render: function () { return liveOnly(runbooksTab, liveRunbooksTab); } },
+        { id: 'backups', label: 'Backups and drills', render: function () { return liveOnly(backupsTab, liveBackupsTab); } },
+        { id: 'maintenance', label: 'Maintenance', render: function () { return liveOnly(maintenanceTab, liveMaintenanceTab); } },
+        { id: 'alarms', label: 'Alarms', render: function () { return liveOnly(alarmsTab, liveAlarmsTab); } },
+        { id: 'cost', label: 'Capacity and cost', render: function () { return liveOnly(costTab, liveCostTab); } }
       ], {
         label: 'Operations sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,

@@ -518,6 +518,9 @@ services:
       ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
       ARGUS_BUCKETS_FILE: /config/buckets.yaml
       ARGUS_STATE_DIR: /state
+      ARGUS_GITOPS_DIR: /config/gitops
+      ARGUS_RUNBOOKS_DIR: /config/runbooks
+      ARGUS_S3_IDENTITIES_FILE: /config/seaweed/s3.json
       ARGUS_S3_ACCESS_KEY_ID: argus-console
       AWS_EC2_METADATA_DISABLED: "true"
       ARGUS_S3_SECRET_ACCESS_KEY: ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
@@ -548,6 +551,8 @@ services:
       - ../gitops:/config/gitops:ro
       - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
       - ./secrets/operators.json:/config/operators.json:ro
+      - ../../docs/runbooks:/config/runbooks:ro
+      - argus_seaweed_conf:/config/seaweed:ro
       - argus_console_state:/state:ro
     ports: ["127.0.0.1:${CONSOLE_PORT:-8787}:8787"]
     mem_limit: 320m

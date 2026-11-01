@@ -115,8 +115,12 @@
   }
 
   var table = null;
+  var browserBaseline = A.data && A.data.audit ? A.data.audit.length : 0;
+  var LIVE_PATH = '/api/audit/recent?limit=500';
+  var liveShared = { key: null, rows: [] };
+  var liveTable = null;
 
-  function exportDialog(rows) {
+  function exportDialog(rows, csvText, noteText) {
     A.dialog({
       wide: true,
       title: 'Export ' + fmt.num(rows.length) + ' audit events as CSV',
@@ -126,15 +130,15 @@
           'aria-label': 'Audit export in CSV format, read only',
           'aria-describedby': 'audit-csv-note'
         });
-        text.value = buildCsv(rows);
+        text.value = csvText === undefined ? buildCsv(rows) : csvText;
         return [
           el('p', { text: 'This is exactly what the filtered table holds, in the order it is sorted.' }),
           text,
           el('p.hint', {
             id: 'audit-csv-note',
-            text: 'The text is shown rather than downloaded because this prototype opens from file:// with '
+            text: noteText || ('The text is shown rather than downloaded because this prototype opens from file:// with '
               + 'downloads blocked, so a download link would silently do nothing. Select all and copy. '
-              + 'A real deployment streams the same rows from the API, signed, without loading them into a page.'
+              + 'A real deployment streams the same rows from the API, signed, without loading them into a page.')
           })
         ];
       },
@@ -169,10 +173,7 @@
     });
   }
 
-  A.screen('audit', {
-    title: 'Audit',
-    crumb: 'Audit',
-    render: function (mount, ctx) {
+  function renderSample(mount, ctx) {
       var d = A.data;
 
       var since = d.now.getTime() - 86400000;
@@ -298,6 +299,292 @@
         ui.columnsButton(function () { return table; }, 'audit events')]));
       mount.appendChild(tableHost);
       paint(filter.tokens());
+  }
+
+  var OUTCOME_TONE = { success: 'ok', failure: 'bad', defer: 'info' };
+
+  var LIVE_HEAD = ['when_utc', 'actor', 'event', 'outcome', 'reason', 'path', 'source_address', 'request_id'];
+
+  function liveWhen(ts) {
+    return String(ts || '').replace('T', ' ').replace(/\.\d+Z$/, 'Z');
+  }
+
+  function liveRow(e) {
+    return {
+      seq: e.seq,
+      raw: e,
+      ts: e.ts,
+      at: new Date(e.ts),
+      actor: e.subject ? String(e.subject) : 'anonymous',
+      event: e.event || '',
+      outcome: e.outcome || '',
+      reason: e.reason || '',
+      path: e.path || '',
+      source: e.sourceAddress || '',
+      requestId: e.requestId || '',
+      hash: null
+    };
+  }
+
+  function liveRowText(r, prev) {
+    return [prev || 'genesis', r.seq, r.ts, r.actor, r.event, r.outcome, r.reason, r.path, r.source, r.requestId].join('|');
+  }
+
+  function liveOrdered(rows) {
+    return rows.slice().sort(function (a, b) { return a.seq - b.seq; });
+  }
+
+  function sealLive(rows) {
+    var ordered = liveOrdered(rows), prev = null, i = 0;
+    function step() {
+      if (i >= ordered.length) return Promise.resolve(rows);
+      var r = ordered[i];
+      return digest(liveRowText(r, prev)).then(function (h) {
+        r.hash = h;
+        prev = h;
+        i += 1;
+        return step();
+      });
+    }
+    return step();
+  }
+
+  function verifyLive(rows) {
+    var ordered = liveOrdered(rows), prev = null, i = 0;
+    var result = { rows: ordered.length, verified: 0, broken: null };
+    function step() {
+      if (i >= ordered.length) return Promise.resolve(result);
+      var r = ordered[i];
+      return digest(liveRowText(r, prev)).then(function (h) {
+        if (r.hash === h) result.verified += 1;
+        else if (!result.broken) result.broken = { index: i + 1, row: r };
+        prev = r.hash;
+        i += 1;
+        return step();
+      });
+    }
+    return step();
+  }
+
+  function liveRowsOf(env) {
+    var events = (env.data && env.data.events) || [];
+    var key = (env.data && env.data.total) + ':' + events.length + ':' + (events.length ? events[0].seq : '');
+    if (liveShared.key !== key) {
+      var rows = events.map(liveRow);
+      liveShared = { key: key, rows: rows, sealed: sealLive(rows), tampered: null };
+    }
+    return liveShared;
+  }
+
+  function liveCsv(rows) {
+    var lines = [LIVE_HEAD.join(',')];
+    rows.forEach(function (r) {
+      lines.push([r.ts, r.actor, r.event, r.outcome, r.reason, r.path, r.source, r.requestId].map(csvField).join(','));
+    });
+    return lines.join('\n');
+  }
+
+  function liveDetail(r) {
+    var keys = Object.keys(r.raw);
+    A.dialog({
+      wide: true,
+      title: 'Audit event ' + r.seq + ': ' + r.event,
+      body: function () {
+        return [
+          el('p.hint', { text: 'The whole record exactly as the API holds it. The actor column shows "anonymous" when the record has no subject.' }),
+          ui.dl(keys.map(function (k) {
+            var v = r.raw[k];
+            return [k, el('span.mono', { text: v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v) })];
+          }))
+        ];
+      }
+    });
+  }
+
+  function readNote(env) {
+    return el('p.hint', { text: 'Read from the console API at ' + fmt.stamp(new Date(env.at)) + '.' });
+  }
+
+  function liveHeader(body, data, env) {
+    var rows = liveRowsOf(env).rows;
+    body.appendChild(el('div.tiles', [
+      ui.statTile('Events held', fmt.num(data.total), { note: 'In the API\'s memory right now' }),
+      ui.statTile('Dropped', fmt.num(data.dropped), { note: 'Pushed out when the memory ring filled' }),
+      ui.statTile('Shown here', fmt.num(rows.length), { note: 'The most recent, up to 500' }),
+      ui.statTile('Since', fmt.stamp(new Date(data.since)), { note: 'When the API last started' })
+    ]));
+    body.appendChild(el('p', {
+      id: 'audit-live-summary',
+      text: fmt.num(data.total) + ' events held, ' + fmt.num(data.dropped) + ' dropped, since ' + fmt.stamp(new Date(data.since)) + '.'
+    }));
+    body.appendChild(el('p', [
+      el('span.mono', { text: 'persistence: ' + data.persistence }),
+      ' This trail lives in the API process only and is emptied when the API restarts. Every event is also written to the API\'s log, '
+        + 'which Loki keeps, so for anything older than the list below open ',
+      A.link('the Logs screen', 'logs'),
+      '.'
+    ]));
+    body.appendChild(readNote(env));
+  }
+
+  function liveChain(body, data, env) {
+    var shared = liveRowsOf(env);
+    var rows = shared.rows;
+    var status = el('p', { role: 'status', id: 'audit-live-chain', text: 'Sealing ' + fmt.num(rows.length) + ' rows as received.' });
+    var verify = ui.btn('Verify the chain', { variant: 'primary', onClick: function () { run(); } });
+    var alter = ui.btn('Alter one row in this page', { variant: 'ghost', onClick: function () {
+      if (!rows.length) return;
+      if (!shared.tampered) {
+        var victim = liveOrdered(rows)[Math.floor(rows.length / 2)];
+        shared.tampered = { row: victim, reason: victim.reason };
+      }
+      shared.tampered.row.reason = 'altered in this browser';
+      status.textContent = 'Row ' + shared.tampered.row.seq + ' was altered in this page. The API was not touched. Verify the chain.';
+    } });
+    var restore = ui.btn('Restore the row', { variant: 'ghost', onClick: function () {
+      if (shared.tampered) { shared.tampered.row.reason = shared.tampered.reason; shared.tampered = null; }
+      status.textContent = 'Row restored. Verify the chain again.';
+    } });
+    function run() {
+      verify.setDisabled(true);
+      status.textContent = 'Verifying ' + fmt.num(rows.length) + ' rows.';
+      shared.sealed.then(function () { return verifyLive(rows); }).then(function (res) {
+        verify.setDisabled(false);
+        if (res.broken) {
+          status.textContent = 'Chain broken at row ' + res.broken.index + ' (seq ' + res.broken.row.seq + ', ' + res.broken.row.event + '). '
+            + 'That row no longer matches the seal made when it arrived. ' + fmt.num(res.verified) + ' rows before it verified.';
+        } else {
+          status.textContent = 'Chain intact: ' + fmt.num(res.verified) + ' of ' + fmt.num(res.rows) + ' rows verified.';
+        }
+      });
+    }
+    body.appendChild(el('p', { text: 'Each row received is sealed with a SHA-256 over its contents and the seal of the row before it, computed in this page. Verifying recomputes every seal.' }));
+    body.appendChild(el('div.callout.warn', [
+      el('strong', { text: 'What this proves.' }),
+      el('p', { text: 'It shows the rows were not altered between the API and this browser, and that none has been changed or removed since they arrived. It does not show the API\'s memory was untouched: the seals are made here, after the API answered.' })
+    ]));
+    body.appendChild(el('div.row', [verify, alter, restore, status]));
+    body.appendChild(readNote(env));
+  }
+
+  function liveTablePanel(body, data, env, ctx) {
+    var rows = liveRowsOf(env).rows;
+    var visible = rows.slice();
+    var accessors = {
+      actor: function (r) { return r.actor; },
+      event: function (r) { return r.event; },
+      outcome: function (r) { return r.outcome; },
+      path: function (r) { return r.path; },
+      source: function (r) { return r.source; }
+    };
+    var cols = [
+      { key: 'seq', label: 'When (UTC)', sort: function (r) { return r.seq; },
+        render: function (r) { return el('span.mono', { text: liveWhen(r.ts) }); },
+        csv: function (r) { return r.ts; } },
+      { key: 'actor', label: 'Actor' },
+      { key: 'event', label: 'Event', render: function (r) { return el('span.mono', { text: r.event }); } },
+      { key: 'outcome', label: 'Outcome', status: true,
+        render: function (r) { return r.outcome ? ui.pill(r.outcome, OUTCOME_TONE[r.outcome] || 'idle') : el('span.muted', { text: '-' }); } },
+      { key: 'reason', label: 'Reason' },
+      { key: 'path', label: 'Path', render: function (r) { return el('span.mono', { text: r.path || '-' }); } },
+      { key: 'source', label: 'Source address', render: function (r) { return el('span.mono', { text: r.source || '-' }); } },
+      { key: 'requestId', label: 'Request id', render: function (r) { return el('span.mono', { text: r.requestId || '-' }); } }
+    ];
+    var host = el('div');
+    liveTable = null;
+    function paint(tokens) {
+      visible = ui.applyTokens(rows, tokens || [], accessors);
+      if (liveTable) { liveTable.setRows(visible); return; }
+      liveTable = ui.table(cols, visible, {
+        id: 'audit.live',
+        caption: 'Audit events held by the console API, newest first, with actor, event, outcome, reason, path, source address and request id',
+        empty: rows.length ? 'No event matches every filter. Remove a token to widen the search.' : 'The API has recorded no audit events yet.',
+        sortKey: 'seq', sortDir: 'desc',
+        rowKey: function (r) { return String(r.seq); },
+        onRow: liveDetail
+      });
+      host.appendChild(liveTable);
+    }
+    var filter = ui.propertyFilter([
+      { key: 'actor', label: 'Actor' },
+      { key: 'event', label: 'Event' },
+      { key: 'outcome', label: 'Outcome' },
+      { key: 'path', label: 'Path' },
+      { key: 'source', label: 'Source' }
+    ], function (tokens) {
+      paint(tokens);
+      A.replaceHash(A.href('audit', [], { f: ui.encodeTokens(tokens) }));
+    }, { initial: ui.decodeTokens((ctx && ctx.params && ctx.params.f) || (A.state.params && A.state.params.f)) });
+    body.appendChild(el('div.row', [filter, el('span.spacer'), ui.columnsButton(function () { return liveTable; }, 'audit events')]));
+    body.appendChild(host);
+    body.appendChild(readNote(env));
+    paint(filter.tokens());
+  }
+
+  function browserSection() {
+    var all = A.data && A.data.audit ? A.data.audit : [];
+    var mine = all.slice(0, Math.max(0, all.length - browserBaseline));
+    if (!mine.length) return null;
+    var t = ui.table([
+      { key: 'at', label: 'When', render: function (r) { return el('span.mono', { text: fmt.stamp(r.at) }); }, sort: function (r) { return r.at.getTime(); } },
+      { key: 'actor', label: 'Actor' },
+      { key: 'action', label: 'Action', render: function (r) { return el('span.mono', { text: r.action }); } },
+      { key: 'target', label: 'Target' }
+    ], mine, {
+      id: 'audit.browser',
+      caption: 'Actions recorded by this browser only',
+      sortKey: 'at', sortDir: 'desc',
+      rowKey: function (r) { return r.at.toISOString() + r.action + r.target; }
+    });
+    return ui.card('This browser', [
+      el('div.callout.info', [
+        el('strong', { text: 'Not sent anywhere.' }),
+        el('p', { text: 'These are actions taken in this page since it loaded. They exist only in this browser tab and are not part of the API\'s audit trail above.' })
+      ]),
+      t
+    ]);
+  }
+
+  function renderLive(mount, ctx) {
+    mount.appendChild(ui.pageHeader(
+      'Audit',
+      'What the console API itself recorded: sign-ins, refusals and session events, newest first.',
+      [
+        ui.btn('Refresh', { variant: 'ghost', onClick: function () { A.forget(LIVE_PATH); A.refresh(); } }),
+        ui.btn('Export as CSV', {
+          variant: 'primary',
+          title: 'Show the filtered audit events as CSV text',
+          onClick: function () {
+            if (!liveTable) { A.flash('info', 'Nothing to export', 'The audit events have not been read yet.'); return; }
+            var rows = liveTable.currentRows();
+            exportDialog(rows, liveCsv(rows), 'This is exactly what the filtered table holds, in the order it is sorted. Select all and copy. The API keeps these events in memory only; Loki holds the full history from the API\'s log.');
+          }
+        })
+      ]));
+    var opts = { ttlMs: 5000, skeletonRows: 4, errorTitle: 'The audit trail could not be read' };
+    mount.appendChild(A.livePanel('Audit trail held by the API', LIVE_PATH, liveHeader, opts));
+    mount.appendChild(A.livePanel('Tamper evidence', LIVE_PATH, liveChain, opts));
+    mount.appendChild(A.livePanel('Events, newest first', LIVE_PATH, function (b, d, e) { liveTablePanel(b, d, e, ctx); }, opts));
+    var mine = browserSection();
+    if (mine) mount.appendChild(mine);
+  }
+
+  A.screen('audit', {
+    title: 'Audit',
+    crumb: 'Audit',
+    render: function (mount, ctx) {
+      var mode = A.storeMode();
+      if (mode === 'live') { renderLive(mount, ctx); return; }
+      if (mode !== 'sample') {
+        var host = el('div');
+        mount.appendChild(host);
+        A.whenProbed(function (m) {
+          if (m === 'live') renderLive(host, ctx);
+          else renderSample(host, ctx);
+        });
+        return;
+      }
+      renderSample(mount, ctx);
     }
   });
 })();
