@@ -5,7 +5,7 @@ Each operational procedure lives in its own file, in the format below.
 ```
 ---
 id: sql-01-restore-drill
-title: Monthly restore drill for umairv3_db
+title: Monthly restore drill for orders_db
 tier: 1
 params:
   - name: Target

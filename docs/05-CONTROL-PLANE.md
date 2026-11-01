@@ -4,7 +4,7 @@ Three surfaces, one truth (ADR-0021). Everything below is `platform/`.
 
 ## 1. The truth: `argus-gitops`
 
-A private repository (`ZaraatDost/argus-gitops`, mirrored on Forgejo). Its `main` branch **is** production. Its `staging` branch is the staging tenant. The only process with write access to production systems is the reconciler (ADR-0023), and it only applies what a signed, reviewed commit says.
+A private repository (`example-org/argus-gitops`, mirrored on Forgejo). Its `main` branch **is** production. Its `staging` branch is the staging tenant. The only process with write access to production systems is the reconciler (ADR-0023), and it only applies what a signed, reviewed commit says.
 
 ```
 argus-gitops/
@@ -15,11 +15,11 @@ argus-gitops/
       servicefabric/cluster.yaml            # node types, seed nodes, upgrade policy
     site-b/ ...
   apps/
-    mills/
+    orders/
       app.yaml                              # SF application: version, instances, ports, gMSA, health policy
-      config/production.env.tmpl            # env vars with {{ openbao:kv/mills/... }} references
+      config/production.env.tmpl            # env vars with {{ openbao:kv/orders/... }} references
       alerts.yaml                           # Prometheus rules scoped to the app
-    loan/ ... agis/ ... console/ ... caddy/ ... nats/ ... openbao/ ... observability/ ...
+    billing/ ... maps/ ... console/ ... caddy/ ... nats/ ... openbao/ ... observability/ ...
   storage/
     buckets.yaml                            # every SeaweedFS bucket: lock policy, lifecycle, replication, owners
   identity/
@@ -57,7 +57,7 @@ Break-glass: a Tier 0 human can pause the reconciler from the console (logged, p
 
 ### 3.1 Stack
 
-`Argus.Console.Api`: .NET 10 minimal API, same conventions as the Mills API (bare camelCase records, RFC 9457 problems, `/api/v1/*`, rate limiting, OTel). `Argus.Console.Web`: Next.js 16 standalone, the Mills design system (Geist + display serif, cream/leaf palette, colour-blind-safe status colours). Deployed as one SF application `ArgusConsole`, behind Caddy at `console.zaraatdost.pk`, reachable only over the admin VPN. Login: AD FS OIDC (PKCE). Authorisation: AD groups → roles.
+`Argus.Console.Api`: .NET 10 minimal API, same conventions as the Orders API (bare camelCase records, RFC 9457 problems, `/api/v1/*`, rate limiting, OTel). `Argus.Console.Web`: Next.js 16 standalone, the Orders design system (Geist + display serif, cream/leaf palette, colour-blind-safe status colours). Deployed as one SF application `ArgusConsole`, behind Caddy at `console.example.com`, reachable only over the admin VPN. Login: AD FS OIDC (PKCE). Authorisation: AD groups → roles.
 
 ### 3.2 Roles
 
@@ -118,28 +118,28 @@ Every `POST` records `{actor, role, action, target, before, after, prUrl?}` in `
 
 ```powershell
 Connect-Argus                                   # AD FS device-code login; token cached in DPAPI
-Get-ArgusApp mills                                   # status
-Publish-ArgusApp mills -Version 2026.09.08.1 -Environment production   # opens the PR, prints the URL
+Get-ArgusApp orders                                   # status
+Publish-ArgusApp orders -Version 2026.09.08.1 -Environment production   # opens the PR, prints the URL
 Approve-ArgusDeployment 1842
-Get-ArgusBackup umairv3_db -Last 5
-New-ArgusDatabaseCredential umairv3_db -Ttl 1h       # OpenBao lease, printed once
+Get-ArgusBackup orders_db -Last 5
+New-ArgusDatabaseCredential orders_db -Ttl 1h       # OpenBao lease, printed once
 Grant-ArgusTierAccess -Group Argus-Tier0-Admins -Hours 2 -Reason "CA CRL renewal"
 Invoke-ArgusRunbook sql-01-restore-drill -Param @{ Target = 'sql-drill-01' }
 Get-ArgusAudit -Since (Get-Date).AddDays(-1)
 ```
 
-`argus` mirrors these for the Linux hosts and CI (`argus app deploy mills --version ...`). Claude Code's `zd-deploy` and `zd-ops` plugins call `argus`.
+`argus` mirrors these for the Linux hosts and CI (`argus app deploy orders --version ...`). Claude Code's `argus-deploy` and `argus-ops` plugins call `argus`.
 
 ## 5. How a change flows (the whole loop)
 
 ```
-1. Zayan merges a Mills PR on GitHub
-2. Self-hosted Windows runner: build · test · scan · sign · package → argus-artifacts/mills/2026.09.08.1.sfpkg (WORM)
-3. Runner opens PR #1842 on argus-gitops: environments/staging.yaml  mills: 2026.09.08.1
+1. Riley merges a Orders PR on GitHub
+2. Self-hosted Windows runner: build · test · scan · sign · package → argus-artifacts/orders/2026.09.08.1.sfpkg (WORM)
+3. Runner opens PR #1842 on argus-gitops: environments/staging.yaml  orders: 2026.09.08.1
 4. Reconciler applies staging within 60 s; SF rolling upgrade; health OK
 5. Adil, from the console Deployments screen (or `Publish-ArgusApp ... -Environment production`), promotes: PR #1843 on production.yaml
 6. Approver (a different Tier 1 person) approves in the console
-7. Reconciler: verify signatures → SF upgrade on production with rollback policy → status green → WhatsApp "mills 2026.09.08.1 live, p95 212 ms"
+7. Reconciler: verify signatures → SF upgrade on production with rollback policy → status green → WhatsApp "orders 2026.09.08.1 live, p95 212 ms"
 ```
 
-Wall clock from step 1 to step 7 with prompt approval: under 10 minutes. Rollback is `Publish-ArgusApp mills -Version <previous>`: a PR like any other.
+Wall clock from step 1 to step 7 with prompt approval: under 10 minutes. Rollback is `Publish-ArgusApp orders -Version <previous>`: a PR like any other.

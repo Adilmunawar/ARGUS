@@ -16,7 +16,7 @@ The components that matter for us, and the verdict on each:
 |---|---|---|
 | **App layout** | Page structure with collapsible side navigation, tools panel, drawers and split panel | **Adopted.** Collapsible rail is now the shell. |
 | **Flashbar** | Page-level notifications about the progress and outcome of actions taken on resources | **Adopted.** Elevation state and the pending approval live here, not buried on a card. |
-| **Property filter** | Token-based filtering of a collection: type a property, get a removable token | **Adopted** on Deployments and Audit. Far better than a plain search box for "environment = production, owner = Zayan". |
+| **Property filter** | Token-based filtering of a collection: type a property, get a removable token | **Adopted** on Deployments and Audit. Far better than a plain search box for "environment = production, owner = Riley". |
 | **Split view** | A collection table where selecting a row opens a details panel, closed on load, bottom or side position | **Adopted in the spec**, built in C1. Right pattern for VM and bucket lists. |
 | **Live region** | A non-visual component that announces page changes to assistive technology | **Adopted.** Every screen change is announced. |
 | **Status indicator** | One fixed vocabulary of states across every service | **Adopted** as our pill component with five tones. |
@@ -118,7 +118,7 @@ v1 failed 11 of 51. Every one is listed, including the four that turned out to b
 | **B5** | **High** | The prototype fetched Lora from `fonts.googleapis.com`. The console runs behind an egress allow-list (ADR-0027): in production it would have silently failed, and it leaks that the console was opened | Convenience during the first draft | Local-first font stack; Geist and Lora ship self-hosted in the real build |
 | **B6** | Medium | `.delta.up` was 3.73:1 against paper, below the 4.5:1 AA threshold. It is the colour that carries "is this number good or bad" | Tailwind emerald-600 assumed to be safe | `--ok` darkened to `#046c4e` |
 | **B7** | Medium | The disabled terminal button used `opacity:.4`, failing contrast and giving screen readers nothing | `opacity` as a disabled state | Explicit colour plus `aria-disabled="true"` and a `title` explaining *why* it is disabled |
-| **B8** | Medium | Eight elements used 10px text: the leaf mark, nav group headings, eyebrows, node captions | Mills allows 10-12px labels; at 3 a.m. on an operations console that is too small | Floor raised to 11px. **Deliberate deviation from the Mills design system, recorded here.** |
+| **B8** | Medium | Eight elements used 10px text: the leaf mark, nav group headings, eyebrows, node captions | Orders allows 10-12px labels; at 3 a.m. on an operations console that is too small | Floor raised to 11px. **Deliberate deviation from the Orders design system, recorded here.** |
 | **B9** | Medium | Status pills wrapped onto two lines inside table cells | No `white-space` control, no cell width class | `white-space:nowrap` on pills, `.st` class on status cells |
 | **B10** | Medium | Review / Extend / Schedule were 53×15 px, under the 24 px WCAG 2.5.8 minimum, and far under a thumb | Inline text styling | Links have padding and a 32 px minimum, rising to 44 px on touch widths |
 | **B11** | Low | Tables had no `<caption>`, no `scope` on headers, some had no `<thead>` | - | Captions (screen-reader only), `scope="col"` throughout |
@@ -147,7 +147,7 @@ Everything above is already fixed in v2 and the suite is green. This is what rem
 |---|---|
 | **Self-host Geist and Lora as WOFF2** and add a CI check that fails on any external URL in the console bundle | B5 is the kind of bug that reappears the first time someone adds an icon library |
 | **Run this suite in CI** on every console PR, exit code as the gate | Otherwise these fixes decay |
-| **Add the suite to the styleguide route** so component changes are judged against it | The Mills team already works this way |
+| **Add the suite to the styleguide route** so component changes are judged against it | The Orders team already works this way |
 
 ### Next, before the console replaces Windows Admin Center
 

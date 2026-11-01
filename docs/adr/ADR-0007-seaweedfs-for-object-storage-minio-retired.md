@@ -4,7 +4,7 @@
 
 **Options.** SeaweedFS (Apache-2.0, Windows build, weekly releases, small-object optimised, erasure coding, lifecycle, object lock). Garage (AGPL, geo-distributed, no Windows build). Ceph RGW (Linux only, heavy). RustFS (young).
 
-**Decision.** SeaweedFS at both sites, running as Windows services (WinSW), with async cross-site replication of the `argus-backups` bucket. Buckets: `argus-survey-pictures`, `argus-rasters`, `argus-sentinel`, `argus-artifacts`, `argus-backups`, `argus-ml`.
+**Decision.** SeaweedFS at both sites, running as Windows services (WinSW), with async cross-site replication of the `argus-backups` bucket. Buckets: `argus-uploads`, `argus-rasters`, `argus-sentinel`, `argus-artifacts`, `argus-backups`, `argus-ml`.
 
 **Why.** Apache-2.0, native Windows binary, and the many-small-objects design fits the survey pictures exactly. Object-lock (WORM) on `argus-backups` and `argus-artifacts`.
 

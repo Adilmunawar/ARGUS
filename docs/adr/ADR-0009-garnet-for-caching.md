@@ -1,6 +1,6 @@
 # ADR-0009: Garnet for caching
 
-**Context.** The Mills API holds three in-process caches (boundary, map geometry, report). Scaling to multiple instances needs an external cache. Redis relicensed in 2024; Valkey has no Windows build.
+**Context.** The Orders API holds three in-process caches (boundary, map geometry, report). Scaling to multiple instances needs an external cache. Redis relicensed in 2024; Valkey has no Windows build.
 
 **Decision.** **Microsoft Garnet** (MIT, .NET, RESP-compatible) as a Windows service. Any Redis client works.
 

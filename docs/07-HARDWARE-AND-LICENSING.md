@@ -1,6 +1,6 @@
 # Hardware and licensing
 
-Reference-class hardware, approximate USD, mid-2026; verify with Lahore/Karachi vendors (±25 %). Assumes rack space, cooling and a generator with ATS at Site A.
+Reference-class hardware, approximate USD, mid-2026; verify with local vendors (±25 %). Assumes rack space, cooling and a generator with ATS at Site A.
 
 ## Tier 1: Phase 0-2 (Site A + minimal Site B)
 
@@ -31,7 +31,7 @@ Reference-class hardware, approximate USD, mid-2026; verify with Lahore/Karachi 
 | - | Dedicated 100 Mbps-1 Gbps link between sites; second ISP each site | recurring |
 | | **Tier 2 total** | **≈ $55-75 k** |
 
-## Licensing (list prices; Pakistan reseller pricing and any NGO/education programmes may differ: check)
+## Licensing (list prices; local reseller pricing and any NGO/education programmes may differ: check)
 
 | Item | Need | Approx. |
 |---|---|---|

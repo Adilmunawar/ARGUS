@@ -4,7 +4,7 @@ Zero trust, rooted in hardware, evidenced continuously. The perimeter is the las
 
 ## 1. Threat model
 
-Ranked by likelihood × impact for a Pakistani agri-tech company holding farmer identity, parcel and loan data.
+Ranked by likelihood × impact for a company holding customer identity, location and financial data.
 
 | # | Threat | Primary control | Secondary |
 |---|---|---|---|
@@ -111,7 +111,7 @@ Detail in `04-NETWORK-AND-SITES.md`. The security-relevant summary:
 
 ## 8. Compliance and evidence
 
-Wazuh SCA scores every host against the **Microsoft Security Baseline** and **CIS Benchmark** daily; drift below 95 % pages. Wazuh's ISO 27001 / PCI DSS / NIST 800-53 mappings tag every alert. Monthly, the console generates the **evidence pack**: MFA coverage (AD FS), WDAC enforcement state, patch age (WSUS), backup drill report, restore timing, open vulnerabilities (Trivy + `dotnet list package --vulnerable`), privileged access grants and expiries, firewall rule changes (Git history). This is the pack an external auditor or a bank partner (the loan product) receives; it is produced by the platform, not written by hand.
+Wazuh SCA scores every host against the **Microsoft Security Baseline** and **CIS Benchmark** daily; drift below 95 % pages. Wazuh's ISO 27001 / PCI DSS / NIST 800-53 mappings tag every alert. Monthly, the console generates the **evidence pack**: MFA coverage (AD FS), WDAC enforcement state, patch age (WSUS), backup drill report, restore timing, open vulnerabilities (Trivy + `dotnet list package --vulnerable`), privileged access grants and expiries, firewall rule changes (Git history). This is the pack an external auditor or a bank partner (the billing product) receives; it is produced by the platform, not written by hand.
 
 ## 9. Security in the delivery pipeline
 
@@ -130,6 +130,6 @@ Nothing reaches a server that was not built from a signed commit, on a locked-do
 ## 10. What is deliberately not here
 
 - **A service mesh**: IPsec is the mesh.
-- **A separate WAF appliance**: Coraza in Caddy is OWASP CRS; a hardware WAF is a Phase 7 question if the loan product grows.
+- **A separate WAF appliance**: Coraza in Caddy is OWASP CRS; a hardware WAF is a Phase 7 question if the billing product grows.
 - **A commercial EDR**: Sysmon + Wazuh + Defender ASR cover the detections; Defender for Endpoint is a licensing decision for the owner, easily added.
 - **A hardware HSM**: recommended (YubiHSM 2 is ~$650 and holds the code-signing and CA keys); recorded in `08-OPEN-QUESTIONS.md`.

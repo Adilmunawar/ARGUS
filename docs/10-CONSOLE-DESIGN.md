@@ -39,7 +39,7 @@ Argus Console
 │
 ├── Overview                     the morning screen
 │
-├── Applications                 Mills · Loan · AGIS · Console · Caddy · NATS · OpenBao · geo services
+├── Applications                 Orders · Billing · Maps · Console · Caddy · NATS · OpenBao · geo services
 │   ├── <app> / Overview         health, version, SLO, dependencies
 │   ├── <app> / Instances        which SF node, uptime, restarts
 │   ├── <app> / Logs             live tail + Loki query
@@ -97,15 +97,15 @@ The **environment switch** is the honest version of AWS's region selector: it is
 
 ## 3. Screen specifications
 
-Every screen uses the Mills component language: `PageHeader`, `StatTile`, `SectionCard`, `TableShell`, `FilterField`, `EmptyState`, `Skeleton`, `Button`, with the same tokens (`ink`, `muted`, `pine`, `cane`, `brand`, `leaf`, `cream`, `paper`). No new component is invented unless a screen below names it.
+Every screen uses the Orders component language: `PageHeader`, `StatTile`, `SectionCard`, `TableShell`, `FilterField`, `EmptyState`, `Skeleton`, `Button`, with the same tokens (`ink`, `muted`, `pine`, `cane`, `brand`, `leaf`, `cream`, `paper`). No new component is invented unless a screen below names it.
 
 ### 3.1 Overview: the morning screen
 
 Replaces: AWS Console Home + Personal Health Dashboard.
 
-- **Hero band** (`cane`→`pine` gradient, Lora title): site status, "all systems normal" or the worst thing happening, in one sentence a mill officer would understand.
+- **Hero band** (`cane`→`pine` gradient, Lora title): site status, "all systems normal" or the worst thing happening, in one sentence an operator would understand.
 - **StatTile row**, every tile a link to its screen: applications healthy (n/n) · lowest SLO this month · oldest backup · open alerts (by severity) · pending deployments · Advisor findings.
-- **Three SectionCards**: *Needs you* (the first rows of the inbox: incidents, alerts, approvals, grants, waivers, secrets, pipelines, alarms) · *Recent activity* (audit rows, sentence-formatted: "Zayan deployed mills 2026.09.08.1 to production") · *Site map* (a small two-column diagram of Site A / Site B with live link status and replication lag).
+- **Three SectionCards**: *Needs you* (the first rows of the inbox: incidents, alerts, approvals, grants, waivers, secrets, pipelines, alarms) · *Recent activity* (audit rows, sentence-formatted: "Riley deployed orders 2026.09.08.1 to production") · *Site map* (a small two-column diagram of Site A / Site B with live link status and replication lag).
 - **Second row**: traffic sparklines over 24 h · reconciler state · service health, thirty days of daily checks per application, worst first · recently visited.
 
 ### 3.2 Applications
@@ -119,8 +119,8 @@ Replaces: AWS Console Home + Personal Health Dashboard.
 | Overview | StatTiles (uptime, p95, RPS, error rate, instances); dependency graph rendered from `02-APPLICATION-INFRASTRUCTURE-MAP.md`: this app → its database, buckets, queues, secrets, external calls, each node clickable |
 | Instances | per SF replica: node, PID, uptime, restarts, CPU, memory; actions *Restart* (confirm), *Drain node* |
 | Logs | live tail with a pause; Loki query box with saved queries; severity filter; jump-to-trace on any log line carrying a trace id |
-| Traces | OTel waterfall for slow requests; the gateway → API → SQL spans the Mills app already emits |
-| Config | env vars from `app.yaml`; secret references shown as `kv/mills/jwt-signing-key → (value hidden)` with a *Who read this* link into the OpenBao audit |
+| Traces | OTel waterfall for slow requests; the gateway → API → SQL spans the Orders app already emits |
+| Config | env vars from `app.yaml`; secret references shown as `kv/orders/jwt-signing-key → (value hidden)` with a *Who read this* link into the OpenBao audit |
 | Deploy history | every version with commit SHA, PR link, who approved, duration, health outcome; one-click *Roll back to this version* → opens a PR |
 
 **Advanced beyond AWS:** the dependency graph is generated from the same YAML the reconciler applies, so it cannot drift from reality. AWS has nothing equivalent outside X-Ray's inferred map.
@@ -131,7 +131,7 @@ Replaces: CodePipeline + CloudFormation change sets, merged.
 
 Three lanes: **Awaiting approval** · **In flight** · **Recent**. A card per deployment: app, version, environment, author, the CI evidence (tests passed, Trivy clean, SBOM, signature verified), and **the reconciler's plan**: the literal diff of desired vs actual, resource by resource, before anything is applied. Approve/Reject inline (Approver role, and never the same person who opened it). In-flight shows the Service Fabric upgrade domain progress bar and the live health check; a failing health policy shows the automatic rollback happening.
 
-**Advanced beyond AWS:** a *blast-radius preview* beside the diff, "this change touches `MillsApi` (3 instances), which is depended on by `MillsWeb`, `MillsGateway` and 2 scheduled functions; 4 mill accounts are currently signed in". Derived from the dependency graph plus live sessions.
+**Advanced beyond AWS:** a *blast-radius preview* beside the diff, "this change touches `OrdersApi` (3 instances), which is depended on by `OrdersWeb`, `OrdersGateway` and 2 scheduled functions; 4 customer accounts are currently signed in". Derived from the dependency graph plus live sessions.
 
 ### 3.4 Compute, and the RDP problem, solved
 
@@ -169,7 +169,7 @@ How a connect actually works, so there is no ambiguity:
 
 **Query editor**, a browser SQL client for read-only investigation: role-scoped (Operators get `SELECT` on non-PII views; Security gets audit tables), every query logged to the audit with its text and row count, a hard row cap, a query timeout, and no `DELETE`/`UPDATE`/`DROP` grammar accepted at all for non-Admin roles. This is deliberately not a replacement for SSMS; it is the 90 % case (someone needs to check a number) without anyone RDP-ing into `sql-01`.
 
-**Object storage**: bucket list with size, object count, lock mode and remaining days, replication lag to Site B, lifecycle rules. A **browser** for prefixes and objects with preview (images from `argus-survey-pictures`, GeoTIFF thumbnails from `argus-rasters` via TiTiler, JSON/text inline): because "find the survey photo for parcel X" should not require an S3 client. Upload/delete follow the bucket's own policy: `argus-backups` shows *Delete* disabled with the reason "object lock, 35 days".
+**Object storage**: bucket list with size, object count, lock mode and remaining days, replication lag to Site B, lifecycle rules. A **browser** for prefixes and objects with preview (images from `argus-uploads`, GeoTIFF thumbnails from `argus-rasters` via TiTiler, JSON/text inline): because "find the survey photo for region X" should not require an S3 client. Upload/delete follow the bucket's own policy: `argus-backups` shows *Delete* disabled with the reason "object lock, 35 days".
 
 **Cache**: Garnet memory, hit rate, keyspace by prefix, slow commands. **Queues**: NATS streams, message rate, consumer lag, dead-letter inspector with a *Replay* action.
 
@@ -195,7 +195,7 @@ How a connect actually works, so there is no ambiguity:
 
 ### 3.8 ML & geospatial
 
-**Pipelines**: the Dagster asset graph rendered natively (not an iframe); `parcels → s2_periods → s1_periods → phenology → v5_train_table → v5_model → parcel_predictions`: each node coloured by freshness against its SLA, click for the last run, logs, and *Materialise*. **Models**: MLflow runs filtered to the v5 series, metrics side by side, lineage back to the exact feature-table version, *Promote to endpoint*. **Endpoints**: Ray Serve latency, request rate, canary split. **Imagery**: a map of Punjab/Sindh showing Sentinel mirror coverage by date, gaps in amber, a STAC search box, and a tile preview through TiTiler.
+**Pipelines**: the Dagster asset graph rendered natively (not an iframe); `regions → s2_periods → s1_periods → phenology → v5_train_table → v5_model → asset_predictions`: each node coloured by freshness against its SLA, click for the last run, logs, and *Materialise*. **Models**: MLflow runs filtered to the v5 series, metrics side by side, lineage back to the exact feature-table version, *Promote to endpoint*. **Endpoints**: Ray Serve latency, request rate, canary split. **Imagery**: a map of regional showing Sentinel mirror coverage by date, gaps in amber, a STAC search box, and a tile preview through TiTiler.
 
 ### 3.9 Operations
 
@@ -203,7 +203,7 @@ How a connect actually works, so there is no ambiguity:
 
 **Backups & drills**: a calendar of backups per data store, RPO trend line, drill history with pass/fail and timing, and the next scheduled drill with a countdown. A red state if any drill is overdue.
 
-**Capacity & cost**: per-application CPU, memory, disk, GPU-hours, and object storage, priced with your actual amortised hardware and power cost, so "what does the Mills dashboard cost us per month" has a real answer. Forecast lines for when a disk or a node runs out. This is Cost Explorer for owned hardware, which no vendor ships.
+**Capacity & cost**: per-application CPU, memory, disk, GPU-hours, and object storage, priced with your actual amortised hardware and power cost, so "what does the Orders dashboard cost us per month" has a real answer. Forecast lines for when a disk or a node runs out. This is Cost Explorer for owned hardware, which no vendor ships.
 
 ### 3.10 Audit
 
@@ -227,13 +227,13 @@ A rule set evaluated against the estate as it is, not a report somebody ran last
 | **Command palette** | `⌘K`: jump to any resource, run any runbook, connect to any VM, by typing. This is how experienced operators will use the console. |
 | **Deep links** | Every resource has a stable URL. Alerts, WhatsApp messages and runbooks link straight to the screen. |
 | **Live by default** | Health, logs, sessions and deployments stream over SSE. No refresh button anywhere. |
-| **Honest empty and error states** | The Mills voice: say what happened and what to do. Never fake success. |
+| **Honest empty and error states** | The Orders voice: say what happened and what to do. Never fake success. |
 | **Elevation is visible** | When elevated, the shell shows a `leaf` band with the remaining time and the reason. You always know what you are holding. |
 | **Mobile** | Overview, Alerts, Deployments (approve/reject) and Runbooks work on a phone, because approvals happen at 9 p.m. from a car. RDP does not pretend to. |
 
 ## 5. Design system
 
-Inherited wholesale from the Mills dashboard `DESIGN.md`, same tokens, same eight components, same Geist + Lora pairing, same chart palette in fixed order, same `motion-safe:` behaviour, same `/styleguide` route as the living reference. The console is a Zaraat Dost product and should look like one.
+Inherited wholesale from the Orders dashboard `DESIGN.md`, same tokens, same eight components, same Geist + Lora pairing, same chart palette in fixed order, same `motion-safe:` behaviour, same `/styleguide` route as the living reference. The console is a the organisation product and should look like one.
 
 Three console-only additions, each documented in the styleguide when built:
 

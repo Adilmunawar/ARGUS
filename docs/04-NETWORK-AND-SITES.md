@@ -20,7 +20,7 @@ Rules are in `platform/policies/firewall/opnsense-rules.yaml` and are applied by
 
 ## 2. Addressing and names
 
-DNS zone `argus.local` (AD-integrated, internal) and `zaraatdost.pk` (public, at the registrar; only DMZ names). Public names: `mills.zaraatdost.pk`, `loans.zaraatdost.pk`, `agis.zaraatdost.pk`, `console.zaraatdost.pk` (VPN-only despite public DNS; Caddy checks source), `ml.zaraatdost.pk`, `status.zaraatdost.pk` (Site B). Every internal service has an `A` record and an AD CS certificate; nothing is addressed by IP in configuration.
+DNS zone `argus.local` (AD-integrated, internal) and `example.com` (public, at the registrar; only DMZ names). Public names: `orders.example.com`, `billing.example.com`, `maps.example.com`, `console.example.com` (VPN-only despite public DNS; Caddy checks source), `ml.example.com`, `status.example.com` (Site B). Every internal service has an `A` record and an AD CS certificate; nothing is addressed by IP in configuration.
 
 ## 3. Edge
 

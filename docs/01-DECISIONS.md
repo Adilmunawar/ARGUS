@@ -45,13 +45,13 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0001: Leave AWS; build a sovereign private cloud
 
-**Context.** The Mills dashboard uses two AWS services: one Windows EC2 instance and one S3 bucket for backups (audit of `Mills-Restructured-by-Zayan`, 7 Sep 2026). The ML pipelines use GPU hours wherever they can be found. Data about Pakistani farmers, parcels and loans currently sits in ap-southeast-1.
+**Context.** The Orders dashboard uses two AWS services: one Windows EC2 instance and one S3 bucket for backups (audit of `example-org/orders`, 7 Sep 2026). The ML pipelines use GPU hours wherever they can be found. Data about customers, regions and billing currently sits in ap-southeast-1.
 
 **Options.** (a) Stay on AWS. (b) Hybrid: local GPUs and storage, AWS for the database. (c) Full exit onto owned hardware.
 
 **Decision.** (c), phased, with (b) as an explicit checkpoint at the end of Phase 3 (`00-MASTER-PLAN.md` §10).
 
-**Why.** The AWS surface is small enough that the exit is a hardware-and-operations project, not a software rewrite. The strongest arguments are capability (GPUs the team actually uses, imagery served locally in seconds instead of pulled over Pakistani bandwidth in hours) and control (data never leaves the country; no dependency on a foreign account that can be suspended). Cost is secondary but favourable over three years.
+**Why.** The AWS surface is small enough that the exit is a hardware-and-operations project, not a software rewrite. The strongest arguments are capability (GPUs the team actually uses, imagery served locally in seconds instead of pulled over a constrained uplink in hours) and control (data never leaves the country; no dependency on a foreign account that can be suspended). Cost is secondary but favourable over three years.
 
 **Consequences.** The team takes on hardware, power, patching, backup drills and on-call: work AWS did invisibly. Section 9 of the master plan staffs it. If it cannot be staffed, ADR-0001 is amended to (b).
 
@@ -117,7 +117,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 **Options.** SeaweedFS (Apache-2.0, Windows build, weekly releases, small-object optimised, erasure coding, lifecycle, object lock). Garage (AGPL, geo-distributed, no Windows build). Ceph RGW (Linux only, heavy). RustFS (young).
 
-**Decision.** SeaweedFS at both sites, running as Windows services (WinSW), with async cross-site replication of the `argus-backups` bucket. Buckets: `argus-survey-pictures`, `argus-rasters`, `argus-sentinel`, `argus-artifacts`, `argus-backups`, `argus-ml`.
+**Decision.** SeaweedFS at both sites, running as Windows services (WinSW), with async cross-site replication of the `argus-backups` bucket. Buckets: `argus-uploads`, `argus-rasters`, `argus-sentinel`, `argus-artifacts`, `argus-backups`, `argus-ml`.
 
 **Why.** Apache-2.0, native Windows binary, and the many-small-objects design fits the survey pictures exactly. Object-lock (WORM) on `argus-backups` and `argus-artifacts`.
 
@@ -125,9 +125,9 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0008: SQL Server stays; PostgreSQL + PostGIS added
 
-**Context.** `umairv3_db` is live under the surveyor mobile apps, uses tuned stored procedures returning multiple result sets, SQL geometry types, and HMAC password hashes shared with the apps. It cannot be migrated as a project prerequisite. The ML pipelines and the parcel/STAC catalogue want a spatial database with an open licence.
+**Context.** `orders_db` is live under the surveyor mobile apps, uses tuned stored procedures returning multiple result sets, SQL geometry types, and HMAC password hashes shared with the apps. It cannot be migrated as a project prerequisite. The ML pipelines and the region/STAC catalogue want a spatial database with an open licence.
 
-**Decision.** SQL Server 2022 Standard in an Always On availability group (primary VM Site A, async secondary Site B). PostgreSQL 17 + PostGIS 3.5 (EDB Windows build) as a second engine for STAC (`pgstac`), classifier feature tables, parcel vector tiles and anything additive OPEN-DECISIONS moves off SQL Server over time.
+**Decision.** SQL Server 2022 Standard in an Always On availability group (primary VM Site A, async secondary Site B). PostgreSQL 17 + PostGIS 3.5 (EDB Windows build) as a second engine for STAC (`pgstac`), classifier feature tables, region vector tiles and anything additive OPEN-DECISIONS moves off SQL Server over time.
 
 **Why.** Non-negotiable constraints on one side; licence cost and geospatial tooling (Martin, TiTiler, pgstac are Postgres-native) on the other. Two engines is the honest answer.
 
@@ -135,7 +135,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0009: Garnet for caching
 
-**Context.** The Mills API holds three in-process caches (boundary, map geometry, report). Scaling to multiple instances needs an external cache. Redis relicensed in 2024; Valkey has no Windows build.
+**Context.** The Orders API holds three in-process caches (boundary, map geometry, report). Scaling to multiple instances needs an external cache. Redis relicensed in 2024; Valkey has no Windows build.
 
 **Decision.** **Microsoft Garnet** (MIT, .NET, RESP-compatible) as a Windows service. Any Redis client works.
 
@@ -149,7 +149,7 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0011: Self-hosted Azure Functions host
 
-**Context.** Scheduled and event-driven jobs (hourly precompute, 15-day feature tables, exports, harvest-drop detection) currently run as cron or inside a request.
+**Context.** Scheduled and event-driven jobs (hourly precompute, 15-day feature tables, exports, change detection) currently run as cron or inside a request.
 
 **Decision.** The **Azure Functions host runtime** (MIT), isolated-worker .NET model, deployed as a Service Fabric guest executable per function app, triggered by NATS (custom trigger) and timers. No Azure account involved.
 
@@ -157,17 +157,17 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0012: Active Directory + AD FS; tiered administration
 
-**Decision.** A new forest `argus.local` (two DCs at Site A, one at Site B); **AD FS** for OIDC/SAML to the console, Grafana, Windows Admin Center, JupyterHub and the Mills web login; **Windows Hello for Business / FIDO2** for humans; **gMSA** for every service; **LAPS**; **Tier 0/1/2** admin model with Privileged Access Workstations; **JEA** endpoints for operators; NTLM disabled; LDAP signing and channel binding enforced.
+**Decision.** A new forest `argus.local` (two DCs at Site A, one at Site B); **AD FS** for OIDC/SAML to the console, Grafana, Windows Admin Center, JupyterHub and the Orders web login; **Windows Hello for Business / FIDO2** for humans; **gMSA** for every service; **LAPS**; **Tier 0/1/2** admin model with Privileged Access Workstations; **JEA** endpoints for operators; NTLM disabled; LDAP signing and channel binding enforced.
 
 **Why.** Included in the Windows licence, the most mature identity system available, and the foundation every other Windows security control (Kerberos-authenticated IPsec, gMSA, Credential Guard) assumes. Keycloak was the Linux plan's choice; on Windows it would duplicate AD.
 
-**Consequences.** The Mills mobile apps keep their HMAC login (ADR-0030); AD FS fronts only the web.
+**Consequences.** The Orders mobile apps keep their HMAC login (ADR-0030); AD FS fronts only the web.
 
 ## ADR-0013: OpenBao for secrets; AD CS for PKI
 
 **Decision.** **OpenBao** (MPL-2.0, Linux Foundation fork of Vault, Windows binary) as a 3-node Raft cluster on the Service Fabric nodes, Shamir 3-of-5 unseal held by three people, audit device to Loki. Dynamic SQL Server and PostgreSQL credentials (1 h TTL), transit engine for PII fields, KV for third-party keys. **AD Certificate Services** (two-tier: offline root, enterprise issuing CA) for machine certificates, IPsec, code signing and the internal TLS chain; external TLS via ACME (Let's Encrypt) at the edge.
 
-**Why.** OpenBao gives dynamic short-lived credentials, the single biggest reduction in credential-theft blast radius, and directly resolves the Mills repo's OPEN-DECISIONS D16 (secrets in git history). AD CS is the native, free PKI that every Windows control expects.
+**Why.** OpenBao gives dynamic short-lived credentials, the single biggest reduction in credential-theft blast radius, and directly resolves the Orders repo's OPEN-DECISIONS D16 (secrets in git history). AD CS is the native, free PKI that every Windows control expects.
 
 ## ADR-0014, WDAC + Authenticode: only signed code runs
 
@@ -179,15 +179,15 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0015: IPsec domain isolation instead of a service mesh
 
-**Decision.** Windows Firewall connection-security rules via GPO: all server-to-server traffic inside the platform requires Kerberos (machine) or certificate (AD CS) authentication and AES-GCM encryption; unauthenticated inbound is dropped. Linux exceptions use strongSwan with AD CS certificates. Per-service inbound rules allow only the identities that need to connect (e.g. SQL accepts only the Mills API gMSA and the backup gMSA).
+**Decision.** Windows Firewall connection-security rules via GPO: all server-to-server traffic inside the platform requires Kerberos (machine) or certificate (AD CS) authentication and AES-GCM encryption; unauthenticated inbound is dropped. Linux exceptions use strongSwan with AD CS certificates. Per-service inbound rules allow only the identities that need to connect (e.g. SQL accepts only the Orders API gMSA and the backup gMSA).
 
 **Why.** This is mTLS-everywhere delivered by the OS at layer 3, with no sidecars and no application changes. Sidecar meshes do not exist for Windows anyway.
 
 ## ADR-0016: Caddy + Coraza at the edge, YARP per application
 
-**Decision.** **Caddy** (Apache-2.0, Windows binary) as the internal edge: ACME certificates, HTTP/3, Brotli, **Coraza** WAF with the OWASP Core Rule Set, rate limiting. Behind it, each application keeps its own **YARP** gateway (the Mills repo already has one). Caddy runs as a Service Fabric guest executable on two nodes with a cluster IP.
+**Decision.** **Caddy** (Apache-2.0, Windows binary) as the internal edge: ACME certificates, HTTP/3, Brotli, **Coraza** WAF with the OWASP Core Rule Set, rate limiting. Behind it, each application keeps its own **YARP** gateway (the Orders repo already has one). Caddy runs as a Service Fabric guest executable on two nodes with a cluster IP.
 
-**Why.** The Mills gateway currently reads a certificate from the Windows store and terminates TLS itself; centralising TLS and WAF in Caddy lets every app's gateway speak plain HTTP on the isolated network and removes the cert-store dependency (`DEPLOYMENT.md` trap).
+**Why.** The Orders gateway currently reads a certificate from the Windows store and terminates TLS itself; centralising TLS and WAF in Caddy lets every app's gateway speak plain HTTP on the isolated network and removes the cert-store dependency (`DEPLOYMENT.md` trap).
 
 ## ADR-0017: OPNsense HA pair + CrowdSec
 
@@ -213,13 +213,13 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0021: Control surface
 
-**Decision.** Three surfaces, one truth: a **web console** for operators and mill staff; a **PowerShell module (`Argus`) and thin `argus` CLI** for engineers; a **GitOps repository** (`platform/gitops/`) that is the only writer of production state. The console and CLI call the same console API; the console API writes to Git and the reconciler applies Git. Direct changes to production outside the reconciler are denied by WDAC/JEA and alerted by Wazuh. Owner's choice, 8 Sep 2026.
+**Decision.** Three surfaces, one truth: a **web console** for operators and site staff; a **PowerShell module (`Argus`) and thin `argus` CLI** for engineers; a **GitOps repository** (`platform/gitops/`) that is the only writer of production state. The console and CLI call the same console API; the console API writes to Git and the reconciler applies Git. Direct changes to production outside the reconciler are denied by WDAC/JEA and alerted by Wazuh. Owner's choice, 8 Sep 2026.
 
 ## ADR-0022: The console is .NET 10 + Next.js on Service Fabric
 
 **Decision.** `platform/console/`: a .NET 10 minimal API (`Argus.Console.Api`) and a Next.js 16 front end, deployed as a Service Fabric application, authenticated by AD FS, authorised by AD groups mapped to console roles. Day one, before parity: Windows Admin Center for raw host management and Grafana for observability, both behind AD FS.
 
-**Why.** The same stack that runs the Mills dashboard on the same Windows server today; the team's design system, testing habits and Claude Code plugins apply unchanged.
+**Why.** The same stack that runs the Orders dashboard on the same Windows server today; the team's design system, testing habits and Claude Code plugins apply unchanged.
 
 ## ADR-0023: First-party GitOps reconciler
 
@@ -237,17 +237,17 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0026: Two sites
 
-**Decision.** Site A (primary, Lahore) and Site B (a second building or a Karachi colocation rack, owner decision pending in `08-OPEN-QUESTIONS.md`): 2 nodes, Hyper-V Replica target, SQL async secondary, SeaweedFS replica with 90-day object lock, third domain controller, Uptime Kuma, cluster witness. RTO ≤ 8 h for full Site A loss.
+**Decision.** Site A (primary, Primary region) and Site B (a second building or a Secondary region colocation rack, owner decision pending in `08-OPEN-QUESTIONS.md`): 2 nodes, Hyper-V Replica target, SQL async secondary, SeaweedFS replica with 90-day object lock, third domain controller, Uptime Kuma, cluster witness. RTO ≤ 8 h for full Site A loss.
 
 ## ADR-0027: External services behind an egress proxy
 
-**Decision.** Google Earth Engine, the Anthropic API and OpenRouteService remain external. All egress from the platform goes through an allow-listing proxy (Caddy forward-proxy or OPNsense) with keys held in OpenBao and injected at runtime; no host has general internet access. OpenRouteService is self-hosted with the Pakistan OSM extract in Phase 3 (Java, runs on Windows), removing the 2,000/day quota.
+**Decision.** Google Earth Engine, the Anthropic API and OpenRouteService remain external. All egress from the platform goes through an allow-listing proxy (Caddy forward-proxy or OPNsense) with keys held in OpenBao and injected at runtime; no host has general internet access. OpenRouteService is self-hosted with a regional OSM extract in Phase 3 (Java, runs on Windows), removing the 2,000/day quota.
 
 ## ADR-0028: Local Sentinel mirror + STAC
 
-**Decision.** Sentinel-1 GRD and Sentinel-2 L2A for the Punjab and Sindh AOIs pulled via `eodag` from the Copernicus Data Space, converted to COGs, stored in `argus-sentinel`, indexed in `pgstac` on PostgreSQL. TiTiler (Python, Windows) serves dynamic raster tiles; Martin (Rust, Windows build) serves parcel vector tiles from PostGIS.
+**Decision.** Sentinel-1 GRD and Sentinel-2 L2A for the regional AOIs pulled via `eodag` from the Copernicus Data Space, converted to COGs, stored in `argus-sentinel`, indexed in `pgstac` on PostgreSQL. TiTiler (Python, Windows) serves dynamic raster tiles; Martin (Rust, Windows build) serves region vector tiles from PostGIS.
 
-**Why.** The single largest performance change available: pipelines stop pulling scenes over Pakistani bandwidth on every run, and the dashboard map stops shipping megabyte GeoJSON.
+**Why.** The single largest performance change available: pipelines stop pulling scenes over a constrained uplink on every run, and the dashboard map stops shipping megabyte GeoJSON.
 
 ## ADR-0029: ML platform on one GPU node
 
@@ -257,13 +257,13 @@ Status legend: **Accepted** · Proposed · Superseded by ADR-nnnn
 
 ## ADR-0030: Mobile-app password scheme frozen; AD FS fronts the web
 
-**Context.** `DECISIONS.md` in the Mills repo: passwords are HMAC-SHA512, written and read in the legacy scheme, shared with the surveyor apps; a rehash locks the apps out.
+**Context.** `DECISIONS.md` in the Orders repo: passwords are HMAC-SHA512, written and read in the legacy scheme, shared with the surveyor apps; a rehash locks the apps out.
 
-**Decision.** The Mills API keeps minting its own JWTs for the mobile apps. The web login moves to AD FS (OIDC) in Phase 2; the API accepts either token type, scoped by the same `VendorId` guards. When the mobile apps next release, they adopt OIDC PKCE against AD FS and the HMAC table is frozen (no new writes).
+**Decision.** The Orders API keeps minting its own JWTs for the mobile apps. The web login moves to AD FS (OIDC) in Phase 2; the API accepts either token type, scoped by the same `VendorId` guards. When the mobile apps next release, they adopt OIDC PKCE against AD FS and the HMAC table is frozen (no new writes).
 
 ## ADR-0031: SQL Server back to FULL recovery *(Proposed)*
 
-**Context.** `umairv3_db` was moved to SIMPLE recovery outside the Mills project in Aug 2026 because the log had grown to 466 GB with no log backups. The owner's standing ruling (D14) was FULL.
+**Context.** `orders_db` was moved to SIMPLE recovery outside the Orders project in Aug 2026 because the log had grown to 466 GB with no log backups. The owner's standing ruling (D14) was FULL.
 
 **Proposal.** Once ADR-0020's 15-minute log backups are running and proven for two weeks, return to FULL. This restores point-in-time recovery (RPO 15 min instead of "last full"). Requires the owner's ruling because D14 was ruled three times.
 
@@ -284,4 +284,4 @@ Full text: [`adr/ADR-0033-console-is-primary-wac-retired-at-parity.md`](adr/ADR-
 
 Full text: [`adr/ADR-0034-the-platform-is-named-argus.md`](adr/ADR-0034-the-platform-is-named-argus.md).
 
-**Decision.** The platform is **Argus**, not ZD Cloud: a name of its own, separate from the company that owns it. The identifier prefix is the full word `argus` everywhere, deliberately not `arg`, because ADR-0023 rejects Argo and a three-letter prefix would read as it. Zaraat Dost remains the company and `zaraatdost.pk` remains the domain.
+**Decision.** The platform is **Argus**: a name of its own, separate from any business that runs it. The identifier prefix is the full word `argus` everywhere, deliberately not `arg`, because ADR-0023 rejects Argo and a three-letter prefix would read as it.
