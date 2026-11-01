@@ -560,7 +560,7 @@
       'connection pool for ' + db + ' grew to 12, above the warm size of 8',
       'POST /api/report accepted, queued for background rendering',
       'cache hit ratio 0.94 over the last 1000 requests',
-      'GET /api/parcels 200 in 61 ms',
+      'GET /api/regions 200 in 61 ms',
       'renewed the lease on ' + secret + ', 60 minutes remaining',
       'wrote 3 objects to ' + bucket,
       'upstream ' + upstream + ' answered in ' + fmt.num(Math.round(app.p95 * 2.4)) + ' ms, above the 800 ms budget',

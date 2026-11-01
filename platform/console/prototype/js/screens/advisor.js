@@ -99,7 +99,7 @@
         v.id, 'security', ['vulns']));
     });
     d.buckets.filter(function (b) { return !b.lock; }).forEach(function (b) {
-      out.push(finding('security', b.name === 'argus-survey-pictures' ? 'medium' : 'low', 'lock-' + b.name, b.name + ' has no object lock',
+      out.push(finding('security', b.name === 'argus-uploads' ? 'medium' : 'low', 'lock-' + b.name, b.name + ' has no object lock',
         'Ransomware that reaches a writer identity can delete or overwrite every object. A compliance lock makes the bucket write-once for its retention.',
         b.name, 'data', ['bucket', b.name]));
     });
@@ -137,7 +137,7 @@
     if (!restores.length || (d.now - restores[0].ran) > 30 * 86400000) {
       out.push(finding('resilience', 'medium', 'drill-restore', 'No restore drill in the last 30 days',
         restores.length ? 'The last one ran ' + fmt.ago(restores[0].ran) + '. A backup nobody has restored is a hope.' : 'No restore drill is on record.',
-        'umairv3_db', 'ops', ['runbook', 'sql-01-restore-drill']));
+        'orders_db', 'ops', ['runbook', 'sql-01-restore-drill']));
     }
 
     d.gpu.cards.filter(function (c) { return c.util < 20; }).forEach(function (c) {

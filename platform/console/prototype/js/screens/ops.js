@@ -43,11 +43,11 @@
       var target = val(v, 'Target');
       return [
         'PS> Invoke-ArgusRunbook -Id sql-01-restore-drill -Target ' + target,
-        'Get-DbaBackupHistory -SqlInstance sql-01 -Database umairv3_db -Last',
+        'Get-DbaBackupHistory -SqlInstance sql-01 -Database orders_db -Last',
         'Latest full 09:00, differential 06:14, log 09:03. Chain is unbroken.',
-        'Restore-DbaDatabase -SqlInstance ' + target + ' -Path S:\\restore\\umairv3_db',
+        'Restore-DbaDatabase -SqlInstance ' + target + ' -Path S:\\restore\\orders_db',
         '  Restored 611 GB in 41 min 12 s',
-        'Invoke-DbaQuery -Query "DBCC CHECKDB (umairv3_db) WITH NO_INFOMSGS"',
+        'Invoke-DbaQuery -Query "DBCC CHECKDB (orders_db) WITH NO_INFOMSGS"',
         '  CHECKDB found 0 allocation errors and 0 consistency errors.',
         'Row count matches production within the 11 minute RPO window.',
         'Runbook completed successfully in 47 min.'
@@ -65,7 +65,7 @@
           : 'Waiting for sql-02 to reach SYNCHRONIZED before failing over.',
         'Invoke-DbaAgFailover -SqlInstance sql-02 -AvailabilityGroup argus-ag1',
         '  Listener argus-ag1-listener now resolves to 10.131.0.20',
-        'Applications reconnected: MillsApi (3), LoanApi (2), ArgusConsoleApi (3)',
+        'Applications reconnected: OrdersApi (3), BillingApi (2), ArgusConsoleApi (3)',
         'Runbook completed successfully in 38 s.'
       ];
     },
@@ -112,7 +112,7 @@
         'Confirming Site A is unreachable from both witness paths.',
         'Start-VMFailover on 9 replicated virtual machines at Site B',
         '  sql-02, pg-01-b, dc-03, adfs-02, guac-02, kuma-b01 online',
-        'DNS: zaraatdost.pk records repointed to 10.120.0.10 (TTL 60 s)',
+        'DNS: example.com records repointed to 10.120.0.10 (TTL 60 s)',
         'Service Fabric quorum re-formed on 3 of 5 nodes.',
         'RPO measured at 214 s. RTO target is 8 h; elapsed 27 min.',
         'Runbook completed successfully in 27 min.'

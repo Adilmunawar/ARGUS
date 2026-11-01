@@ -87,7 +87,7 @@
             return p.asset + ' last ran ' + fmt.ago(p.lastRun) + ' and failed after ' + fmt.dur(p.durationS) + '. '
               + (down.length
                 ? 'Downstream: ' + down.join(', ') + ' cannot refresh until it succeeds.'
-                : 'Nothing downstream re-runs, which makes this the last mile: the Mills dashboard keeps '
+                : 'Nothing downstream re-runs, which makes this the last mile: the Orders dashboard keeps '
                   + 'serving the previous predictions, silently, until somebody looks at this row.');
           }).join(' ')
         })

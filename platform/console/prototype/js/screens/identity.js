@@ -416,7 +416,7 @@
     ]);
   }
 
-  var READ_ACTORS = ['gmsa-mills$', 'gmsa-console$', 'reconciler', 'gmsa-ci$', 'gmsa-loan$'];
+  var READ_ACTORS = ['gmsa-orders$', 'gmsa-console$', 'reconciler', 'gmsa-ci$', 'gmsa-billing$'];
 
   function recentReads(s) {
     var n = Math.min(4, Math.max(2, s.leases));

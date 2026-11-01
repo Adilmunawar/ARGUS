@@ -50,10 +50,10 @@
   var KEYSTROKES = {
     's-2291': [
       { at: 18, text: 'sqlcmd -S sql-drill-01 -E -Q "SELECT @@VERSION"' },
-      { at: 96, text: 'Restore-DbaDatabase -SqlInstance sql-drill-01 -Path S:\\restore\\umairv3_db' },
+      { at: 96, text: 'Restore-DbaDatabase -SqlInstance sql-drill-01 -Path S:\\restore\\orders_db' },
       { at: 540, text: 'Get-DbaDbRestoreHistory -SqlInstance sql-drill-01 -Last' },
-      { at: 902, text: 'Invoke-DbaQuery -Query "DBCC CHECKDB (umairv3_db) WITH NO_INFOMSGS"' },
-      { at: 1288, text: 'Test-DbaLastBackup -SqlInstance sql-drill-01 -Database umairv3_db' },
+      { at: 902, text: 'Invoke-DbaQuery -Query "DBCC CHECKDB (orders_db) WITH NO_INFOMSGS"' },
+      { at: 1288, text: 'Test-DbaLastBackup -SqlInstance sql-drill-01 -Database orders_db' },
       { at: 1602, text: 'exit' }
     ],
     's-2290': [
