@@ -2498,6 +2498,28 @@ async function axeOn(page, label, suite, opts) {
     JSON.stringify(chain));
 
   await goto(page, 'advisor');
+  const grouped = await page.evaluate(() => {
+    const findings = window.ARGUS.advisorFindings().filter(f => !f.suppressed);
+    const rows = [...document.querySelectorAll('#main tbody tr[data-key]')];
+    const groups = [...document.querySelectorAll('#main [data-members]')];
+    const members = groups.reduce((n, g) => n + Number(g.dataset.members), 0);
+    const wdac = rows.find(r => /WDAC is in audit mode on \d+ hosts/.test(r.textContent));
+    const links = wdac ? [...wdac.querySelectorAll('.chip a')].map(a => a.textContent) : [];
+    const expected = findings.filter(f => /^wdac-/.test(f.id)).map(f => f.resource);
+    const accept = wdac ? [...wdac.querySelectorAll('button')].find(b => /^Accept risk on all/.test(b.getAttribute('aria-label') || '')) : null;
+    return {
+      rows: rows.length, findings: findings.length, groups: groups.length, members,
+      everyFindingCounted: rows.length - groups.length + members === findings.length,
+      linksMatch: links.length > 1 && links.join() === expected.join(),
+      accept: !!accept,
+      tileSum: [...document.querySelectorAll('#main .tiles a.tile .tile-value')].reduce((n, t) => n + Number(t.textContent), 0)
+    };
+  });
+  rec('ACT', 'repeated Advisor findings share a row, list each resource as a link, and no finding is lost from the counts',
+    grouped.groups > 0 && grouped.rows < grouped.findings && grouped.everyFindingCounted && grouped.linksMatch && grouped.accept && grouped.tileSum === grouped.findings,
+    JSON.stringify(grouped));
+  await page.evaluate(() => { document.getElementById('advisor-each').click(); });
+  await page.waitForTimeout(60);
   const advisor = await page.evaluate(async () => {
     const d = window.ARGUS.data;
     const findings = window.ARGUS.advisorFindings();
@@ -2684,6 +2706,50 @@ async function axeOn(page, label, suite, opts) {
     JSON.stringify(costTags));
 
   const realFails = failedReqs.filter(u => !/favicon/.test(u));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await goto(page, 'overview');
+  const phoneBar = await page.evaluate(async () => {
+    const top = document.querySelector('.top');
+    const kbar = document.getElementById('kbar');
+    const before = document.getElementById('main').getBoundingClientRect().top;
+    window.ARGUS.flash('bad', 'Layout check', 'This must not move the page.');
+    await new Promise(r => setTimeout(r, 40));
+    const after = document.getElementById('main').getBoundingClientRect().top;
+    const f = document.querySelector('#flashes .flash').getBoundingClientRect();
+    const bar = top.getBoundingClientRect();
+    window.scrollTo(0, 500);
+    await new Promise(r => setTimeout(r, 40));
+    const pinned = top.getBoundingClientRect().top;
+    window.scrollTo(0, 0);
+    document.getElementById('flashes').textContent = '';
+    return {
+      position: getComputedStyle(top).position, height: bar.height, pinned,
+      search: /Search or jump to/.test(kbar.textContent), kbarHeight: kbar.getBoundingClientRect().height,
+      moved: after - before, clearOfBar: f.top >= bar.bottom, inside: f.left >= 0 && f.right <= window.innerWidth
+    };
+  });
+  rec('RESP', 'on a phone the top bar is one pinned row and search keeps its name',
+    phoneBar.position === 'sticky' && phoneBar.height <= 64 && phoneBar.pinned === 0 && phoneBar.search && phoneBar.kbarHeight >= 44, JSON.stringify(phoneBar));
+  rec('RESP', 'a flash does not move the page and clears the top bar',
+    phoneBar.moved === 0 && phoneBar.clearOfBar && phoneBar.inside, JSON.stringify(phoneBar));
+  await page.setViewportSize({ width: 320, height: 256 });
+  await page.waitForTimeout(40);
+  const shortScreen = await page.evaluate(() => ({ top: getComputedStyle(document.querySelector('.top')).position, flash: getComputedStyle(document.getElementById('flashes')).position }));
+  rec('RESP', 'at 400% zoom neither the top bar nor a flash is pinned over the content',
+    shortScreen.top === 'static' && shortScreen.flash === 'static', JSON.stringify(shortScreen));
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await goto(page, 'overview');
+  const scale = await page.evaluate(() => {
+    const h1 = parseFloat(getComputedStyle(document.querySelector('.pagehead h1')).fontSize);
+    const tile = parseFloat(getComputedStyle(document.querySelector('.tile-value')).fontSize);
+    const card = parseFloat(getComputedStyle(document.querySelector('.card-title')).fontSize);
+    const sizes = new Set();
+    document.querySelectorAll('body *').forEach(n => { if (n.getClientRects().length && n.textContent.trim()) sizes.add(parseFloat(getComputedStyle(n).fontSize)); });
+    return { h1, tile, card, sizes: [...sizes].sort((a, b) => a - b) };
+  });
+  rec('TXT', 'the page title is the largest type and every size comes from the scale',
+    scale.h1 > scale.tile && scale.tile > scale.card && scale.sizes.every(s => [11, 12, 13, 15, 20, 22, 25].indexOf(s) !== -1), JSON.stringify(scale));
+
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));
   rec('CONS', 'no failed requests', realFails.length === 0, realFails.slice(0, 4).join(' | '));
 

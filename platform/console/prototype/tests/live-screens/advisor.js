@@ -10,6 +10,12 @@ module.exports = async function (ctx) {
   }, null, 8000);
   rec('the live Advisor settles into a findings table', settled);
 
+  await page.evaluate(() => {
+    const each = document.getElementById('advisor-each');
+    if (each && each.getAttribute('aria-pressed') !== 'true') each.click();
+  });
+  await page.waitForTimeout(60);
+
   const state = await page.evaluate(async () => {
     const main = document.getElementById('main');
     const findings = window.ARGUS.advisorFindings();

@@ -7,7 +7,7 @@
 **Windows Server · Hyper V · Service Fabric · Active Directory · GitOps · Zero Trust · Browser RDP**
 
 [![validate](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml/badge.svg)](https://github.com/Adilmunawar/argus/actions/workflows/validate.yml)
-[![console tests](https://img.shields.io/static/v1?label=console%20tests&message=408%20passing&color=046c4e)](platform/console/prototype/tests)
+[![console tests](https://img.shields.io/static/v1?label=console%20tests&message=413%20passing&color=046c4e)](platform/console/prototype/tests)
 [![architecture decisions](https://img.shields.io/static/v1?label=ADRs&message=34&color=1e6f4a)](docs/01-DECISIONS.md)
 [![license](https://img.shields.io/static/v1?label=license&message=all%20rights%20reserved%20%C2%B7%20permission%20required&color=8a1c1c)](LICENSE)
 [![version](https://img.shields.io/static/v1?label=version&message=v0.12.0&color=b07f23)](CHANGELOG.md)
@@ -69,7 +69,7 @@ Cloud repatriation is now a mainstream decision, yet almost nothing public shows
 * Data freshness indicators, idle lock resumed by a security key, and automatic light and dark themes.
 
 ### Tests that actually test
-408 assertions across 31 suites in headless Chromium against the rendered DOM: **axe core WCAG 2.1 A and AA** on every screen and overlay, real keyboard traversal with focus trapping, contrast computed from rendered pixels, six viewport widths, **WCAG 1.4.10 reflow** at 200% and 400% zoom, a density budget for a 1366×768 laptop, layout leak detection, and a security pass proving `innerHTML` appears nowhere. Sandbox checks and stress budgets run alongside.
+413 assertions across 31 suites in headless Chromium against the rendered DOM: **axe core WCAG 2.1 A and AA** on every screen and overlay, real keyboard traversal with focus trapping, contrast computed from rendered pixels, six viewport widths, **WCAG 1.4.10 reflow** at 200% and 400% zoom, a density budget for a 1366×768 laptop, layout leak detection, and a security pass proving `innerHTML` appears nowhere. Sandbox checks and stress budgets run alongside.
 
 ## Quick start
 

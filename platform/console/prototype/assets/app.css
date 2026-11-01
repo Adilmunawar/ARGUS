@@ -1,5 +1,6 @@
 :root{
   --ctl:36px;
+  --fs-xs:11px; --fs-sm:12px; --fs-md:13px; --fs-lg:15px; --fs-xl:20px; --fs-2xl:22px; --fs-3xl:25px;
   --ink:#163026; --muted:#55665d; --pine:#0c2b1f; --cane:#113a2b; --brand:#1e6f4a;
   --leaf:#c8e36f; --cream:#f5f3e9; --paper:#fffefa;
   --c1:#247a52; --c2:#b07f23; --c3:#3f6fa8; --c4:#b25746; --c5:#7757b8; --grid:#e4e1d3;
@@ -76,13 +77,15 @@
 html{-webkit-text-size-adjust:100%;
   scroll-padding-top:58px}
 body{
-  font-family:var(--sans); font-size:13px; line-height:1.5; color:var(--ink); background:var(--cream);
+  font-family:var(--sans); font-size:var(--fs-md); line-height:1.5; color:var(--ink); background:var(--cream);
   background-image:radial-gradient(120% 60% at 50% -10%, var(--glow), transparent 60%);
   background-repeat:no-repeat; min-height:100vh;
   -webkit-font-smoothing:antialiased; overflow-x:hidden;
 }
 ::selection{background:var(--leaf);color:var(--pine)}
 h1,h2,h3{font-family:var(--display);font-weight:600;letter-spacing:-.01em}
+h2{font-size:var(--fs-lg)}
+h3,h4,h5,h6{font-size:var(--fs-md);font-weight:600}
 :focus-visible{outline:3px solid rgba(var(--focus-rgb),.95);outline-offset:2px;border-radius:6px}
 .skip{position:absolute;left:-9999px;top:8px;z-index:200;background:var(--paper);border:1px solid var(--brand);
   border-radius:var(--field);padding:10px 15px;font-weight:600;color:var(--brand);text-decoration:none}
@@ -96,14 +99,14 @@ body.railed{--rail:66px}
 .mark{display:flex;align-items:center;gap:9px;padding:2px 6px 12px}
 .leafmark{width:28px;height:28px;border-radius:9px;background:linear-gradient(140deg,var(--brand),var(--cane));display:grid;place-items:center;flex:none}
 .leafmark svg{width:16px;height:16px}
-.mark .txt b{font-family:var(--display);font-size:15px;font-weight:600;display:block;line-height:1.2}
-.mark .txt span{font-size:11px;color:var(--muted)}
-.navgroup{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:11px 8px 4px;font-weight:600}
+.mark .txt b{font-family:var(--display);font-size:var(--fs-lg);font-weight:600;display:block;line-height:1.2}
+.mark .txt span{font-size:var(--fs-xs);color:var(--muted)}
+.navgroup{font-size:var(--fs-xs);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:11px 8px 4px;font-weight:600}
 .nav{position:relative;display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:8px;color:var(--ink);cursor:pointer;
-  border:none;background:none;width:100%;text-align:left;font:inherit;font-size:13px;min-height:32px}
+  border:none;background:none;width:100%;text-align:left;font:inherit;font-size:var(--fs-md);min-height:32px}
 .nav:hover{background:rgba(var(--ink-rgb),.06)}
 .nav[aria-current="page"]{background:linear-gradient(120deg,var(--cane),var(--pine));color:#fff;font-weight:600}
-.nav .badge{margin-left:auto;background:var(--danger-fill);color:var(--on-danger);border-radius:999px;font-size:11px;
+.nav .badge{margin-left:auto;background:var(--danger-fill);color:var(--on-danger);border-radius:999px;font-size:var(--fs-xs);
   min-width:19px;height:19px;display:grid;place-items:center;padding:0 5px;font-weight:700}
 .nav svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .nav-clip{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
@@ -116,7 +119,7 @@ body.railed .nav .badge{position:absolute;top:4px;right:10px;width:9px;height:9p
 body.railed .navgroup,body.railed .mark .txt{display:none}
 body.railed .nav{justify-content:center;padding:9px 0}
 .railbtn{width:100%;margin-top:16px;border:1px solid rgba(var(--ink-rgb),.14);background:var(--cream);border-radius:10px;
-  padding:8px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:12px;min-height:38px}
+  padding:8px;cursor:pointer;color:var(--ink);display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-size:var(--fs-sm);min-height:38px}
 .railbtn:hover{background:rgba(var(--wash-rgb),.26)}
 
 .top{display:flex;align-items:center;gap:11px;padding:7px 18px;min-height:46px;
@@ -124,15 +127,15 @@ body.railed .nav{justify-content:center;padding:9px 0}
   background:var(--paper)}
 .burger{display:none;border:1px solid rgba(var(--ink-rgb),.14);background:var(--paper);border-radius:10px;
   width:44px;height:44px;align-items:center;justify-content:center;cursor:pointer;color:var(--ink);flex:none}
-.crumbs{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);min-width:0}
+.crumbs{display:flex;align-items:center;gap:7px;font-size:var(--fs-sm);color:var(--muted);min-width:0}
 .crumbs b{color:var(--ink);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .crumbs .sep{color:rgba(var(--ink-rgb),.62)}
 .kbar{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--cream);border:1px solid rgba(var(--ink-rgb),.14);
-  border-radius:var(--field);padding:0 12px;color:var(--muted);cursor:pointer;min-width:210px;font:inherit;font-size:12px;height:var(--ctl);min-height:var(--ctl)}
+  border-radius:var(--field);padding:0 12px;color:var(--muted);cursor:pointer;min-width:210px;font:inherit;font-size:var(--fs-sm);height:var(--ctl);min-height:var(--ctl)}
 .kbar:hover{border-color:rgba(var(--brand-rgb),.45);color:var(--ink)}
-.kbar kbd{margin-left:auto;font:inherit;font-size:11px;background:var(--paper);border:1px solid rgba(var(--ink-rgb),.16);border-radius:5px;padding:2px 6px}
+.kbar kbd{margin-left:auto;font:inherit;font-size:var(--fs-xs);background:var(--paper);border:1px solid rgba(var(--ink-rgb),.16);border-radius:5px;padding:2px 6px}
 .envpill{display:flex;align-items:center;gap:7px;background:linear-gradient(120deg,var(--cane),var(--pine));color:#fff;
-  border:none;border-radius:999px;padding:0 15px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;height:var(--ctl);min-height:var(--ctl);white-space:nowrap;flex:none}
+  border:none;border-radius:999px;padding:0 15px;font:inherit;font-size:var(--fs-sm);font-weight:600;cursor:pointer;height:var(--ctl);min-height:var(--ctl);white-space:nowrap;flex:none}
 
 @media (max-width: 1200px) {
   :root { --rail: 66px; }
@@ -159,7 +162,7 @@ body.railed .nav{justify-content:center;padding:9px 0}
     position: static; width: auto; height: auto; margin: 0; clip: auto; overflow: visible;
   }
   body.navopen .nav .badge {
-    position: static; width: auto; height: 19px; min-width: 19px; padding: 0 5px; font-size: 11px;
+    position: static; width: auto; height: 19px; min-width: 19px; padding: 0 5px; font-size: var(--fs-xs);
     margin: 0 0 0 auto; border: 0; overflow: visible;
   }
   body.navopen .nav { justify-content: flex-start; padding: 9px 10px; }
@@ -168,26 +171,30 @@ body.railed .nav{justify-content:center;padding:9px 0}
   .kbar { min-width: 0; flex: 1; }
   .top { padding: 8px 14px; gap: 9px; }
   .main { padding: 16px 14px 48px; }
-  .flashes { padding: 0 14px; }
   .elevation { margin: 12px 14px 0; }
 }
 
 @media (max-width: 620px) {
-  .top { position: static; }
-  .top { flex-wrap: wrap; row-gap: 8px; }
-  .crumbs { order: 1; flex: 1 1 auto; }
-  .kbar { order: 3; flex: 1 1 100%; margin-left: 0; }
-  .envpill, .iconbtn, .whopill { order: 2; }
+  .top { position: static; flex-wrap: wrap; row-gap: 8px; gap: 6px; padding: 8px 10px; }
+  .kbar { flex: 0 0 44px; width: 44px; height: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  .kbar svg { flex: none; }
+  .kbar span { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .envpill { margin-left: auto; padding: 0 11px; }
+  .envpill .env-dot { display: none; }
+}
+
+@media (min-width: 340px) and (max-width: 620px) and (min-height: 480px) {
+  .top { position: sticky; }
 }
 
 @media (max-width: 420px) {
   .main { padding: 14px 12px 44px; }
-  .flashes { padding: 0 12px; }
   .elevation { margin: 12px 12px 0; }
   .top { padding: 8px 12px; }
 }
 
 @media (max-width: 620px) { html { scroll-padding-top: 0; } }
+@media (min-width: 340px) and (max-width: 620px) and (min-height: 480px) { html { scroll-padding-top: 68px; } }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 @media (prefers-contrast: more) { :root { --muted: var(--ink-soft); } }

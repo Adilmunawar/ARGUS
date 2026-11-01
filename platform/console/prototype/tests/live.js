@@ -226,6 +226,45 @@ const dialogTitle = () => { const h = document.querySelector('.dialog h2'); retu
       }
     }
 
+    const stranded = [];
+    for (const route of ROUTES) {
+      const fresh = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const pg = await fresh.newPage();
+      pg.on('pageerror', (e) => pageErrors.push(route + ': ' + e));
+      await pg.goto(ORIGIN + '/#/' + route, { waitUntil: 'domcontentloaded' });
+      const asked = await waitFor(pg, () => {
+        const h = document.querySelector('.dialog h2');
+        return h && h.textContent === 'Sign in to the console';
+      }, null, 6000);
+      if (!asked) stranded.push(route);
+      await fresh.close();
+    }
+    rec('AUTH', 'a signed-out browser opening any screen directly reaches the sign-in dialog', stranded.length === 0, stranded.join(','));
+
+    const expiring = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const ep = await expiring.newPage();
+    await ep.goto(ORIGIN + '/#/advisor', { waitUntil: 'domcontentloaded' });
+    const canSign = await waitFor(ep, () => !!document.getElementById('signin-subject'), null, 6000);
+    if (canSign) {
+      await ep.fill('#signin-subject', SUBJECT);
+      await ep.fill('#signin-password', PASSWORD);
+      await ep.keyboard.press('Enter');
+    }
+    const painted = canSign && await waitFor(ep, () => !document.querySelector('.dialog') && document.querySelectorAll('#main tbody tr[data-key]').length > 0, null, 8000);
+    rec('AUTH', 'signing in on the Advisor deep link paints the findings', !!painted);
+    if (painted) {
+      await ep.evaluate(() => {
+        window.fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-argus-console': '1' }, body: '{}' })
+          .then(() => { ['/api/host', '/api/capabilities'].forEach((u) => window.ARGUS.forget(u)); return window.ARGUS.read('/api/host', { ttlMs: 0 }); });
+      });
+    }
+    const returned = painted && await waitFor(ep, () => {
+      const h = document.querySelector('.dialog h2');
+      return h && h.textContent === 'Sign in to the console';
+    }, null, 6000);
+    rec('AUTH', 'a session ending while on the Advisor brings the dialog back and the page stays responsive', !!returned);
+    await expiring.close();
+
     const health = await page.evaluate(() => window.ARGUS.storeHealth());
     rec('LIVE', 'the store counted real reads and the last one succeeded', health.reads > 0 && health.lastOkAt && !health.signedOut, JSON.stringify({ reads: health.reads, failures: health.failures }));
 

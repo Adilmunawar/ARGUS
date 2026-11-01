@@ -19,6 +19,56 @@
   var SEV_TONE = { critical: 'bad', high: 'bad', medium: 'warn', low: 'info', info: 'idle' };
   var SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
+  var GROUPS = [
+    { match: /^wdac-/, noun: 'hosts', title: function (n) { return 'WDAC is in audit mode on ' + n + ' hosts'; } },
+    { match: /^replica-/, noun: 'machines', title: function (n) { return n + ' machines have no replica at Site B'; } },
+    { match: /^lock-(?!missing-|unenforced-|filer-)/, noun: 'buckets', title: function (n) { return n + ' buckets have no object lock'; } },
+    { match: /^runbook-/, noun: 'runbooks', title: function (n) { return n + ' runbooks have never been run'; } },
+    { match: /^lock-missing-/, noun: 'buckets', title: function (n) { return n + ' buckets are declared with a lock and none is enforced'; } },
+    { match: /^no-alerts-/, noun: 'applications', title: function (n) { return n + ' applications have no alert rules'; } },
+    { match: /^no-spec-/, noun: 'directories', title: function (n) { return n + ' directories have no spec'; } }
+  ];
+
+  var groupedView = true;
+
+  function groupOf(f) {
+    for (var i = 0; i < GROUPS.length; i++) if (GROUPS[i].match.test(f.id)) return GROUPS[i];
+    return null;
+  }
+
+  function groupRows(list) {
+    var buckets = {};
+    list.forEach(function (f) {
+      var g = f.suppressed ? null : groupOf(f);
+      if (!g) return;
+      var key = String(g.match) + '|' + f.severity + '|' + f.detail;
+      (buckets[key] = buckets[key] || { spec: g, members: [] }).members.push(f);
+    });
+    var placed = {};
+    var out = [];
+    list.forEach(function (f) {
+      var g = f.suppressed ? null : groupOf(f);
+      var key = g ? String(g.match) + '|' + f.severity + '|' + f.detail : null;
+      if (!g || buckets[key].members.length < 2) { out.push(f); return; }
+      if (placed[key]) return;
+      placed[key] = true;
+      var members = buckets[key].members;
+      out.push({
+        id: 'group-' + members[0].id,
+        group: true,
+        noun: buckets[key].spec.noun,
+        members: members,
+        category: f.category,
+        severity: f.severity,
+        title: buckets[key].spec.title(members.length),
+        detail: f.detail,
+        evidence: f.evidence,
+        resource: members.map(function (m) { return m.resource; }).join(', ')
+      });
+    });
+    return out;
+  }
+
   function finding(category, severity, id, title, detail, resource, route, rest, params) {
     return {
       id: id, category: category, severity: severity, title: title, detail: detail,
@@ -446,10 +496,22 @@
       });
       live.at = cancelled ? 0 : Date.now();
       live.promise = null;
-      if (typeof A.refreshAdvisorBadge === 'function') A.refreshAdvisorBadge();
+      paintAdvisorBadge();
       return live;
     });
     return live.promise;
+  }
+
+  function signedOut() {
+    return typeof A.storeHealth === 'function' && !!A.storeHealth().signedOut;
+  }
+
+  function paintAdvisorBadge() {
+    var badge = document.getElementById('nav-advisor-badge');
+    if (!badge || typeof A.advisorFindings !== 'function') return;
+    var urgent = A.advisorFindings().filter(function (f) { return !f.suppressed && (f.severity === 'critical' || f.severity === 'high'); }).length;
+    badge.textContent = urgent ? String(urgent) : '';
+    badge.hidden = !urgent;
   }
 
   function suppressedMap() {
@@ -475,6 +537,7 @@
 
   function suppressDialog(f, onDone) {
     var liveMode = isLive();
+    var targets = f.group ? f.members : [f];
     var why = el('input.field', { type: 'text', id: 'suppress-why', autocomplete: 'off', spellcheck: 'false', placeholder: 'Accepted until the hardware order lands in November' });
     var days = el('select.field', { id: 'suppress-days' }, [['7', '7 days'], ['30', '30 days'], ['90', '90 days']].map(function (o) {
       return el('option', { value: o[0], text: o[1], selected: o[0] === '30' ? true : null });
@@ -484,6 +547,7 @@
       body: function () {
         return [
           el('p', { text: f.detail }),
+          f.group ? el('p', { text: 'This accepts all ' + fmt.num(targets.length) + ': ' + f.resource + '. To accept one alone, choose Show each finding first.' }) : null,
           liveMode ? el('div.callout.warn', { 'data-client-side': 'advisor' }, [
             el('strong', { text: 'This acceptance stays in this browser.' }),
             el('p', { text: 'This console has no write path, so nothing is recorded on the server. The finding is hidden here until you reload or the time is up, and comes back for every other operator at once.' })
@@ -500,9 +564,11 @@
             var reason = why.value.trim();
             if (!reason) return;
             close();
-            A.data.advisorSuppressed = (A.data.advisorSuppressed || []).filter(function (s) { return s.id !== f.id; });
-            A.data.advisorSuppressed.push({ id: f.id, until: new Date(A.data.now.getTime() + Number(days.value) * 86400000), reason: reason, by: A.me() });
-            A.record('advisor.accept', f.id + ' for ' + days.value + ' d: ' + reason);
+            targets.forEach(function (t) {
+              A.data.advisorSuppressed = (A.data.advisorSuppressed || []).filter(function (s) { return s.id !== t.id; });
+              A.data.advisorSuppressed.push({ id: t.id, until: new Date(A.data.now.getTime() + Number(days.value) * 86400000), reason: reason, by: A.me() });
+              A.record('advisor.accept', t.id + ' for ' + days.value + ' d: ' + reason);
+            });
             A.flash('info', 'Risk accepted for ' + days.value + ' days' + (liveMode ? ' in this browser' : ''), f.title + '. It returns on ' + fmt.stamp(A.data.advisorSuppressed[A.data.advisorSuppressed.length - 1].until) + '.', { timeout: 6000 });
             if (onDone) onDone();
           }
@@ -592,7 +658,8 @@
 
     function rowsFor(tokens) {
       var base = showAccepted ? all : active;
-      return ui.applyTokens(base, tokens || [], accessors);
+      var matched = ui.applyTokens(base, tokens || [], accessors);
+      return groupedView ? groupRows(matched) : matched;
     }
 
     function paint(tokens) {
@@ -628,15 +695,26 @@
           return el('div.col', [
             el('strong', { text: f.title }),
             el('div.muted', { text: f.detail }),
+            f.group ? el('div.chips', { 'data-members': String(f.members.length) }, f.members.map(function (m) {
+              return el('span.chip', [A.link(m.resource, m.route, m.rest, m.params)]);
+            })) : null,
             f.evidence ? el('div.muted', { 'data-evidence': f.evidence.path, text: 'Evidence: GET ' + f.evidence.path + ' read at ' + fmt.stamp(f.evidence.at) + '.' }) : null,
             f.suppressed ? el('div.muted', { text: 'Accepted by ' + f.suppressed.by + ' until ' + fmt.stamp(f.suppressed.until) + ': ' + f.suppressed.reason + (liveMode ? ' (in this browser only)' : '') }) : null
           ]);
         }
       },
-      { key: 'resource', label: 'Resource', render: function (f) { return el('span.mono', { text: f.resource }); } },
+      {
+        key: 'resource', label: 'Resource',
+        render: function (f) { return f.group ? el('span', { text: fmt.num(f.members.length) + ' ' + f.noun }) : el('span.mono', { text: f.resource }); }
+      },
       {
         key: 'actions', label: 'Actions', sortable: false,
         render: function (f) {
+          if (f.group) {
+            var all_ = ui.btn('Accept all', { variant: 'ghost', title: 'Accept the risk on all ' + f.members.length + ' for a fixed time with a reason', onClick: function () { suppressDialog(f, function () { A.refresh(); }); } });
+            all_.setAttribute('aria-label', 'Accept risk on all ' + f.members.length + ': ' + f.title);
+            return el('div.row.cell-actions', [all_]);
+          }
           var open = A.link('Open', f.route, f.rest, f.params);
           open.setAttribute('aria-label', 'Go to ' + f.resource);
           open.title = 'Go to ' + f.resource;
@@ -675,8 +753,22 @@
     });
     toggle.setAttribute('aria-pressed', 'false');
 
+    var eachToggle = ui.btn(groupedView ? 'Show each finding' : 'Group repeated findings', {
+      variant: 'ghost',
+      onClick: function () {
+        groupedView = !groupedView;
+        eachToggle.textContent = groupedView ? 'Show each finding' : 'Group repeated findings';
+        eachToggle.setAttribute('aria-pressed', groupedView ? 'false' : 'true');
+        if (table) { table.remove(); table = null; }
+        paint(filter.tokens());
+        A.announce(groupedView ? 'Repeated findings grouped' : 'Every finding on its own row');
+      }
+    });
+    eachToggle.id = 'advisor-each';
+    eachToggle.setAttribute('aria-pressed', groupedView ? 'false' : 'true');
+
     mount.appendChild(el('div.row', [
-      filter, el('span.spacer'), toggle,
+      filter, el('span.spacer'), eachToggle, toggle,
       ui.columnsButton(function () { return table; }, 'findings'),
       ui.exportButton(function () { return table; }, 'findings')
     ]));
@@ -709,6 +801,13 @@
           paintScreen(host, ctx, A.advisorFindings());
           return;
         }
+        if (signedOut()) {
+          live.findings = null;
+          live.at = 0;
+          host.appendChild(ui.pageHeader('Advisor', 'The rules run over what the console API answers, and it answers only to a signed-in operator.'));
+          host.appendChild(ui.emptyState('Sign in to read this', 'No rule has been evaluated, so this is not a clean bill of health.'));
+          return;
+        }
         host.appendChild(ui.pageHeader('Advisor', 'Reading ' + fmt.num(READS.length) + ' sources from the console API and running every rule over them.'));
         host.appendChild(ui.skeleton(6));
         var fresh = live.at && (Date.now() - live.at) < LIVE_TTL_MS && live.findings;
@@ -722,11 +821,7 @@
   });
 
   A.refreshAdvisorBadge = function () {
-    var badge = document.getElementById('nav-advisor-badge');
-    if (!badge || typeof A.advisorFindings !== 'function') return;
-    var urgent = A.advisorFindings().filter(function (f) { return !f.suppressed && (f.severity === 'critical' || f.severity === 'high'); }).length;
-    badge.textContent = urgent ? String(urgent) : '';
-    badge.hidden = !urgent;
-    if (isLive() && !live.promise && (!live.at || (Date.now() - live.at) > LIVE_TTL_MS)) evaluateLive();
+    paintAdvisorBadge();
+    if (isLive() && !signedOut() && !live.promise && (!live.at || (Date.now() - live.at) > LIVE_TTL_MS)) evaluateLive();
   };
 })();
