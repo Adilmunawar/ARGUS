@@ -123,6 +123,12 @@ jobs:
       - name: Install the Chromium build and its system libraries
         run: npx playwright install --with-deps chromium
 
+      - name: Private name guard passes its own self-test
+        run: node .github/scripts/check-identifying.js --self-test
+
+      - name: No private organisation, person, host or database is named
+        run: node .github/scripts/check-identifying.js
+
       - name: JavaScript comment stripper passes its own self-test
         run: node .github/scripts/check-comments.js --self-test
 
