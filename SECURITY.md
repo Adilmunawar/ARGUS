@@ -13,7 +13,7 @@ carries fixes.
 | --- | --- | --- |
 | 0.6.x | Yes | Current release line |
 | 0.5.x | No | Superseded by 0.6.0 |
-| < 0.5 | No | Pre-naming (`ZD Cloud`); no fixes |
+| < 0.5 | No | Pre-naming (the earlier working name); no fixes |
 
 ## Reporting a vulnerability
 
@@ -72,7 +72,7 @@ above has run.
 
 ### Out of scope
 
-- The production deployment at `*.zaraatdost.pk`. This repository is the
+- The production deployment at `*.example.com`. This repository is the
   design and the control plane; testing the live estate is not authorised by
   this policy.
 - Findings that require a compromised operator workstation or physical access

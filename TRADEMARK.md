@@ -17,10 +17,6 @@ The author reserves the name Argus and its mark, alone or with a suffix such as 
 - Use the mark, the console mark or the repository's visual identity on anything not published by the author.
 - Suggest that the author endorses, sponsors or built your work.
 
-## Earlier name
-
-Before version 0.5 the project was called ZD Cloud. That name is not claimed.
-
 ## Contact
 
 Questions and permission requests: adilmunawarx@gmail.com. Misuse of the name is handled under [ENFORCEMENT.md](ENFORCEMENT.md).

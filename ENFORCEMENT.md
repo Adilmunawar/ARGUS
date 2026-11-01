@@ -26,7 +26,7 @@ Before contacting anyone, so the copy cannot quietly change:
 
 ## 3. Platform copyright notice
 
-Every large platform takes down copies on a copyright notice (in the United States this is the DMCA; the EU, the United Kingdom, Pakistan and most other countries have an equivalent). It is a short form, costs nothing, and usually acts within days. Submit the notice from the account or email that matches the author named in this repository.
+Every large platform takes down copies on a copyright notice (in the United States this is the DMCA; the EU, the United Kingdom and most other countries have an equivalent). It is a short form, costs nothing, and usually acts within days. Submit the notice from the account or email that matches the author named in this repository.
 
 Where the forms are:
 

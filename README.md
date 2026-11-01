@@ -155,7 +155,6 @@ Challenges and corrections are welcome. The most valuable contribution is provin
 
 ## Related projects
 
-* [ZD Claude Plugin](https://github.com/Adilmunawar/ZD-claude-plugin): Claude Code plugins for deploys, operations and security, pointed at `platform/gitops/` and `docs/runbooks/`.
 * [QGIS MCP](https://github.com/Adilmunawar/QGIS_MCP): a Model Context Protocol server that connects AI assistants to QGIS.
 
 ## Author
