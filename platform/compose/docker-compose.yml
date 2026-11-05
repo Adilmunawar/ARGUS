@@ -124,9 +124,9 @@ services:
             "actions": ["Admin"] }
         ] }
         JSON
-        chmod 0400 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
-        chown 1000:1000 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
-        echo "wrote filer.toml and s3.json, readable by root and by the console user"
+        chmod 0440 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
+        chown 0:1000 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
+        echo "wrote filer.toml and s3.json, readable by root and the console group"
     environment:
       ARGUS_S3_ADMIN_SECRET:       ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
       ARGUS_S3_CONSOLE_SECRET:     ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
