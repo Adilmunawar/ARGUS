@@ -1,5 +1,6 @@
 module.exports = async function (ctx) {
-  const { page, rec, goto, waitFor, origin, get } = ctx;
+  const { page, rec, goto, waitFor } = ctx;
+  const SUBJECT = ctx.subject || 'alex';
   const PATH = '/api/audit/recent?limit=500';
 
   const fromApi = (ttl) => page.evaluate(async (a) => {
@@ -18,7 +19,10 @@ module.exports = async function (ctx) {
       heads,
       rows,
       summary: summary ? summary.textContent : '',
-      errors: document.querySelectorAll('#main .empty.is-error').length,
+      errors: document.querySelectorAll('#main [data-state="failed"], #main [data-state="unreachable"], #main [data-state="timeout"]').length,
+      okPanels: document.querySelectorAll('#main .livepanel[data-state="ok"]').length,
+      stamps: document.querySelectorAll('#main .livepanel[data-state="ok"] p.readstamp[data-read-at]').length,
+      demo: (() => { const d = [...document.querySelectorAll('#main details.disclosure')].find((x) => /Demonstration of tamper evidence/.test(x.querySelector('summary').textContent)); return d ? { open: d.open, buttons: [...d.querySelectorAll('button')].map((b) => b.textContent.trim()) } : null; })(),
       sample: document.querySelectorAll('[data-sample-notice]').length
     };
   });
@@ -41,14 +45,14 @@ module.exports = async function (ctx) {
   rec('AUDIT live: the table is newest first, so the successful login sits above the failed one', okIx !== -1 && failedIx !== -1 && okIx < failedIx, 'succeeded ' + okIx + ' failed ' + failedIx);
   const seqs = events.map((e) => e.seq);
   rec('AUDIT live: the API itself answers newest first and the table follows its order', seqs.every((v, i) => i === 0 || seqs[i - 1] > v) && s.rows.length === events.length && s.rows[0][2] === events[0].event, 'first event ' + (events[0] && events[0].event));
-  rec('AUDIT live: the actor column shows the operator subject for the successful login', okIx !== -1 && s.rows[okIx][1] === 'adil', okIx !== -1 ? s.rows[okIx][1] : 'no row');
+  rec('AUDIT live: the actor column shows the operator subject for the successful login', okIx !== -1 && s.rows[okIx][1] === SUBJECT, okIx !== -1 ? s.rows[okIx][1] : 'no row');
   rec('AUDIT live: an event with no subject shows anonymous, not a blank', s.rows.every((r) => r[1] !== '') && events.every((e) => !!e.subject || s.rows.some((r) => r[1] === 'anonymous')), s.rows.slice(0, 3).map((r) => r[1]).join(','));
 
   const wantSummary = api ? api.total + ' events held, ' + api.dropped + ' dropped' : '';
   rec('AUDIT live: the header reports the same total and dropped count as /api/audit/recent', !!api && s.summary.indexOf(wantSummary) === 0, s.summary);
-  rec('AUDIT live: a fresh read agrees with the header, allowing only for events added since', !!api && !!fresh && fresh.total >= api.total && fresh.since === api.since && fresh.persistence === 'memory', fresh ? fresh.total + ' vs ' + (api && api.total) : 'no read');
-  rec('AUDIT live: the header says persistence is memory and points to the Logs screen',
-    /persistence: memory/.test(s.text) && await page.evaluate(() => !!document.querySelector('#main a[href$="#/logs"], #main a[href*="#/logs"]')), 'persistence line present');
+  rec('AUDIT live: a fresh read agrees with the header, allowing only for events added since', !!api && !!fresh && fresh.total >= api.total && fresh.since === api.since && (fresh.persistence === 'memory' || fresh.persistence === 'file') && fresh.persistence === api.persistence, fresh ? fresh.total + ' vs ' + (api && api.total) : 'no read');
+  rec('AUDIT live: the header states where the trail is kept, as the API reports it, and points to the Logs screen',
+    !!api && new RegExp('persistence: ' + api.persistence).test(s.text) && await page.evaluate(() => !!document.querySelector('#main a[href$="#/logs"], #main a[href*="#/logs"]')), 'persistence line present');
 
   const chain = await page.evaluate(async () => {
     const btn = () => [...document.querySelectorAll('#main button')].find((b) => /Verify the chain/.test(b.textContent));
@@ -117,7 +121,9 @@ module.exports = async function (ctx) {
   const t = await snap();
   const fixtureLeak = ['sam', 'contractor', 'reconciler', 'alert.acknowledge', 'deployment.approve', 'elevation.request'].filter((w) => t.text.toLowerCase().indexOf(w) !== -1);
   rec('AUDIT live: no fixture actor or fixture action appears on the live screen', fixtureLeak.length === 0 && t.sample === 0, fixtureLeak.join(',') || 'clean');
-  rec('AUDIT live: every panel says when it was read', (t.text.match(/Read from the console API at/g) || []).length >= 3, String((t.text.match(/Read from the console API at/g) || []).length));
+  rec('AUDIT live: every panel that answered carries one read stamp', t.okPanels === 3 && t.stamps === 3, t.stamps + ' stamps on ' + t.okPanels + ' answered panels');
+  rec('AUDIT live: the alter and restore controls sit in a closed disclosure named for the tamper demonstration',
+    !!t.demo && t.demo.open === false && t.demo.buttons.join('|') === 'Alter one row in this page|Restore the row', JSON.stringify(t.demo));
   rec('AUDIT live: the page shows no error state', t.errors === 0, String(t.errors));
 
   const deep = await page.evaluate(async () => {

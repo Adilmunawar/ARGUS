@@ -538,13 +538,7 @@
     var dep = d.deployments.filter(function (p) { return String(p.id) === String(id); })[0];
 
     if (!dep) {
-      mount.appendChild(ui.errorState(
-        'No deployment numbered ' + id,
-        'Nothing in the queue has that number. It may have been closed before this console kept history, or the link may be mistyped.'));
-      mount.appendChild(ui.btn('Back to the deployment queue', {
-        variant: 'primary',
-        onClick: function () { A.go('deploys'); }
-      }));
+      mount.appendChild(ui.notFound('deployment', id, 'deploys', 'Back to the deployment queue'));
       return;
     }
 
@@ -667,17 +661,20 @@
       'What the repository declares for each environment. Nothing here has been applied.'));
     host.appendChild(A.notInStack('The GitOps reconciler',
       'does not run in this stack, so no deployment has been planned, approved or applied. What follows is what the repository declares.'));
-    host.appendChild(A.livePanel('Declared versions', '/api/gitops/environments', declaredVersions, {
-      errorTitle: 'The declared versions could not be read'
-    }));
-    host.appendChild(A.livePanel('Declared applications', '/api/gitops/apps', declaredApps, {
-      errorTitle: 'The declared applications could not be read'
-    }));
+    host.appendChild(A.livePanel('Declared versions', '/api/gitops/environments', declaredVersions));
+    host.appendChild(A.livePanel('Declared applications', '/api/gitops/apps', declaredApps));
+  }
+
+  function renderLiveDetail(host, id) {
+    host.appendChild(ui.notFound('deployment', id, 'deploys', 'Back to the declared versions'));
+    host.appendChild(A.notInStack('The GitOps reconciler',
+      'does not run in this stack, so it holds no deployment history and no deployment number can be looked up here.'));
   }
 
   var screen = {
     title: 'Deployments',
     crumb: 'Deployments',
+    liveCrumbs: function (rest) { return ['Deployment ' + rest[0]]; },
     crumbs: function (rest) {
       var out = ['Deployment ' + rest[0]];
       if (rest[1]) out.push(rest[1].charAt(0).toUpperCase() + rest[1].slice(1));
@@ -687,13 +684,16 @@
       var host = el('div');
       mount.appendChild(host);
       A.whenProbed(function (mode) {
-        if (mode === 'live') { renderLive(host); return; }
+        if (mode === 'live') {
+          if (ctx.rest && ctx.rest.length) renderLiveDetail(host, ctx.rest[0]);
+          else renderLive(host);
+          return;
+        }
         if (ctx.rest && ctx.rest.length) renderDetail(host, ctx.rest[0], ctx.rest[1]);
         else renderQueue(host);
       });
     }
   };
 
-  if (typeof A.screen === 'function') A.screen('deploys', screen);
-  else document.addEventListener('DOMContentLoaded', function () { A.screen('deploys', screen); });
+  A.screen('deploys', screen);
 })();

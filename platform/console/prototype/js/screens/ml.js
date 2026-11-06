@@ -338,76 +338,30 @@
     ]);
   }
 
-  function sizeText(n) {
-    if (n === null || n === undefined || isNaN(n)) return null;
-    if (n < 1024) return fmt.num(n) + ' B';
-    if (n < 1048576) return fmt.num(n / 1024, 1) + ' KB';
-    if (n < 1073741824) return fmt.num(n / 1048576, 1) + ' MB';
-    if (n < 1099511627776) return fmt.num(n / 1073741824, 1) + ' GB';
-    return fmt.num(n / 1099511627776, 2) + ' TB';
-  }
-
   var ML_BUCKET = /ml|raster|sentinel/i;
 
   function bucketsPanel() {
-    return A.livePanel('Data buckets', '/api/storage/buckets', function (body, d, env) {
-      var rows = (d.buckets || []).filter(function (b) { return ML_BUCKET.test(b.name); });
-      if (d.topologyOk === false || d.inventorySource !== 'storage-init') {
-        body.appendChild(el('div.callout.warn', [
-          el('strong', { text: 'The object store is not configured here.' }),
-          el('p', {
-            text: 'Bucket names come from ' + (d.inventorySource || 'the declarations') + ', so they are declared rather than verified.' +
-              (d.topologyOk === false ? ' Sizes are unknown because the SeaweedFS master could not be read.' : '')
-          })
-        ]));
+    return A.livePanel('Data buckets', '/api/storage/buckets', function (body, d) {
+      var rows = (d.buckets || []).filter(function (b) { return ML_BUCKET.test(b.name); })
+        .sort(function (x, y) { return String(x.name).localeCompare(String(y.name)); });
+      var line = el('p', { 'data-bucket-summary': String(rows.length) });
+      if (!rows.length) {
+        line.appendChild(document.createTextNode('The object store lists no bucket whose name contains ml, raster or sentinel. '));
+      } else {
+        line.appendChild(document.createTextNode(fmt.num(rows.length) + ' bucket' + (rows.length === 1 ? ' is' : 's are') + ' reserved for ML and imagery data: '));
+        rows.forEach(function (b, i) {
+          if (i) line.appendChild(document.createTextNode(', '));
+          line.appendChild(A.link(b.name, 'storage', null, { bucket: b.name }, 'rlink'));
+        });
+        line.appendChild(document.createTextNode('. '));
       }
-      body.appendChild(ui.table([
-        { key: 'name', label: 'Bucket', render: function (b) { return el('code.mono', { text: b.name }); } },
-        {
-          key: 'size', label: 'Size on disk', align: 'right',
-          sort: function (b) { return b.diskBytes === null || b.diskBytes === undefined ? -1 : b.diskBytes; },
-          render: function (b) {
-            var v = sizeText(b.diskBytes);
-            return v === null ? el('span.muted', { text: 'unknown' }) : el('span', { text: v });
-          }
-        },
-        {
-          key: 'versioning', label: 'Versioning',
-          render: function (b) {
-            return b.versioning === null || b.versioning === undefined
-              ? el('span.muted', { text: 'unknown' })
-              : ui.pill(b.versioning ? 'on' : 'off', b.versioning ? 'ok' : 'idle');
-          }
-        },
-        {
-          key: 'lock', label: 'Lock',
-          render: function (b) {
-            if (b.lock) return el('span', { text: b.lock + ' ' + fmt.num(b.lockDays) + ' d' });
-            return el('span.muted', { text: b.lockDeclared ? 'declared ' + b.lockDeclared + ', not applied' : 'none' });
-          }
-        },
-        {
-          key: 'owner', label: 'Owner',
-          render: function (b) { return b.owner ? el('span.mono', { text: b.owner }) : el('span.muted', { text: 'not declared' }); }
-        }
-      ], rows, {
-        caption: 'Buckets reserved for ML and imagery data, read from the object store',
-        sortKey: 'name',
-        rowKey: function (b) { return b.name; },
-        empty: 'The object store lists no bucket whose name contains ml, raster or sentinel.'
-      }));
-      body.appendChild(el('p.hint', { text: 'Read ' + fmt.stamp(new Date(env.at)) + ' from the object store. Sizes are the volume footprint, not a count of objects.' }));
-    }, {
-      errorTitle: 'The buckets could not be read',
-      notConfigured: function (body, e) {
-        body.appendChild(ui.emptyState('Object store not configured',
-          (e && e.message ? e.message + ' ' : '') + 'No bucket can be listed until the console is pointed at SeaweedFS, so no size, versioning or lock is shown.'));
-      }
+      line.appendChild(A.link('Sizes, locks and contents are on the Storage screen', 'storage', null, null, 'rlink'));
+      body.appendChild(line);
     });
   }
 
   function accountsPanel() {
-    return A.livePanel('Declared applications that use them', '/api/gitops/service-accounts', function (body, d, env) {
+    return A.livePanel('Declared applications that use them', '/api/gitops/service-accounts', function (body, d) {
       var rows = [];
       (d.accounts || []).forEach(function (a) {
         var mine = (a.s3 || []).filter(function (g) { return ML_BUCKET.test(String(g).split(':')[0]); });
@@ -426,13 +380,8 @@
       }));
       body.appendChild(el('p.hint', {
         text: 'Declared in the gitops repository' + (d.declaredAt ? ' as of ' + fmt.stamp(new Date(d.declaredAt)) : '') +
-          ', read ' + fmt.stamp(new Date(env.at)) + '. A declaration says who may use a bucket, not that they do.'
+          '. A declaration says who may use a bucket, not that they do.'
       }));
-    }, {
-      errorTitle: 'The declared accounts could not be read',
-      notConfigured: function (body, e) {
-        body.appendChild(ui.emptyState('No gitops repository configured', e && e.message ? e.message : 'The console has no declarations to read.'));
-      }
     });
   }
 

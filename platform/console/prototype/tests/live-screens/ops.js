@@ -9,9 +9,8 @@ function mainText(page) {
 function settled(page) {
   return page.waitForFunction(() => {
     const main = document.getElementById('main');
-    if (!main || main.querySelector('.skel')) return false;
-    const text = main.textContent;
-    return /Read from the console API at|is not configured|could not be read|Not in this stack|Runbook not found|Sign in to read this/.test(text);
+    if (!main || main.querySelector('.skel') || main.querySelector('[data-state="loading"]')) return false;
+    return !!main.querySelector('.livepanel[data-state], .notfound, [data-state="notInStack"], .stateblock');
   }, null, { timeout: 8000 }).then(() => true, () => false);
 }
 
@@ -41,7 +40,8 @@ module.exports = async function (ctx) {
     'index rows at ' + firstIndex.join(',') + ', runbooks at ' + lastNonIndex.join(','));
   const listText = await mainText(page);
   rec('the runbooks tab says they cannot be run and carries the read time',
-    /cannot be run|not scripts the console can run/.test(listText) && /Read from the console API at \d{4}-\d{2}-\d{2}/.test(listText)
+    /cannot be run|not scripts the console can run/.test(listText)
+      && (await page.evaluate(() => !!document.querySelector('#main .livepanel[data-path="/api/runbooks"][data-state="ok"] .readstamp[data-read-at]')))
       && !(await page.evaluate(() => Array.from(document.querySelectorAll('#main button')).some((b) => /^Run /.test(b.textContent)))),
     listText.slice(0, 100));
 
@@ -68,48 +68,88 @@ module.exports = async function (ctx) {
 
   await goto(page, 'ops/runbook/sql-01-restore-drill');
   await settled(page);
-  const missing = await page.evaluate(() => ({
-    h1: (document.querySelector('#main h1') || {}).textContent,
-    text: document.getElementById('main').textContent,
-    links: Array.from(document.querySelectorAll('#main a')).map((a) => a.textContent.trim())
-  }));
-  rec('the fixture deep link sql-01-restore-drill says the runbook was not found and lists the real ones',
-    missing.h1 === 'Runbook not found' && /none is called sql-01-restore-drill/.test(missing.text) && missing.links.includes('boot-01-day-one'),
-    String(missing.h1) + ' / links ' + missing.links.join(','));
+  const missing = await page.evaluate(() => {
+    const n = document.querySelector('#main .notfound');
+    return {
+      h1: (document.querySelector('#main h1') || {}).textContent,
+      h1s: document.querySelectorAll('#main h1').length,
+      state: n ? n.getAttribute('data-state') + ':' + n.getAttribute('data-reason') : null,
+      retry: Array.from(document.querySelectorAll('#main button')).some((b) => /Try again/.test(b.textContent)),
+      links: Array.from(document.querySelectorAll('#main a')).map((a) => a.textContent.trim())
+    };
+  });
+  rec('the fixture deep link sql-01-restore-drill renders the one not-found block and lists the real runbooks',
+    missing.state === 'notFound:unknown-id' && missing.h1 === 'No such runbook' && missing.h1s === 1 && !missing.retry && missing.links.includes('boot-01-day-one'),
+    JSON.stringify(missing).slice(0, 200));
 
   await goto(page, 'ops/alarms');
   await settled(page);
-  const alarms = await page.evaluate(() => ({
-    text: document.getElementById('main').textContent,
-    create: Array.from(document.querySelectorAll('#main button')).filter((b) => /Create alarm|Edit alm|Delete alm/.test(b.textContent)).length
-  }));
-  rec('the Alarms tab says Prometheus is not configured rather than evaluating fixture alarms',
-    /Prometheus is not configured/.test(alarms.text), alarms.text.replace(/\s+/g, ' ').slice(0, 120));
-  rec('the Alarms tab says Alertmanager is not configured for silences', /Alertmanager is not configured/.test(alarms.text));
+  const alarms = await page.evaluate(() => {
+    const st = (p) => { const n = document.querySelector('#main .livepanel[data-path="' + p + '"]'); return n ? n.getAttribute('data-state') + ' ' + n.textContent : 'missing'; };
+    return {
+      rules: st('/api/metrics/rules'),
+      silences: st('/api/alerts/silences'),
+      active: st('/api/alerts/active'),
+      create: Array.from(document.querySelectorAll('#main button')).filter((b) => /Create alarm|Edit alm|Delete alm/.test(b.textContent)).length
+    };
+  });
+  const alarmApi = await page.evaluate(async () => {
+    const A = window.ARGUS;
+    const out = {};
+    for (const p of ['/api/metrics/rules', '/api/alerts/silences', '/api/alerts/active']) out[p] = A.envelopeState(await A.read(p));
+    const open = A.openAlerts(await A.read('/api/alerts/active'));
+    const tile = Array.from(document.querySelectorAll('#main .livepanel[data-path="/api/alerts/active"] .tile')).find((t) => /^Open alerts/.test(t.textContent));
+    out.openTotal = open ? open.total : null;
+    out.tileValue = tile && tile.querySelector('.tile-value') ? tile.querySelector('.tile-value').textContent.trim() : null;
+    out.stamped = !!document.querySelector('#main .livepanel[data-path="/api/alerts/active"] p.readstamp[data-read-at]');
+    return out;
+  });
+  const stateOf = (s) => s.split(' ')[0];
+  if (alarmApi['/api/metrics/rules'] === 'notConfigured') {
+    rec('the Alarms tab marks the rules panel notConfigured and names Prometheus rather than evaluating fixture alarms',
+      /^notConfigured /.test(alarms.rules) && /Prometheus is not configured/.test(alarms.rules), alarms.rules.slice(0, 120));
+  } else {
+    rec('the Alarms tab rules panel takes the state of the Prometheus rules read and counts real rule groups',
+      stateOf(alarms.rules) === alarmApi['/api/metrics/rules'] && (alarmApi['/api/metrics/rules'] !== 'ok' || /rule groups? loaded by Prometheus/.test(alarms.rules)), alarms.rules.slice(0, 120));
+  }
+  if (alarmApi['/api/alerts/silences'] === 'notConfigured') {
+    rec('the Alarms tab marks silences notConfigured and names Alertmanager', /^notConfigured /.test(alarms.silences) && /Alertmanager is not configured/.test(alarms.silences), alarms.silences.slice(0, 120));
+  } else {
+    rec('the Alarms tab silences panel takes the state of the Alertmanager silences read', stateOf(alarms.silences) === alarmApi['/api/alerts/silences'], alarms.silences.slice(0, 120));
+  }
+  if (alarmApi['/api/alerts/active'] === 'ok') {
+    rec('the Alarms tab open-alert count is A.openAlerts of /api/alerts/active, with a read stamp',
+      stateOf(alarms.active) === 'ok' && alarmApi.openTotal !== null && alarmApi.tileValue === String(alarmApi.openTotal) && alarmApi.stamped, JSON.stringify(alarmApi));
+  } else {
+    rec('the Alarms tab reads open alerts from /api/alerts/active', stateOf(alarms.active) === alarmApi['/api/alerts/active'], alarms.active.slice(0, 120));
+  }
   rec('the alarm editor is not offered in live mode', alarms.create === 0, 'buttons ' + alarms.create);
 
   await goto(page, 'ops/maintenance');
   await settled(page);
   const maint = await page.evaluate(() => ({
-    marks: Array.from(document.querySelectorAll('#main [data-not-in-stack]')).map((n) => n.getAttribute('data-not-in-stack')),
+    marks: Array.from(document.querySelectorAll('#main [data-not-in-stack-item]')).map((n) => n.getAttribute('data-not-in-stack-item')),
+    strips: document.querySelectorAll('#main [data-state="notInStack"]').length,
     buttons: Array.from(document.querySelectorAll('#main button')).filter((b) => /freeze/i.test(b.textContent)).length,
     calendar: document.querySelectorAll('#main .calendar').length
   }));
-  rec('Maintenance marks change freezes as not in this stack with no declare or lift button',
-    maint.marks.includes('Change freezes') && maint.buttons === 0 && maint.calendar === 0, JSON.stringify(maint));
+  rec('Maintenance marks change freezes and windows in one not-in-stack strip with no declare or lift button',
+    maint.marks.includes('Change freezes') && maint.marks.includes('Maintenance windows') && maint.strips === 1 && maint.buttons === 0 && maint.calendar === 0, JSON.stringify(maint));
 
   await goto(page, 'ops/backups');
   await settled(page);
   const backups = await page.evaluate(() => ({
     marks: Array.from(document.querySelectorAll('#main [data-not-in-stack]')).map((n) => n.getAttribute('data-not-in-stack')),
     text: document.getElementById('main').textContent,
-    tiles: document.querySelectorAll('#main .tile').length
+    tiles: document.querySelectorAll('#main .tile').length,
+    panel: (() => { const p = document.querySelector('#main .livepanel[data-path="/api/storage/buckets"]'); return p ? { state: p.getAttribute('data-state'), tables: p.querySelectorAll('table').length, storage: Array.from(p.querySelectorAll('a')).some((a) => /storage$/.test(a.getAttribute('href') || '')) } : null; })()
   }));
   rec('Backups and drills is marked not in this stack and shows no fixture tiles',
     backups.marks.includes('Backups and restore drills') && backups.tiles === 0 && !/Drills passed|Worst RPO/.test(backups.text), JSON.stringify(backups.marks));
-  rec('the backup buckets panel shows a not-configured or error state without SeaweedFS, never a fixture store',
-    /is not configured|could not be read|Try again/.test(backups.text) && !/billing_db|2026-08-14-sql-01-restore-drill/.test(backups.text),
-    backups.text.replace(/\s+/g, ' ').slice(-160));
+  rec('the backup buckets panel settles and never shows a fixture store',
+    !!backups.panel && backups.panel.state !== 'loading' && !/billing_db|2026-08-14-sql-01-restore-drill/.test(backups.text), JSON.stringify(backups.panel));
+  rec('the backup buckets panel is a summary that defers to Storage, not a second bucket table',
+    !!backups.panel && backups.panel.tables === 0 && (backups.panel.state !== 'ok' || backups.panel.storage), JSON.stringify(backups.panel));
 
   await goto(page, 'ops/cost');
   await settled(page);
@@ -135,6 +175,26 @@ module.exports = async function (ctx) {
 
   await goto(page, 'ops');
   await settled(page);
-  const errors = await page.evaluate(() => document.querySelectorAll('#main .empty.is-error').length);
+  const errors = await page.evaluate(() => document.querySelectorAll('#main [data-state="failed"],#main [data-state="unreachable"],#main [data-state="timeout"]').length);
   rec('the Runbooks tab renders without an error state', errors === 0, 'error states ' + errors);
+
+  await page.route('**/api/runbooks', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: false, reason: 'unreachable', message: 'The runbooks reader did not answer.' }) }));
+  await page.evaluate(() => window.ARGUS.forget());
+  await goto(page, 'ops/runbooks');
+  await settled(page);
+  const fault = await page.evaluate(() => {
+    const p = document.querySelector('#main .livepanel[data-path="/api/runbooks"]');
+    return p ? { state: p.getAttribute('data-state'), reason: p.getAttribute('data-reason'), retry: Array.from(p.querySelectorAll('button')).some((b) => /Try again/.test(b.textContent)), rows: p.querySelectorAll('tbody tr').length } : null;
+  });
+  rec('a runbooks reader fault renders the unreachable state with a retry and no rows',
+    !!fault && fault.state === 'unreachable' && fault.reason === 'unreachable' && fault.retry && fault.rows === 0, JSON.stringify(fault));
+  await goto(page, 'ops/runbook/boot-01-day-one');
+  await settled(page);
+  const detailFault = await page.evaluate(() => {
+    const b = document.querySelector('#main .stateblock');
+    return b ? b.getAttribute('data-state') : null;
+  });
+  rec('a runbooks reader fault on a runbook deep link renders the same unreachable state', detailFault === 'unreachable', String(detailFault));
+  await page.unroute('**/api/runbooks');
+  await page.evaluate(() => window.ARGUS.forget());
 };

@@ -83,6 +83,25 @@
       if (tb < 1) return fmt.num(tb * 1024, 1) + ' GB';
       return fmt.num(tb, 2) + ' TB';
     },
+    bytes: function (n) {
+      if (n === null || n === undefined || n === '' || !isFinite(Number(n))) return '-';
+      var v = Number(n);
+      var units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'];
+      var i = 0;
+      var neg = v < 0;
+      v = Math.abs(v);
+      while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+      var dp = i === 0 ? 0 : (v < 10 ? 2 : (v < 100 ? 1 : 0));
+      return (neg ? '-' : '') + fmt.num(v, dp) + ' ' + units[i];
+    },
+    clock: function (d) {
+      if (!d) return '';
+      if (!(d instanceof Date)) d = new Date(d);
+      if (!isFinite(d.getTime())) return '';
+      var full = fmt.stamp(d);
+      if (A.timezone && A.timezone() === 'local') return full.slice(11);
+      return full.slice(11, 16) + 'Z';
+    },
     ms: function (n) { return n === null || n === undefined ? '-' : (n >= 1000 ? fmt.num(n / 1000, 2) + ' s' : fmt.num(n) + ' ms'); },
     dur: function (s) {
       if (s === null || s === undefined) return '-';
@@ -806,6 +825,74 @@
       Array.apply(null, Array(rows || 3)).map(function () { return el('div.skel-row'); }));
   }
 
+  var STATES = {
+    sample: { tone: 'info', text: 'Not read on sample data.' },
+    signedOut: { tone: 'info', text: 'Sign in to read this.' },
+    notConfigured: { tone: 'info', text: 'Not configured on this stack.' },
+    forbidden: { tone: 'warn', text: 'The console API refused this read.' },
+    notFound: { tone: 'info', text: 'The console API has nothing at this address.' },
+    unreachable: { tone: 'bad', text: 'The source did not answer.' },
+    timeout: { tone: 'bad', text: 'The read timed out.' },
+    failed: { tone: 'bad', text: 'The read failed.' },
+    stale: { tone: 'warn', text: 'Showing the last value that could be read.' },
+    notInStack: { tone: 'info', text: 'Not in this stack.' },
+    loading: { tone: 'info', text: 'Reading.' }
+  };
+  var TRANSIENT = { unreachable: true, timeout: true, failed: true };
+
+  function stateBlock(state, opts) {
+    opts = opts || {};
+    var spec = STATES[state] ? state : 'failed';
+    var def = STATES[spec];
+    var attrs = { 'data-state': spec };
+    if (opts.reason) attrs['data-reason'] = String(opts.reason);
+    if (spec === 'notInStack') attrs['data-not-in-stack'] = opts.what || '';
+    if (def.tone === 'bad') attrs.role = 'alert';
+    var detail = opts.detail || '';
+    if (spec === 'notInStack' && opts.what) {
+      detail = opts.what + ' ' + (opts.detail || 'has no source the console can read here, so nothing is shown rather than a figure nobody measured.');
+    }
+    return el('div.callout.stateblock.' + def.tone, attrs, [
+      el('strong.state-title', { text: def.text }),
+      detail ? el('p.state-detail', { text: detail }) : null,
+      opts.action || null,
+      opts.retry && TRANSIENT[spec] ? btn('Try again', { variant: 'ghost', onClick: opts.retry }) : null
+    ]);
+  }
+
+  function notInStackStrip(items) {
+    var list = (items || []).filter(Boolean);
+    return el('div.callout.stateblock.info.nis-strip', {
+      'data-state': 'notInStack',
+      'data-not-in-stack': list.map(function (it) { return it.what; }).join(', ')
+    }, [
+      el('strong.state-title', { text: STATES.notInStack.text }),
+      el('ul.nis-list', list.map(function (it) {
+        return el('li', { 'data-not-in-stack-item': it.what || '' }, [
+          el('b', { text: it.what }),
+          it.detail ? ' ' + it.detail : null
+        ]);
+      }))
+    ]);
+  }
+
+  function notFound(kind, id, backRoute, backLabel) {
+    var shown = String(id === undefined || id === null ? '' : id);
+    if (shown.length > 80) shown = shown.slice(0, 77) + '...';
+    return el('div.notfound', { 'data-state': 'notFound', 'data-reason': 'unknown-id' }, [
+      pageHeader('No such ' + kind),
+      el('p', { text: 'Nothing called "' + shown + '" is known to the console, so there is nothing to show.' }),
+      backRoute ? el('a.rlink', { href: A.href ? A.href(backRoute) : '#/' + backRoute, text: backLabel || 'Back' }) : null
+    ]);
+  }
+
+  function disclosure(summary, nodes) {
+    return el('details.disclosure', [
+      el('summary', { text: summary }),
+      el('div.disclosure-body', nodes)
+    ]);
+  }
+
   function dl(items) {
     return el('dl.deflist', items.filter(Boolean).map(function (kv) {
       return el('div.deflist-row', [el('dt', { text: kv[0] }), el('dd', kv[1])]);
@@ -1241,8 +1328,8 @@
       preserveAspectRatio: 'xMinYMid meet'
     });
 
-    edges.forEach(function (e) {
-      var a = pos[e[0]], b = pos[e[1]];
+    edges.forEach(function (edge) {
+      var a = pos[edge[0]], b = pos[edge[1]];
       if (!a || !b) return;
       var x1 = a.x + boxW, y1 = a.y + boxH / 2, x2 = b.x, y2 = b.y + boxH / 2;
       var mid = (x1 + x2) / 2;
@@ -1269,8 +1356,8 @@
 
     var described = [];
     var mentioned = Object.create(null);
-    edges.forEach(function (e) {
-      var a = byId[e[0]], b = byId[e[1]];
+    edges.forEach(function (edge) {
+      var a = byId[edge[0]], b = byId[edge[1]];
       if (!a || !b) return;
       mentioned[a.id] = true; mentioned[b.id] = true;
       described.push(a.label + ' ' + verb + ' ' + b.label);
@@ -1385,10 +1472,14 @@
     return node;
   }
 
+  function escapeToken(v) {
+    return String(v).replace(/[%,:]/g, function (c) { return c === '%' ? '%25' : c === ',' ? '%2C' : '%3A'; });
+  }
+
   function encodeTokens(tokens) {
     if (!tokens || !tokens.length) return null;
     return tokens.map(function (t) {
-      return encodeURIComponent(t.key) + ':' + encodeURIComponent(t.value);
+      return escapeToken(t.key) + ':' + escapeToken(t.value);
     }).join(',');
   }
 
@@ -1565,7 +1656,8 @@
   UI.el = el; UI.svg = svg; UI.clear = clear; UI.append = append; UI.fmt = fmt;
   UI.pill = pill; UI.btn = btn; UI.pageHeader = pageHeader; UI.statTile = statTile;
   UI.card = card; UI.table = table; UI.emptyState = emptyState; UI.errorState = errorState;
-  UI.skeleton = skeleton; UI.dl = dl; UI.tabs = tabs; UI.sparkline = sparkline; UI.bar = bar;
+  UI.skeleton = skeleton; UI.stateBlock = stateBlock; UI.notInStackStrip = notInStackStrip;
+  UI.notFound = notFound; UI.disclosure = disclosure; UI.STATES = STATES; UI.TRANSIENT = TRANSIENT; UI.dl = dl; UI.tabs = tabs; UI.sparkline = sparkline; UI.bar = bar;
   UI.graph = graph; UI.heatgrid = heatgrid; UI.timeline = timeline;
   UI.heartbeatBar = heartbeatBar; UI.uptimeOf = uptimeOf; UI.incidentsOf = incidentsOf;
   UI.logView = logView; UI.logLevel = logLevel; UI.LOG_LEVELS = LOG_LEVELS; UI.LOG_LEVEL_LABEL = LOG_LEVEL_LABEL;

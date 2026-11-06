@@ -66,10 +66,10 @@
     ],
     's-2289': [
       { at: 22, text: 'Import-Module WebAdministration' },
-      { at: 140, text: 'Get-WebAppPoolState -Name LandSurveyApiPool' },
-      { at: 611, text: 'Restart-WebAppPool -Name LandSurveyApiPool' },
+      { at: 140, text: 'Get-WebAppPoolState -Name LegacyAppPool' },
+      { at: 611, text: 'Restart-WebAppPool -Name LegacyAppPool' },
       { at: 980, text: 'Get-EventLog -LogName Application -Newest 40 -Source "ASP.NET 4.0"' },
-      { at: 1544, text: 'Invoke-WebRequest http://localhost/landsurvey/health -UseBasicParsing' },
+      { at: 1544, text: 'Invoke-WebRequest http://localhost/legacy-app/health -UseBasicParsing' },
       { at: 2044, text: 'logoff' }
     ],
     's-2288': [
@@ -322,7 +322,7 @@
             if (alert && alert.state === 'open') alert.state = 'ack';
             A.record('incident.open', inc.id + ' ' + inc.title + ' (' + inc.severity + ', commander ' + inc.commander + ')');
             close();
-            A.flash('warn', 'Incident ' + inc.id + ' opened', inc.title + '. ' + personName(inc.commander) + ' is the commander; every step goes on its timeline.');
+            A.flash('warn', 'Incident ' + inc.id + ' opened', inc.title + '. ' + A.personName(inc.commander) + ' is the commander; every step goes on its timeline.');
             A.go('security', ['incidents'], { id: inc.id });
           }
         });
@@ -332,10 +332,6 @@
     });
   }
 
-  function personName(upn) {
-    var p = A.data.personByUpn(upn);
-    return p ? p.name : upn;
-  }
 
   function addTimelineNote(inc) {
     var note = el('textarea.field', { id: 'inc-add-note', rows: '3', spellcheck: 'false' });
@@ -388,7 +384,7 @@
         match: inc.id,
         confirmLabel: 'Resolve ' + inc.id,
         detail: 'Resolving closes the incident and marks ' + (inc.alerts.length ? 'its ' + fmt.num(inc.alerts.length) + ' linked alert' + (inc.alerts.length === 1 ? '' : 's') : 'no alert') + ' resolved. The timeline stays readable for ever.',
-        blast: 'Commander ' + personName(inc.commander) + ', opened ' + fmt.ago(inc.opened) + ', ' + fmt.num(inc.timeline.length) + ' timeline entries.',
+        blast: 'Commander ' + A.personName(inc.commander) + ', opened ' + fmt.ago(inc.opened) + ', ' + fmt.num(inc.timeline.length) + ' timeline entries.',
         reversible: 'An incident can be reopened from its page, which writes a new timeline entry rather than erasing this one.',
         onConfirm: apply
       });
@@ -423,7 +419,7 @@
       el('div.row', [
         ui.pill(inc.state, INC_TONE[inc.state] || 'idle'),
         ui.pill(inc.severity, SEV_TONE[inc.severity] || 'idle'),
-        el('span.muted', { text: 'Commander ' + personName(inc.commander) + ' · opened ' + fmt.ago(inc.opened) + ' · updated ' + fmt.ago(inc.updated) })
+        el('span.muted', { text: 'Commander ' + A.personName(inc.commander) + ' · opened ' + fmt.ago(inc.opened) + ' · updated ' + fmt.ago(inc.updated) })
       ]),
       ui.dl([
         ['Host', el('span.mono', { text: inc.host })],
@@ -435,7 +431,7 @@
       el('div.sectiontitle', { text: 'Timeline' }),
       el('ol.timeline-list', entries.map(function (t) {
         return el('li.timeline-item' + (t.kind === 'audit' ? '.is-audit' : ''), [
-          el('div.timeline-meta', { text: fmt.stamp(t.at) + ' · ' + personName(t.who) + (t.kind === 'audit' ? ' · from the audit' : '') }),
+          el('div.timeline-meta', { text: fmt.stamp(t.at) + ' · ' + A.personName(t.who) + (t.kind === 'audit' ? ' · from the audit' : '') }),
           el('div', { text: t.text })
         ]);
       })),
@@ -468,7 +464,7 @@
         sort: function (i) { return ['open', 'mitigated', 'resolved'].indexOf(i.state); },
         render: function (i) { return ui.pill(i.state, INC_TONE[i.state] || 'idle'); }
       },
-      { key: 'commander', label: 'Commander', render: function (i) { return personName(i.commander); } },
+      { key: 'commander', label: 'Commander', render: function (i) { return A.personName(i.commander); } },
       { key: 'host', label: 'Host', render: function (i) { return el('span.mono', { text: i.host }); } },
       { key: 'opened', label: 'Opened', sort: function (i) { return i.opened.getTime(); }, render: function (i) { return fmt.time(i.opened); } },
       { key: 'updated', label: 'Updated', sort: function (i) { return i.updated.getTime(); }, render: function (i) { return fmt.time(i.updated); } },
@@ -584,13 +580,6 @@
     });
   }
 
-  var AM_RANK = { critical: 0, page: 1, high: 2, warning: 3, warn: 3, medium: 4, info: 5, low: 6, none: 7 };
-
-  function amRank(sev) {
-    var key = String(sev || 'none').toLowerCase();
-    return Object.prototype.hasOwnProperty.call(AM_RANK, key) ? AM_RANK[key] : 8;
-  }
-
   function amTone(sev) {
     var key = String(sev || '').toLowerCase();
     if (key === 'critical' || key === 'page' || key === 'high') return 'bad';
@@ -599,128 +588,14 @@
     return 'idle';
   }
 
-  function amSuppression(alert) {
-    var st = alert.status || {};
-    var silenced = (st.silencedBy || []).length;
-    var inhibited = (st.inhibitedBy || []).length;
-    if (silenced) return ui.pill('silenced', 'idle', { title: 'Silenced by ' + st.silencedBy.join(', ') });
-    if (inhibited) return ui.pill('inhibited', 'idle', { title: 'Inhibited by ' + st.inhibitedBy.join(', ') });
-    if (st.state === 'unprocessed') return ui.pill('unprocessed', 'warn');
-    return ui.pill('firing', 'bad');
-  }
-
-  function amRow(alert) {
-    var labels = alert.labels || {};
-    var annotations = alert.annotations || {};
-    var started = alert.startsAt ? new Date(alert.startsAt) : null;
-    var name = labels.alertname || 'unnamed rule';
-    var where = labels.instance || labels.job || labels.service || labels.namespace || null;
-
-    return el('div.row', [
-      ui.pill(labels.severity || 'unlabelled', amTone(labels.severity)),
-      el('div.col', [
-        el('strong', { text: name + (where ? ' on ' + where : '') }),
-        el('span.muted', {
-          text: annotations.summary || annotations.description ||
-            'The rule carries no summary annotation, so there is nothing to quote here.'
-        })
-      ]),
-      amSuppression(alert),
-      started && isFinite(started.getTime())
-        ? el('span.num', { text: 'since ' + fmt.stamp(started) })
-        : el('span.muted', { text: 'no start time' })
-    ]);
-  }
-
   function alertInbox() {
-    var body = el('div', [ui.skeleton(3)]);
-    var card = ui.card('Alert inbox', body);
-    var alive = true;
-    A.onLeave(function () { alive = false; });
-
-    A.probe().then(function () {
-      if (!alive) return;
-      if (A.storeMode() !== A.MODE.LIVE) {
-        ui.clear(body);
-        body.appendChild(el('div.callout.warn', [
-          el('strong', { text: 'Alertmanager has not been read.' }),
-          el('p', {
-            text: 'The console API is not answering, so nothing here is firing or not firing -- it is ' +
-              'unknown. The table below is the bundled sample dataset and is not a reading of this estate.'
-          })
-        ]));
-        return;
-      }
-
-      A.read('/api/alerts/active', { ttlMs: 10000 }).then(function (env) {
-        if (!alive) return;
-        ui.clear(body);
-
-        if (!env.ok) {
-          var e = env.error || {};
-          body.appendChild(ui.errorState(
-            'Alertmanager could not be read',
-            (e.message || 'The console API gave no reason.') +
-              ' Until it answers, this console cannot say what is firing. Nothing has been substituted.',
-            function () { A.forget('/api/alerts/active'); A.go('security', ['alerts']); }));
-          return;
-        }
-
-        var payload = env.data || {};
-        if (payload.ok === false) {
-          body.appendChild(el('div.callout.warn', [
-            el('strong', { text: 'Alertmanager is not reachable from the console.' }),
-            el('p', { text: payload.message || 'The reader answered without a reason.' })
-          ]));
-          return;
-        }
-
-        var alerts = Array.isArray(payload) ? payload : (payload.alerts || []);
-        if (!alerts.length) {
-          body.appendChild(ui.emptyState(
-            'Nothing is firing',
-            'Alertmanager answered and is holding no active alert. That is a real answer, not a failure ' +
-              'to load.'));
-          return;
-        }
-
-        if (env.stale) {
-          body.appendChild(el('div.callout.warn', [
-            el('strong', { text: 'Showing the last list that could be read.' }),
-            el('p', {
-              text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
-                ' An alert raised since then would not appear below.'
-            })
-          ]));
-        }
-
-        var ranked = alerts.slice().sort(function (a, b) {
-          var byRank = amRank((a.labels || {}).severity) - amRank((b.labels || {}).severity);
-          if (byRank !== 0) return byRank;
-          return String(b.startsAt || '').localeCompare(String(a.startsAt || ''));
-        });
-
-        var firing = ranked.filter(function (a) {
-          var st = a.status || {};
-          return !(st.silencedBy || []).length && !(st.inhibitedBy || []).length;
-        });
-
-        body.appendChild(el('p.hint', {
-          text: fmt.num(ranked.length) + ' alert' + (ranked.length === 1 ? '' : 's') + ' held by ' +
-            'Alertmanager, ' + fmt.num(firing.length) + ' of them neither silenced nor inhibited, worst ' +
-            'severity first.'
-        }));
-        body.appendChild(el('div.stack', ranked.slice(0, 40).map(amRow)));
-        if (ranked.length > 40) {
-          body.appendChild(el('p.hint', {
-            text: 'The remaining ' + fmt.num(ranked.length - 40) + ' are not listed. Silence or group them ' +
-              'in Alertmanager rather than reading past forty rows here.'
-          }));
-        }
-      });
-    });
-
-    return card;
+    return ui.card('Alert inbox', el('div.callout.warn', [
+      el('strong', { text: 'Alertmanager has not been read.' }),
+      el('p', {
+        text: 'The console is on bundled sample data, so nothing here is firing or not firing -- it is ' +
+          'unknown. The table below is the sample dataset and is not a reading of this estate.'
+      })
+    ]));
   }
 
   function linkedIncident(alert) {
@@ -1318,7 +1193,7 @@
         }),
         list,
         el('p.hint', {
-          text: 'Values shown are live as of ' + fmt.stamp(A.data.now) + '. The pack freezes them at generation time.'
+          text: 'Values shown are from the bundled sample dataset, as of ' + fmt.stamp(A.data.now) + '. A real pack freezes them at generation time.'
         })
       ], {
         actions: [
@@ -1338,10 +1213,87 @@
     ]);
   }
 
-  A.screen('security', {
-    title: 'Security',
-    crumb: 'Security',
-    render: function (mount, ctx) {
+  function safeHttp(url) {
+    var s = String(url || '');
+    return /^https?:\/\/[^\s]+$/i.test(s) ? s : null;
+  }
+
+  function sinceText(iso) {
+    var t = Date.parse(iso);
+    return isFinite(t) ? fmt.stamp(new Date(t)) : 'unknown';
+  }
+
+  function liveAlertsPanel(want) {
+    return A.livePanel('Firing in Alertmanager', '/api/alerts/active', function (body, data, env) {
+      var open = A.openAlerts(env) || { total: 0, groups: [], paging: [] };
+      if (!open.total) {
+        body.appendChild(ui.emptyState('Nothing is firing',
+          'Alertmanager answered and holds no active alert that is neither silenced nor inhibited. That is a reading, not a failure to load.'));
+        return;
+      }
+      body.appendChild(el('p.hint', {
+        text: fmt.num(open.total) + ' firing alert' + (open.total === 1 ? '' : 's') + ' in ' + fmt.num(open.groups.length) +
+          ' group' + (open.groups.length === 1 ? '' : 's') + ' by alert name, worst severity first' +
+          (open.pagingCount ? ', ' + fmt.num(open.pagingCount) + ' of them paging' : '') + '. The console is read-only here: silence or acknowledge in Alertmanager.'
+      }));
+      var cols = [
+        {
+          key: 'severity', label: 'Severity', status: true,
+          sort: function (g) { return g.paging ? 0 : g.severity === 'error' || g.severity === 'high' ? 1 : g.severity === 'warning' ? 2 : 3; },
+          render: function (g) { return ui.pill(g.severity || 'unlabelled', amTone(g.severity)); }
+        },
+        { key: 'name', label: 'Alert', render: function (g) { return el('strong', { text: g.name }); } },
+        { key: 'count', label: 'Firing', align: 'right', render: function (g) { return fmt.num(g.count); } },
+        { key: 'startsAt', label: 'Since', render: function (g) { return el('span.num', { text: sinceText(g.startsAt) }); } },
+        { key: 'summary', label: 'Summary', sortable: false, render: function (g) { return g.summary ? g.summary : el('span.muted', { text: 'no summary annotation' }); } },
+        {
+          key: 'links', label: 'Where to look', sortable: false,
+          render: function (g) {
+            var rule = safeHttp(g.generatorURL);
+            return el('div.row', [
+              rule ? el('a.rlink', { href: rule, target: '_blank', rel: 'noopener noreferrer', text: 'Prometheus rule for ' + g.name })
+                : el('span.muted', { text: 'no rule link reported' }),
+              A.link('Stack for ' + g.name, 'stack')
+            ]);
+          }
+        }
+      ];
+      var table = ui.table(cols, open.groups, {
+        id: 'security.live-alerts',
+        caption: 'Firing alerts grouped by alert name, with count and worst severity',
+        sortKey: 'severity', sortDir: 'asc',
+        rowKey: function (g) { return g.name; }
+      });
+      body.appendChild(table);
+      if (want) ui.revealRow(body, want, { label: 'Alert ' + want + ' is highlighted' });
+    }, { ttlMs: 10000, skeletonRows: 4 });
+  }
+
+  var LIVE_ABSENT = [
+    { what: 'Posture', detail: 'needs Wazuh Security Configuration Assessment results from each host; no Wazuh manager reports to this stack.' },
+    { what: 'Incidents', detail: 'need an incident store that holds a commander and a timeline; this stack has none.' },
+    { what: 'Vulnerabilities', detail: 'need a vulnerability scanner reporting into the console; none does here.' },
+    { what: 'Sessions', detail: 'need Guacamole recordings in a session bucket; this stack records no session.' },
+    { what: 'Evidence', detail: 'needs an evidence generator that freezes these readings into a signed pack; none runs here.' }
+  ];
+
+  function renderLive(mount, ctx) {
+    var rest = (ctx && ctx.rest) || [];
+    var params = (ctx && ctx.params) || {};
+    mount.appendChild(ui.pageHeader('Security',
+      'What Alertmanager reports as firing, read through the console API. Nothing here can be changed from the console.'));
+    mount.appendChild(liveAlertsPanel(params.alert || params.id || null));
+    var strip = ui.notInStackStrip(LIVE_ABSENT);
+    strip.id = 'security-absent';
+    mount.appendChild(ui.card('Other security sources', strip));
+    if (rest[0] && rest[0] !== 'alerts') {
+      window.setTimeout(function () {
+        if (strip.isConnected && strip.scrollIntoView) strip.scrollIntoView({ block: 'center' });
+      }, 0);
+    }
+  }
+
+  function renderSample(mount, ctx) {
       var items = [
         { id: 'posture', label: 'Posture', render: postureTab },
         { id: 'alerts', label: 'Alerts', render: alertsTab },
@@ -1362,6 +1314,24 @@
           if (id === 'alerts' && want) ui.revealRow(mount, want, { label: 'Alert ' + want + ' is highlighted' });
         }
       }));
+  }
+
+  A.screen('security', {
+    title: 'Security',
+    crumb: 'Security',
+    liveCrumbs: function (rest) { return rest.slice(0, 1); },
+    render: function (mount, ctx) {
+      var mode = A.storeMode();
+      if (mode === A.MODE.SAMPLE) { renderSample(mount, ctx); return; }
+      if (mode === A.MODE.LIVE) { renderLive(mount, ctx); return; }
+      var host = el('div');
+      mount.appendChild(host);
+      host.appendChild(ui.skeleton(4));
+      A.whenProbed(function (now) {
+        ui.clear(host);
+        if (now === A.MODE.LIVE) renderLive(host, ctx);
+        else renderSample(host, ctx);
+      });
     }
   });
 })();

@@ -3,11 +3,6 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
 
-  function registerScreen(id, def) {
-    if (typeof A.screen === 'function') { A.screen(id, def); return; }
-    document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
-  }
-
   var LEVELS = ui.LOG_LEVELS;
   var LEVEL_LABEL = ui.LOG_LEVEL_LABEL;
   var BUFFERS = [200, 500, 2000];
@@ -20,6 +15,27 @@
 
   var STREAM_LABELS = ['service_name', 'service', 'job', 'container', 'app'];
   var MAX_STREAM_NAMES = 200;
+
+  var RANGES = [
+    { key: '15m', label: '15 min', words: 'the last 15 minutes' },
+    { key: '1h', label: '1 h', words: 'the last hour' },
+    { key: '6h', label: '6 h', words: 'the last 6 hours' },
+    { key: '24h', label: '24 h', words: 'the last 24 hours' }
+  ];
+  var DEFAULT_RANGE = '1h';
+  var QUERY_MAX_CHARS = 2048;
+
+  var CONSOLE_STREAM = /^(argus-)?console$/;
+  var POLLING_LINE = /(^|\s)(GET|HEAD) \/api\/\S* [23]\d\d \d+ms\s*$/;
+
+  function isPolling(line) {
+    return !!line && CONSOLE_STREAM.test(line.stream) && POLLING_LINE.test(line.text);
+  }
+
+  function rangeOf(key) {
+    for (var i = 0; i < RANGES.length; i++) if (RANGES[i].key === key) return RANGES[i];
+    return rangeOf(DEFAULT_RANGE);
+  }
 
   function quoteLabelValue(value) {
     return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -101,7 +117,8 @@
     };
   }
 
-  registerScreen('logs', {
+
+  A.screen('logs', {
     title: 'Logs',
     crumb: 'Logs',
     render: function (mount, ctx) {
@@ -122,8 +139,7 @@
 
       mount.appendChild(ui.pageHeader(
         'Logs',
-        'One multiplexed stream per screen, appended without re-rendering the list, bounded at the ' +
-          'buffer size you choose. The tail yields the moment you scroll up.',
+        'Follow the live tail, or query a time range. The tail yields the moment you scroll up.',
         [refresh]));
       mount.appendChild(host);
 
@@ -140,6 +156,13 @@
 
       A.onLeave(function () { live = false; drop(); });
 
+      function notFound(name) {
+        if (!live) return;
+        drop();
+        ui.clear(mount);
+        mount.appendChild(ui.notFound('log stream', name, 'logs', 'All log streams'));
+      }
+
       function paint() {
         gen += 1;
         var mine = gen;
@@ -148,7 +171,9 @@
         A.probe().then(function () {
           if (!(live && mine === gen)) return;
           var stillMine = function () { return live && mine === gen; };
-          teardown = A.scopeLeaveHooks(function () { build(host, refresh, rest, params, stillMine); });
+          teardown = A.scopeLeaveHooks(function () {
+            build(host, refresh, rest, params, stillMine, function (name) { if (stillMine()) notFound(name); });
+          });
         });
       }
 
@@ -156,18 +181,22 @@
     }
   });
 
-  function build(host, refresh, rest, params, stillMine) {
+  function build(host, refresh, rest, params, stillMine, notFound) {
     var mode = A.storeMode();
     var isLive = mode === A.MODE.LIVE;
+    var S = A.STREAM || {};
 
     refresh.title = isLive
       ? 'Drop the stream and open it again from the newest line.'
       : 'There is no console API to stream from. Nothing on this screen came from one.';
 
     var state = {
+      mode: params.mode === 'query' ? 'query' : 'follow',
+      range: rangeOf(params.range).key,
       stream: rest[0] || params.stream || 'all',
       level: params.level || 'all',
       text: params.q || '',
+      showPolling: params.polling === '1',
       cap: DEFAULT_BUFFER,
       received: 0,
       dropped: 0,
@@ -175,13 +204,17 @@
       shown: 0,
       following: true,
       streams: [],
-      connection: A.STREAM ? A.STREAM.OFF : 'off',
+      connection: S.OFF || 'off',
       connectionNote: '',
       beats: [],
       lastAnnounceAt: 0
     };
+    var requested = state.stream;
 
     var buffer = [];
+    var streamLabel = null;
+    var closeStream = null;
+    var queryGen = 0;
 
     var streamSel = el('select.field', { id: 'log-stream' }, [el('option', { value: 'all', text: 'All streams' })]);
     var levelSel = el('select.field', { id: 'log-level' }, [el('option', { value: 'all', text: 'All levels' })].concat(
@@ -230,6 +263,19 @@
       }
     });
 
+    var pollingBtn = ui.btn('Show the console\'s own polling', {
+      variant: 'ghost',
+      title: 'The console API logs every read it serves. Those lines are hidden unless this is pressed.',
+      onClick: function () {
+        state.showPolling = !state.showPolling;
+        pollingBtn.setAttribute('aria-pressed', state.showPolling ? 'true' : 'false');
+        rememberParams();
+        repaintFiltered();
+      }
+    });
+    pollingBtn.id = 'log-polling';
+    pollingBtn.setAttribute('aria-pressed', state.showPolling ? 'true' : 'false');
+
     var counters = el('p.logstat');
     var echo = el('p.logstat');
 
@@ -248,6 +294,7 @@
     followBtn.addEventListener('click', function () { view.follow(!view.following()); });
 
     function matches(line) {
+      if (!state.showPolling && isPolling(line)) return false;
       if (state.stream !== 'all' && line.stream !== state.stream) return false;
       if (state.level !== 'all' && line.level !== state.level) return false;
       if (state.text) {
@@ -265,7 +312,7 @@
       if (!keep.length) {
         view.say(buffer.length
           ? 'No line in the buffer matches this filter.'
-          : 'No line has arrived yet.');
+          : (state.mode === 'query' ? 'No line is shown for this range yet.' : 'No line has arrived yet.'));
         state.shown = 0;
         paintStatus();
         return;
@@ -273,15 +320,20 @@
       view.appendMany(keep.slice(-state.cap));
     }
 
+    function noteStream(name) {
+      if (state.streams.indexOf(name) === -1 && state.streams.length < MAX_STREAM_NAMES) {
+        state.streams.push(name);
+        return true;
+      }
+      return false;
+    }
+
     function take(line) {
       if (!line) return;
       state.received += 1;
       buffer.push(line);
       if (buffer.length > KEEP) buffer.splice(0, buffer.length - KEEP);
-      if (state.streams.indexOf(line.stream) === -1 && state.streams.length < MAX_STREAM_NAMES) {
-        state.streams.push(line.stream);
-        paintStreamOptions();
-      }
+      if (noteStream(line.stream)) paintStreamOptions();
       if (matches(line)) view.append(line);
       else paintStatus();
     }
@@ -298,7 +350,7 @@
     }
 
     function connectionWord() {
-      var S = A.STREAM || {};
+      if (state.mode === 'query') return 'showing a range';
       if (state.connection === S.OPEN) return 'streaming';
       if (state.connection === S.OPENING) return 'connecting';
       if (state.connection === S.RETRYING) return 'reconnecting';
@@ -306,12 +358,22 @@
       return isLive ? 'not connected' : 'not streaming';
     }
 
+    function pollingHidden() {
+      if (state.showPolling) return 0;
+      var n = 0;
+      for (var i = 0; i < buffer.length; i++) if (isPolling(buffer[i])) n += 1;
+      return n;
+    }
+
     function paintStatus() {
       var parts = [];
-      parts.push(connectionWord().charAt(0).toUpperCase() + connectionWord().slice(1) + '.');
+      var word = connectionWord();
+      parts.push(word.charAt(0).toUpperCase() + word.slice(1) + '.');
       parts.push(fmt.num(state.shown) + ' of ' + fmt.num(buffer.length) + ' buffered lines shown, ' +
         fmt.num(state.cap) + ' kept in the view.');
-      if (isLive) parts.push(fmt.num(state.received) + ' received this session.');
+      var hidden = pollingHidden();
+      if (hidden) parts.push(fmt.num(hidden) + ' of the console\'s own polling line' + (hidden === 1 ? ' is' : 's are') + ' hidden.');
+      if (isLive && state.mode === 'follow') parts.push(fmt.num(state.received) + ' received this session.');
       if (state.dropped) {
         parts.push(fmt.num(state.dropped) + ' line' + (state.dropped === 1 ? '' : 's') +
           ' were dropped by the server because this browser could not keep up.');
@@ -320,7 +382,7 @@
         parts.push(state.gaps + ' resume' + (state.gaps === 1 ? '' : 's') +
           ' could not replay every missed line.');
       }
-      if (state.connectionNote) parts.push(state.connectionNote);
+      if (state.connectionNote && state.mode === 'follow') parts.push(state.connectionNote);
       counters.textContent = parts.join(' ');
     }
 
@@ -329,6 +391,19 @@
       if (at - state.lastAnnounceAt < ANNOUNCE_GAP_MS) return;
       state.lastAnnounceAt = at;
       A.announce(message);
+    }
+
+    function paramsNow() {
+      return {
+        mode: state.mode === 'query' ? 'query' : null,
+        range: state.mode === 'query' && state.range !== DEFAULT_RANGE ? state.range : null,
+        query: state.mode === 'query' && queryInput.value.trim() ? queryInput.value.trim() : null,
+        polling: state.showPolling ? '1' : null
+      };
+    }
+
+    function rememberParams() {
+      if (A.replaceHash) A.replaceHash(A.href('logs', rest, paramsNow()));
     }
 
     streamSel.addEventListener('change', function () {
@@ -350,17 +425,58 @@
       repaintFiltered();
     });
 
+    var followModeBtn = ui.btn('Follow live', { variant: 'ghost', onClick: function () { setMode('follow', true); } });
+    var queryModeBtn = ui.btn('Query a range', { variant: 'ghost', onClick: function () { setMode('query', true); } });
+    followModeBtn.setAttribute('data-log-mode', 'follow');
+    queryModeBtn.setAttribute('data-log-mode', 'query');
+    var modeBar = el('div.rangebar', { role: 'group', 'aria-label': 'What the view shows' }, [followModeBtn, queryModeBtn]);
+
+    var rangeSel = el('select.field', { id: 'log-range' }, RANGES.map(function (r) {
+      return el('option', { value: r.key, text: r.label });
+    }));
+    rangeSel.value = state.range;
+    var queryInput = el('input.field', {
+      id: 'log-query', type: 'text', value: params.query || '', maxlength: String(QUERY_MAX_CHARS),
+      placeholder: '{service_name="console"} |= "error"', autocomplete: 'off', spellcheck: 'false'
+    });
+    var runBtn = ui.btn('Run the query', { onClick: function () { runQuery(); } });
+    queryInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); runQuery(); } });
+    rangeSel.addEventListener('change', function () { state.range = rangeSel.value; runQuery(); });
+
+    var queryBar = el('div.logbar', { 'data-log-querybar': '' }, [
+      el('label.fieldlabel', { for: 'log-range', text: 'Range' }), rangeSel,
+      el('label.fieldlabel', { for: 'log-query', text: 'LogQL' }), queryInput,
+      runBtn
+    ]);
+    var queryState = el('div.livepanel', { 'data-path': '/api/logs/query' });
+
     var controls = el('div.logbar', [
       el('label.fieldlabel', { for: 'log-stream', text: 'Stream' }), streamSel,
       el('label.fieldlabel', { for: 'log-level', text: 'Level' }), levelSel,
       el('label.fieldlabel', { for: 'log-filter', text: 'Filter' }), textInput,
       el('label.fieldlabel', { for: 'log-buffer', text: 'Buffer' }), capSel,
-      followBtn, jumpBtn, announceBtn, clearBtn
+      followBtn, jumpBtn, announceBtn, clearBtn, pollingBtn
     ]);
 
     var sourceSlot = el('div');
-    host.appendChild(sourceSlot);
-    host.appendChild(ui.card('Tail', [controls, view.node, counters, echo]));
+    var tailWrap = el('div', { 'data-log-view': '' }, [
+      el('div.row', [modeBar]),
+      queryBar, queryState, sourceSlot, controls, view.node, counters, echo,
+      ui.disclosure('Details', [
+        el('p', {
+          text: 'Follow live opens one multiplexed stream for every topic this screen subscribes to, because a ' +
+            'browser allows six connections per origin and a stream that never completes holds one of them ' +
+            'for as long as it is open. Query a range asks Loki once for the newest lines in the window, up to ' +
+            'the buffer size, with the LogQL you give it.'
+        }),
+        el('p', {
+          text: 'The console API logs every read it serves. A line from the console stream that records a ' +
+            'successful GET of an /api/ path is the console polling itself, and is hidden unless "Show the ' +
+            'console\'s own polling" is pressed. Failed reads stay visible.'
+        })
+      ])
+    ]);
+    host.appendChild(ui.card('Lines', tailWrap));
 
     var healthBody = el('div');
     host.appendChild(ui.card('Stream health', healthBody));
@@ -371,8 +487,7 @@
       if (!isLive) {
         healthBody.appendChild(ui.emptyState(
           'No stream has been opened',
-          'The console API is not answering, so there is no connection to record. This panel shows the ' +
-            'result of every connection attempt once there is one.'));
+          'The console API is not answering, so there is no connection to record.'));
         return;
       }
 
@@ -385,8 +500,8 @@
           name: 'The log stream',
           label: ui.heartbeatSentence(beats, { name: 'The log stream' })
         }),
-        ui.pill(connectionWord(), state.connection === (A.STREAM || {}).OPEN ? 'ok'
-          : state.connection === (A.STREAM || {}).RETRYING ? 'warn' : 'idle')
+        ui.pill(connectionWord(), state.connection === S.OPEN ? 'ok'
+          : state.connection === S.RETRYING ? 'warn' : 'idle')
       ]));
 
       healthBody.appendChild(el('div.hbscale', [
@@ -395,10 +510,7 @@
       ]));
 
       if (u.ratio === null) {
-        healthBody.appendChild(el('p.hint', {
-          text: 'No connection attempt has completed yet, so there is no figure to give. ' +
-            'This panel will not compute one from an empty history.'
-        }));
+        healthBody.appendChild(el('p.hint', { text: 'No connection attempt has completed yet.' }));
       } else {
         healthBody.appendChild(ui.dl([
           ['Attempts recorded', fmt.num(u.counted)],
@@ -407,11 +519,11 @@
           ['Share opened', fmt.pct(u.ratio * 100, 1)],
           ['History covers', u.coveredMs ? fmt.dur(u.coveredMs / 1000) : 'a single sample']
         ]));
-        healthBody.appendChild(el('p.hint', {
+        healthBody.appendChild(ui.disclosure('Details', [el('p.hint', {
           text: 'This is the history of this browser tab\'s own connection, not of the log pipeline. ' +
             'It is discarded when you leave the screen, so no figure here is offered for a window ' +
             'longer than it covers.'
-        }));
+        })]));
       }
 
       var incidents = ui.incidentsOf(beats);
@@ -435,19 +547,156 @@
       paintHealth();
     }
 
-    if (!isLive) {
-      sourceSlot.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'Nothing is streaming: the console API is not answering.' }),
-        el('p', {
-          text: 'The buffer below is the bundled sample, not a tail. Start the API with `npm start` in ' +
-            'platform/console/server, with ARGUS_LOKI_URL pointing at the deployed Loki, and reload to ' +
-            'follow the real thing.'
-        })
-      ]));
+    function defaultQuery() {
+      return selectorFor(streamLabel || STREAM_LABELS[0], state.stream);
+    }
 
-      var sample = sampleBuffer();
+    function queryBlock(st, opts) {
+      ui.clear(queryState);
+      queryState.setAttribute('data-state', st);
+      if (opts && opts.reason) queryState.setAttribute('data-reason', opts.reason);
+      else queryState.removeAttribute('data-reason');
+      queryState.appendChild(ui.stateBlock(st, opts || {}));
+    }
+
+    function runQuery() {
+      if (state.mode !== 'query') return;
+      var range = rangeOf(rangeSel.value);
+      state.range = range.key;
+      if (!queryInput.value.trim()) queryInput.value = defaultQuery();
+      var q = queryInput.value.trim();
+      rememberParams();
+      queryGen += 1;
+      var token = queryGen;
+
+      if (!isLive) {
+        queryBlock('sample', { detail: 'A range query reads Loki through the console API, so it does not run on sample data.' });
+        buffer.length = 0;
+        view.say('No range query runs on sample data.');
+        paintStatus();
+        return;
+      }
+      if (q.length > QUERY_MAX_CHARS) {
+        queryBlock('failed', { reason: 'too-long', detail: 'A log query is at most ' + fmt.num(QUERY_MAX_CHARS) + ' characters.' });
+        return;
+      }
+
+      ui.clear(queryState);
+      queryState.setAttribute('data-state', 'loading');
+      queryState.removeAttribute('data-reason');
+      queryState.appendChild(ui.skeleton(1));
+      var path = '/api/logs/query?query=' + encodeURIComponent(q) + '&since=' + encodeURIComponent(range.key) +
+        '&limit=' + state.cap + '&direction=backward';
+
+      A.read(path, { ttlMs: 0, timeoutMs: 30000 }).then(null, function (err) {
+        return { ok: false, data: null, mode: A.MODE.LIVE, at: Date.now(), error: err || {} };
+      }).then(function (env) {
+        if (!stillMine() || token !== queryGen || state.mode !== 'query') return;
+        var st = A.envelopeState(env);
+        var e = env.error || {};
+        if (st !== 'ok' && st !== 'stale') {
+          queryBlock(st, { reason: e.reason, detail: e.message || '', retry: ui.TRANSIENT[st] && e.reason !== 'invalid-request' ? runQuery : null });
+          buffer.length = 0;
+          view.say('No line: the query did not answer.');
+          paintStatus();
+          return;
+        }
+        var d = env.data || {};
+        if (d.resultType && d.resultType !== 'streams') {
+          queryBlock('failed', {
+            reason: 'not-a-log-query',
+            detail: 'Loki answered with a ' + d.resultType + ' result. This view shows log lines, so give it a ' +
+              'log selector such as {service_name="console"}.'
+          });
+          buffer.length = 0;
+          view.say('No line: that is a metric query.');
+          paintStatus();
+          return;
+        }
+        var lines = (Array.isArray(d.lines) ? d.lines : []).map(decodeLine).filter(Boolean);
+        lines.sort(function (a, b) { return a.at.getTime() - b.at.getTime(); });
+        buffer.length = 0;
+        var added = false;
+        lines.forEach(function (l) { buffer.push(l); if (noteStream(l.stream)) added = true; });
+        if (added) paintStreamOptions();
+
+        ui.clear(queryState);
+        queryState.setAttribute('data-state', st);
+        queryState.removeAttribute('data-reason');
+        if (st === 'stale') queryState.appendChild(ui.stateBlock('stale', { reason: e.reason, detail: e.message || '' }));
+        var capped = lines.length >= state.cap;
+        queryState.appendChild(el('p', {
+          'data-lines': String(lines.length),
+          text: fmt.num(lines.length) + ' line' + (lines.length === 1 ? '' : 's') + ' from ' + range.words +
+            (capped ? ', the newest ' + fmt.num(state.cap) + ' only. Raise the buffer or narrow the query for more' : '') + '.'
+        }));
+        (Array.isArray(d.warnings) ? d.warnings : []).forEach(function (w) {
+          queryState.appendChild(el('p.hint', { text: 'Loki warned: ' + String(w) }));
+        });
+        var at = new Date(env.at || Date.now());
+        queryState.appendChild(el('p.readstamp', { 'data-read-at': at.toISOString(), text: 'Read ' + fmt.clock(at) }));
+        repaintFiltered();
+        view.follow(true);
+        A.announce(fmt.num(lines.length) + ' log lines from ' + range.words + '.');
+      });
+    }
+
+    function stopFollow() {
+      if (closeStream) { closeStream(); closeStream = null; }
+      if (replayStop) replayStop();
+      state.connection = S.CLOSED || 'closed';
+    }
+
+    function startFollow() {
+      buffer.length = 0;
+      state.received = 0;
+      if (!isLive) { loadSample(); return; }
+      view.say('Waiting for the first line.');
+      paintStatus();
+      if (streamLabel && !capabilityRefusal()) open(streamLabel);
+    }
+
+    function setMode(next, byUser) {
+      if (byUser && next === state.mode) {
+        if (next === 'query') { runQuery(); return; }
+        state.connectionNote = isLive ? 'Already following the live tail.' : 'Already showing the bundled sample.';
+        view.follow(true);
+        paintStatus();
+        A.announce(state.connectionNote);
+        return;
+      }
+      state.mode = next;
+      followModeBtn.setAttribute('aria-pressed', next === 'follow' ? 'true' : 'false');
+      queryModeBtn.setAttribute('aria-pressed', next === 'query' ? 'true' : 'false');
+      tailWrap.setAttribute('data-log-mode', next);
+      queryBar.hidden = next !== 'query';
+      queryState.hidden = next !== 'query';
+      sourceSlot.hidden = next !== 'follow';
+      followBtn.hidden = next !== 'follow';
+      if (replayBtn) replayBtn.hidden = next !== 'follow';
+      if (!byUser) return;
+      rememberParams();
+      if (next === 'query') {
+        stopFollow();
+        paintHealth();
+        runQuery();
+      } else {
+        queryGen += 1;
+        ui.clear(queryState);
+        startFollow();
+        paintHealth();
+      }
+    }
+
+    var replayBtn = null;
+    var replayStop = null;
+    var sample = null;
+
+    function loadSample() {
+      sample = sample || sampleBuffer();
       state.streams = sampleStreams(sample);
       paintStreamOptions();
+      view.reset();
       sample.forEach(function (line) {
         buffer.push(line);
         if (matches(line)) view.append(line);
@@ -455,18 +704,38 @@
       view.flushNow();
       if (!view.count()) view.say('The bundled dataset has no application to derive a line from.');
       paintStatus();
+    }
+
+    setMode(state.mode, false);
+
+    if (!isLive) {
+      sourceSlot.appendChild(ui.stateBlock('sample', {
+        detail: 'The lines below are the bundled sample, not a tail. Start the API with `npm start` in ' +
+          'platform/console/server, with ARGUS_LOKI_URL pointing at the deployed Loki, to follow the real thing.'
+      }));
+
+      sample = sampleBuffer();
+      var sampleNames = sampleStreams(sample);
+      if (requested !== 'all' && sampleNames.indexOf(requested) === -1) { notFound(requested); return; }
+
+      if (state.mode === 'follow') loadSample();
+      else { state.streams = sampleNames; paintStreamOptions(); runQuery(); }
       paintHealth();
 
       var replayTimer = null;
       var replayAt = 0;
-      var replayBtn = ui.btn('Replay the bundled sample', {
+      replayStop = function () {
+        if (!replayTimer) return;
+        window.clearInterval(replayTimer);
+        replayTimer = null;
+        replayBtn.textContent = 'Replay the bundled sample';
+        replayBtn.setAttribute('aria-pressed', 'false');
+      };
+      replayBtn = ui.btn('Replay the bundled sample', {
         title: 'Appends the bundled lines again, one every two seconds, to exercise the append path.',
         onClick: function () {
           if (replayTimer) {
-            window.clearInterval(replayTimer);
-            replayTimer = null;
-            replayBtn.textContent = 'Replay the bundled sample';
-            replayBtn.setAttribute('aria-pressed', 'false');
+            replayStop();
             A.announce('Replay stopped.');
             return;
           }
@@ -491,6 +760,7 @@
         }
       });
       replayBtn.setAttribute('aria-pressed', 'false');
+      replayBtn.hidden = state.mode !== 'follow';
       controls.appendChild(replayBtn);
       A.onLeave(function () {
         if (replayTimer) { window.clearInterval(replayTimer); replayTimer = null; }
@@ -499,54 +769,46 @@
       return;
     }
 
-    var closeStream = null;
     A.onLeave(function () {
       view.stop();
       if (closeStream) { closeStream(); closeStream = null; }
     });
 
-    function refuse(message) {
-      state.connectionNote = message;
-      view.say(message);
+    function refuse(message, st, reason) {
+      state.connectionNote = '';
+      if (state.mode === 'follow') view.say('Nothing is streaming.');
       paintStatus();
       ui.clear(sourceSlot);
-      sourceSlot.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'This screen could not open a live stream.' }),
-        el('p', { text: message }),
-        el('p', { text: 'Nothing below is a reading. No line is being invented to fill the gap.' })
-      ]));
+      sourceSlot.appendChild(ui.stateBlock(st || 'failed', {
+        reason: reason,
+        detail: message + ' Nothing below is a reading.'
+      }));
     }
 
     function capabilityRefusal() {
       var caps = A.capabilities();
       if (!caps) {
-        return 'The console API has not said what it can stream, so this screen has not asked it for a tail.';
+        return { st: 'failed', reason: 'no-capabilities', message: 'The console API has not said what it can stream, so this screen has not asked it for a tail.' };
       }
       if (caps.auth && caps.auth.authenticated === false) {
-        return 'You are not signed in, so the console API will refuse a log stream. Sign in and reload.';
+        return { st: 'signedOut', reason: 'unauthenticated', message: 'You are not signed in, so the console API will refuse a log stream.' };
       }
       if (!caps.streams || !caps.streams.logs) {
-        return 'Loki is not configured on the console API, so there is no log pipeline to tail. ' +
-          'Set ARGUS_LOKI_URL and restart the API. Until then this screen opens nothing rather than ' +
-          'reconnecting at you forever.';
+        return {
+          st: 'notConfigured', reason: 'not-configured',
+          message: 'Loki is not configured on the console API, so there is no log pipeline to tail. Set ' +
+            'ARGUS_LOKI_URL and restart the API.'
+        };
       }
       return null;
     }
 
-    sourceSlot.appendChild(el('div.callout.info', [
-      el('strong', { text: 'Live tail.' }),
-      el('p', {
-        text: 'One multiplexed stream carries every topic this screen subscribes to, because a browser ' +
-          'allows six connections per origin and a stream that never completes holds one of them for as ' +
-          'long as it is open.'
-      })
-    ]));
-
-    view.say('Waiting for the first line.');
+    if (state.mode === 'follow') view.say('Waiting for the first line.');
     paintStatus();
     paintHealth();
 
     function open(label) {
+      if (closeStream) { closeStream(); closeStream = null; }
       var selector = selectorFor(label, state.stream);
       var topics = state.stream === 'all' ? [] : [state.stream];
 
@@ -556,7 +818,7 @@
         {
           on: {
             line: function (payload) {
-              if (!stillMine()) return;
+              if (!stillMine() || state.mode !== 'follow') return;
               take(decodeLine(payload));
             },
             dropped: function (payload) {
@@ -588,7 +850,6 @@
           },
           onState: function (next, info) {
             if (!stillMine()) return;
-            var S = A.STREAM;
             state.connection = next;
             if (next === S.OPEN) {
               state.connectionNote = info && info.resumedFrom
@@ -612,31 +873,31 @@
           onUnavailable: function (why) {
             if (!stillMine()) return;
             closeStream = null;
-            state.connection = (A.STREAM || {}).CLOSED;
-            refuse(why.message);
+            state.connection = S.CLOSED;
+            var w = why || {};
+            refuse(w.message || 'The console API refused the stream.',
+              A.envelopeState({ ok: false, mode: A.MODE.LIVE, error: w }), w.reason);
             paintHealth();
           }
         });
     }
 
     function loadStreamNames(label) {
-      A.read('/api/logs/label-values?name=' + encodeURIComponent(label), { ttlMs: 30000 }).then(function (env) {
-        if (!stillMine()) return;
-        var payload = (env.ok && env.data) || {};
-        var values = Array.isArray(payload.values) ? payload.values : [];
-        values.forEach(function (name) {
-          if (typeof name !== 'string') return;
-          if (state.streams.indexOf(name) !== -1) return;
-          if (state.streams.length >= MAX_STREAM_NAMES) return;
-          state.streams.push(name);
-        });
+      return A.read('/api/logs/label-values?name=' + encodeURIComponent(label), { ttlMs: 30000 }).then(function (env) {
+        if (!stillMine()) return null;
+        if (!env.ok) return null;
+        var payload = env.data || {};
+        var values = Array.isArray(payload.values) ? payload.values.filter(function (v) { return typeof v === 'string'; }) : null;
+        (values || []).forEach(noteStream);
         paintStreamOptions();
-      });
+        return values;
+      }, function () { return null; });
     }
 
     var refusal = capabilityRefusal();
-    if (refusal) {
-      refuse(refusal);
+    if (refusal) refuse(refusal.message, refusal.st, refusal.reason);
+    if (refusal && refusal.st === 'signedOut') {
+      if (state.mode === 'query') runQuery();
       return;
     }
 
@@ -644,34 +905,39 @@
       if (!stillMine()) return;
 
       if (!env.ok) {
-        refuse('The console API could not list Loki\'s labels: ' +
-          ((env.error && env.error.message) || 'it gave no reason.') +
-          ' Without a label this screen has no selector to tail, so it has opened nothing.');
+        if (!refusal) {
+          var e = env.error || {};
+          refuse('The console API could not list Loki\'s labels: ' + (e.message || 'it gave no reason.') +
+            ' Without a label this screen has no selector to tail, so it has opened nothing.',
+            A.envelopeState(env), e.reason);
+        }
+        if (state.mode === 'query') runQuery();
         return;
       }
 
-      var payload = env.data || {};
-      if (payload.ok === false) {
-        refuse(payload.message || 'Loki did not answer the label list, so this screen has no selector to tail.');
-        return;
-      }
-
-      var names = Array.isArray(payload.labels) ? payload.labels : [];
+      var labelNames = Array.isArray((env.data || {}).labels) ? env.data.labels : [];
       var label = null;
       for (var i = 0; i < STREAM_LABELS.length; i++) {
-        if (names.indexOf(STREAM_LABELS[i]) !== -1) { label = STREAM_LABELS[i]; break; }
+        if (labelNames.indexOf(STREAM_LABELS[i]) !== -1) { label = STREAM_LABELS[i]; break; }
       }
 
       if (!label) {
-        refuse('Loki holds ' + fmt.num(names.length) + ' labels and none of them is one this screen ' +
-          'recognises as naming a stream (' + STREAM_LABELS.join(', ') + '). It will not guess a ' +
-          'selector, so it has opened nothing.');
+        if (!refusal) {
+          refuse('Loki holds ' + fmt.num(labelNames.length) + ' labels and none of them is one this screen ' +
+            'recognises as naming a stream (' + STREAM_LABELS.join(', ') + '). It will not guess a ' +
+            'selector, so it has opened nothing.', 'notConfigured', 'no-stream-label');
+        }
+        if (state.mode === 'query') runQuery();
         return;
       }
 
-      loadStreamNames(label);
-      open(label);
+      streamLabel = label;
+      loadStreamNames(label).then(function (values) {
+        if (!stillMine()) return;
+        if (requested !== 'all' && values && values.indexOf(requested) === -1) { notFound(requested); return; }
+        if (state.mode === 'query') runQuery();
+        else if (!refusal) open(label);
+      });
     });
-
   }
 })();

@@ -284,9 +284,45 @@
     saveRecents();
   }
   A.recents = function () { return recents.slice(); };
-  A.forgetRecents = function () { recents = []; saveRecents(); };
 
-  A.me = function () { return String(A.data.me.upn || '').split('@')[0]; };
+  function shellMode() {
+    if (typeof A.storeMode !== 'function' || !A.MODE) return 'sample';
+    var m = A.storeMode();
+    if (m === A.MODE.SAMPLE) return 'sample';
+    if (m === A.MODE.LIVE) return 'live';
+    return 'pending';
+  }
+  A.shellMode = shellMode;
+
+  function storeSnap() { return typeof A.storeHealth === 'function' ? A.storeHealth() : {}; }
+  function signedOutNow() { return !!storeSnap().signedOut; }
+  function livePrincipal() {
+    var auth = typeof A.auth === 'function' ? A.auth() : null;
+    return auth && auth.authenticated ? auth.principal : null;
+  }
+
+  A.me = function () {
+    if (shellMode() !== 'sample') {
+      var p = livePrincipal();
+      return p ? String(p.subject || '') : '';
+    }
+    return String(A.data.me.upn || '').split('@')[0];
+  };
+
+  A.personName = function (upn) {
+    var raw = String(upn === undefined || upn === null ? '' : upn);
+    if (!raw) return 'Somebody';
+    if (shellMode() !== 'sample') {
+      var p = livePrincipal();
+      if (p && p.subject === raw && p.displayName) return p.displayName;
+      return raw;
+    }
+    var person = A.data.personByUpn ? A.data.personByUpn(raw.split('@')[0]) : null;
+    if (person) return person.name;
+    if (raw === 'reconciler') return 'The reconciler';
+    if (raw === 'system') return 'The monitoring system';
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  };
 
   A.record = function (action, target, pr, actor, role) {
     var me = A.data.me;
@@ -466,7 +502,112 @@
     return out;
   };
 
+  var UNSEAL_ANCHOR = 'unseal-posture';
+  var NEEDS_PATHS = ['/api/alerts/active', '/api/heartbeats', '/api/gitops/apps', '/api/secrets/seal-status'];
+
+  function needsReason(env) {
+    var e = (env && env.error) || {};
+    var st = A.envelopeState(env);
+    if (st === 'notConfigured') return 'not configured';
+    if (st === 'forbidden') return 'your role cannot read it';
+    if (st === 'signedOut') return 'signed out';
+    return e.message || 'unreadable';
+  }
+
+  A.liveNeedsYou = function () {
+    return Promise.all(NEEDS_PATHS.map(function (p) { return A.read(p, { ttlMs: 10000 }); })).then(function (envs) {
+      var alerts = envs[0], beats = envs[1], apps = envs[2], seal = envs[3];
+      var urgent = [], rest = [], later = [], checked = [], unchecked = [];
+      var open = A.openAlerts(alerts);
+      if (open) {
+        checked.push('Alertmanager');
+        open.groups.forEach(function (g) {
+          var sev = g.severity && g.severity !== 'none' ? g.severity : 'unranked';
+          var item = {
+            kind: 'Alert', tone: g.paging ? 'bad' : (sev === 'error' || sev === 'high' ? 'warn' : 'info'),
+            text: g.name + (g.count > 1 ? ' (' + fmt.num(g.count) + ' firing)' : '') + ', ' + sev +
+              (g.summary ? ': ' + g.summary : '') + '.',
+            label: 'Open alerts', route: 'security', rest: ['alerts'], params: { alert: g.name },
+            group: g
+          };
+          (g.paging || sev === 'error' || sev === 'high' ? urgent : later).push(item);
+        });
+      } else unchecked.push('Alertmanager (' + needsReason(alerts) + ')');
+      if (beats.ok) {
+        checked.push('service heartbeats');
+        ((beats.data && beats.data.monitors) || []).filter(function (m) { return m.status === 0; }).forEach(function (m) {
+          rest.push({ kind: 'Service', tone: 'bad', text: (m.label || m.id) + ' is down' + (m.message ? ', ' + m.message : '.'),
+            label: 'Open Services', route: 'stack', rest: [] });
+        });
+      } else unchecked.push('service heartbeats (' + needsReason(beats) + ')');
+      if (seal.ok && seal.data && seal.data.configured === false) {
+        unchecked.push('the OpenBao seal (not configured)');
+      } else if (seal.ok) {
+        checked.push('the OpenBao seal');
+        var sb = (seal.data && seal.data.sandbox) || {};
+        if (sb.verdict === true) {
+          rest.push({ kind: 'Secrets', tone: 'warn', text: 'Sandbox unseal: the vault is not unsealed the way production must be.',
+            label: 'See the unseal posture', route: 'stack', rest: [], params: { at: UNSEAL_ANCHOR } });
+        } else if (sb.verdict === null) {
+          rest.push({ kind: 'Secrets', tone: 'info', text: 'The unseal posture has not been verified.',
+            label: 'See the unseal posture', route: 'stack', rest: [], params: { at: UNSEAL_ANCHOR } });
+        }
+      } else unchecked.push('the OpenBao seal (' + needsReason(seal) + ')');
+      if (apps.ok) {
+        checked.push('GitOps declarations');
+        ((apps.data && apps.data.problems) || []).forEach(function (p) {
+          rest.push({ kind: 'Declaration', tone: 'warn', text: p.directory + ' ' + p.message,
+            label: 'Open Applications', route: 'apps', rest: [] });
+        });
+      } else unchecked.push('GitOps declarations (' + needsReason(apps) + ')');
+      var findings = typeof A.advisorFindings === 'function' ? A.advisorFindings() : [];
+      findings.filter(function (f) { return f && !f.suppressed && (f.severity === 'critical' || f.severity === 'high'); }).forEach(function (f) {
+        rest.push({ kind: 'Advisor', tone: f.severity === 'critical' ? 'bad' : 'warn', text: (f.title || f.id) + ', ' + f.severity + '.',
+          label: 'Open the Advisor', route: 'advisor', rest: [] });
+      });
+      return { items: urgent.concat(rest, later), open: open, checked: checked, unchecked: unchecked, envs: envs };
+    });
+  };
+
+  function inboxDialog(items, emptyDetail, note) {
+    A.dialog({
+      title: items.length ? fmt.num(items.length) + ' thing' + (items.length === 1 ? '' : 's') + ' need' + (items.length === 1 ? 's' : '') + ' you' : 'Nothing needs you',
+      wide: true,
+      body: function (close) {
+        var out = [];
+        if (!items.length) out.push(ui.emptyState('The inbox is empty', emptyDetail));
+        else {
+          out.push(el('div.stack.inbox', items.map(function (it) {
+            return el('div.row.inbox-row', [
+              ui.pill(it.kind, it.tone),
+              el('span.inbox-text', { text: it.text }),
+              ui.btn(it.label, {
+                variant: 'ghost',
+                onClick: function () { close(); A.go(it.route, it.rest, it.params); }
+              })
+            ]);
+          })));
+        }
+        if (note) out.push(el('p.hint', { text: note }));
+        return out;
+      }
+    });
+  }
+
   A.inbox = function () {
+    var mode = shellMode();
+    if (mode !== 'sample') {
+      if (mode === 'pending' || signedOutNow()) {
+        inboxDialog([], 'The console has not read anything yet, so it cannot say what needs you.', null);
+        return;
+      }
+      A.liveNeedsYou().then(function (r) {
+        inboxDialog(r.items,
+          'Checked ' + (r.checked.length ? r.checked.join(', ') : 'nothing') + ': no open alert, no monitor down, no sandbox seal, no declaration problem and no critical or high advisor finding.',
+          r.unchecked.length ? 'Not checked: ' + r.unchecked.join('; ') + '.' : null);
+      });
+      return;
+    }
     var items = A.needsYou();
     A.dialog({
       title: items.length ? fmt.num(items.length) + ' thing' + (items.length === 1 ? '' : 's') + ' need' + (items.length === 1 ? 's' : '') + ' you' : 'Nothing needs you',
@@ -490,25 +631,57 @@
     });
   };
 
-  A.refreshBadges = function () {
-    var d = A.data;
-    paintEnv();
-    if (typeof A.refreshAdvisorBadge === 'function') A.refreshAdvisorBadge();
-    var open = d.alerts.filter(A.alertOpen).length;
-    var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).length;
-    var needs = A.needsYou().length;
-    var alertBadge = document.getElementById('nav-alert-badge');
-    var deployBadge = document.getElementById('nav-deploy-badge');
+  function setBadge(id, n) {
+    var b = document.getElementById(id);
+    if (!b) return;
+    b.textContent = n ? String(n) : '';
+    b.hidden = !n;
+  }
+
+  function paintBell(needs, open) {
     var bell = document.getElementById('bell');
-    if (alertBadge) { alertBadge.textContent = open ? String(open) : ''; alertBadge.hidden = !open; }
-    if (deployBadge) { deployBadge.textContent = awaiting ? String(awaiting) : ''; deployBadge.hidden = !awaiting; }
-    if (bell) {
-      var word = needs ? needs + ' thing' + (needs === 1 ? '' : 's') + ' need' + (needs === 1 ? 's' : '') + ' you, ' + open + ' open alert' + (open === 1 ? '' : 's') : 'Open inbox, nothing needs you';
-      bell.setAttribute('aria-label', word);
-      bell.title = 'Open inbox';
-      var dot = bell.querySelector('.dot');
-      if (dot) dot.hidden = !needs;
+    if (!bell) return;
+    var word;
+    if (needs === null) word = 'Open inbox, nothing has been read yet';
+    else if (needs) {
+      word = needs + ' thing' + (needs === 1 ? '' : 's') + ' need' + (needs === 1 ? 's' : '') + ' you' +
+        (open === null ? '' : ', ' + open + ' open alert' + (open === 1 ? '' : 's'));
+    } else word = 'Open inbox, nothing needs you';
+    bell.setAttribute('aria-label', word);
+    bell.title = 'Open inbox';
+    var dot = bell.querySelector('.dot');
+    if (dot) dot.hidden = !needs;
+  }
+
+  var badgeGen = 0;
+
+  A.refreshBadges = function () {
+    paintEnv();
+    var mode = shellMode();
+    var gen = ++badgeGen;
+    if (mode === 'sample') {
+      var d = A.data;
+      if (typeof A.refreshAdvisorBadge === 'function') A.refreshAdvisorBadge();
+      var open = d.alerts.filter(A.alertOpen).length;
+      var awaiting = d.deployments.filter(function (p) { return p.state === 'awaiting'; }).length;
+      setBadge('nav-alert-badge', open);
+      setBadge('nav-deploy-badge', awaiting);
+      paintBell(A.needsYou().length, open);
+      return;
     }
+    setBadge('nav-deploy-badge', 0);
+    if (mode === 'pending' || signedOutNow() || storeSnap().unreachable) {
+      setBadge('nav-alert-badge', 0);
+      setBadge('nav-advisor-badge', 0);
+      paintBell(null, null);
+      return;
+    }
+    if (typeof A.refreshAdvisorBadge === 'function') A.refreshAdvisorBadge();
+    A.liveNeedsYou().then(function (r) {
+      if (gen !== badgeGen || shellMode() !== 'live') return;
+      setBadge('nav-alert-badge', r.open ? r.open.total : 0);
+      paintBell(r.items.length, r.open ? r.open.total : null);
+    });
   };
 
   var screens = {};
@@ -598,14 +771,15 @@
     return el('a' + (cls ? '.' + cls : '.rlink'), { href: A.href(route, rest, params) }, label);
   };
 
-  var mount, crumbHost, titleHost;
+  var mount, crumbHost;
 
   function paintCrumb(r, def) {
     clear(crumbHost);
     crumbHost.appendChild(el('a.crumb-link', { href: A.href(r.route), text: def.crumb || def.title }));
     var labels = r.rest.slice();
-    if (r.rest.length && typeof def.crumbs === 'function') {
-      try { labels = def.crumbs(r.rest) || labels; } catch (e) { labels = r.rest.slice(); }
+    var crumbsFn = shellMode() === 'sample' ? def.crumbs : def.liveCrumbs;
+    if (r.rest.length && typeof crumbsFn === 'function') {
+      try { labels = crumbsFn(r.rest) || labels; } catch (e) { labels = r.rest.slice(); }
     }
     if (labels.length) {
       crumbHost.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
@@ -658,10 +832,22 @@
       window.scrollTo(0, 0);
       A.announce('That screen does not exist');
       closeDrawerNav();
+      settled();
       return;
     }
 
     var pageTitle = paintCrumb(r, def);
+
+    if (shellMode() === 'live' && signedOutNow()) {
+      mount.appendChild(el('div.signedout-shell', { 'data-state': 'signedOut' }, [
+        ui.pageHeader(def.title || r.route, 'Sign in to read this screen. Nothing is shown until the console API answers for you.'),
+        ui.skeleton(6)
+      ]));
+      window.scrollTo(0, 0);
+      closeDrawerNav();
+      settled();
+      return;
+    }
 
     try {
       def.render(mount, { rest: r.rest, params: r.params, env: A.state.env });
@@ -674,20 +860,47 @@
     }
 
     var h1 = mount.querySelector('h1');
-    if (h1) h1.focus({ preventScroll: true });
+    if (h1 && !document.body.classList.contains('has-dialog')) h1.focus({ preventScroll: true });
     window.scrollTo(0, 0);
+    anchorWanted = r.params && r.params.at && /^[a-z][a-z0-9-]{0,63}$/.test(r.params.at) ? { id: r.params.at, gen: routeGen } : null;
     A.announce(pageTitle + ' loaded');
     closeDrawerNav();
     remember(A.href(r.route, r.rest),
       r.rest.length ? (def.title || r.route) + ' / ' + r.rest.join(' / ') : (def.title || r.route),
       r.rest.length ? 'Resource' : 'Screen');
+    settled();
   }
 
-  function paletteItems() {
-    var d = A.data, items = [];
+  function screenItems() {
+    var items = [];
     Object.keys(screens).forEach(function (id) {
       items.push({ kind: 'Go to', label: screens[id].title, hint: screens[id].crumb || '', run: function () { A.go(id); } });
     });
+    (ui.views ? ui.views() : []).forEach(function (v) {
+      items.push({ kind: 'Saved view', label: v.name, hint: v.screen, run: function () {
+        if (window.location.hash === v.hash) render(); else window.location.hash = v.hash;
+      } });
+    });
+    return items;
+  }
+
+  function actionItems(sample) {
+    var items = [];
+    items.push({ kind: 'Action', label: 'What needs me', hint: 'Inbox', run: function () { A.inbox(); } });
+    if (sample) {
+      items.push({ kind: 'Action', label: 'Lock the console', hint: 'Needs your key to resume', run: function () { A.lock('locked by hand'); } });
+      items.push({ kind: 'Action', label: 'Switch to ' + (A.state.env === 'production' ? 'staging' : 'production'), hint: 'Environment', run: function () { A.setEnv(A.state.env === 'production' ? 'staging' : 'production'); } });
+    }
+    items.push({ kind: 'Action', label: 'Toggle compact density', hint: 'Rows per screen', run: function () { A.setDensity(prefs.density === 'compact' ? 'comfortable' : 'compact'); } });
+    items.push({ kind: 'Action', label: 'Show keyboard shortcuts', hint: '?', run: function () { A.shortcuts(); } });
+    items.push({ kind: 'Action', label: 'Console preferences', hint: 'Theme, timestamps, density', run: function () { A.settings(); } });
+    items.push({ kind: 'Action', label: 'Switch to ' + (resolveTheme() === 'dark' ? 'the light theme' : 'the dark theme'), hint: 'Appearance', run: function () { A.setTheme(resolveTheme() === 'dark' ? 'light' : 'dark'); } });
+    return items;
+  }
+
+  function paletteItems() {
+    if (shellMode() !== 'sample') return screenItems().concat(actionItems(false));
+    var d = A.data, items = screenItems();
     d.apps.forEach(function (app) {
       items.push({ kind: 'Application', label: app.display, hint: app.name + ' · ' + app.version, run: function () { A.go('apps', [app.name]); } });
     });
@@ -738,19 +951,7 @@
     (d.incidents || []).forEach(function (i) {
       items.push({ kind: 'Incident', label: i.title, hint: i.id + ' · ' + i.state + ' · ' + i.host, run: function () { A.go('security', ['incidents'], { id: i.id }); } });
     });
-    (ui.views ? ui.views() : []).forEach(function (v) {
-      items.push({ kind: 'Saved view', label: v.name, hint: v.screen, run: function () {
-        if (window.location.hash === v.hash) render(); else window.location.hash = v.hash;
-      } });
-    });
-    items.push({ kind: 'Action', label: 'What needs me', hint: 'Inbox', run: function () { A.inbox(); } });
-    items.push({ kind: 'Action', label: 'Lock the console', hint: 'Needs your key to resume', run: function () { A.lock('locked by hand'); } });
-    items.push({ kind: 'Action', label: 'Switch to ' + (A.state.env === 'production' ? 'staging' : 'production'), hint: 'Environment', run: function () { A.setEnv(A.state.env === 'production' ? 'staging' : 'production'); } });
-    items.push({ kind: 'Action', label: 'Toggle compact density', hint: 'Rows per screen', run: function () { A.setDensity(prefs.density === 'compact' ? 'comfortable' : 'compact'); } });
-    items.push({ kind: 'Action', label: 'Show keyboard shortcuts', hint: '?', run: function () { A.shortcuts(); } });
-    items.push({ kind: 'Action', label: 'Console preferences', hint: 'Theme, timestamps, density', run: function () { A.settings(); } });
-    items.push({ kind: 'Action', label: 'Switch to ' + (resolveTheme() === 'dark' ? 'the light theme' : 'the dark theme'), hint: 'Appearance', run: function () { A.setTheme(resolveTheme() === 'dark' ? 'light' : 'dark'); } });
-    return items;
+    return items.concat(actionItems(true));
   }
 
   function fuzzy(n, h) {
@@ -768,7 +969,7 @@
   }
 
   function indexItem(it) {
-    it.hay = (it.label + ' ' + (it.hint || '')).toLowerCase();
+    it.hay = (it.label + ' ' + (it.hint || '') + (it.extra ? ' ' + it.extra : '')).toLowerCase();
     return it;
   }
 
@@ -777,11 +978,19 @@
     var out = [];
     raw.forEach(function (r) {
       if (!r || !r.label || !r.route) return;
+      var params = r.params && typeof r.params === 'object' ? r.params : {};
+      var extra = [r.kind || '', r.id || '', r.host || ''].concat(
+        Array.isArray(r.rest) ? r.rest.map(String) : [],
+        Object.keys(params).map(function (k) { return String(params[k]); }),
+        Array.isArray(r.keywords) ? r.keywords.map(String) : []
+      ).filter(Boolean).join(' ');
       out.push(indexItem({
         kind: r.kind || 'Resource',
         label: String(r.label),
         hint: r.hint ? String(r.hint) : '',
-        run: function () { A.go(r.route, r.rest || [], r.params || {}); }
+        extra: extra,
+        live: true,
+        run: function () { A.go(r.route, r.rest || [], params); }
       }));
     });
     return out;
@@ -818,7 +1027,9 @@
     var list = el('ul.pal-list', { id: 'pal-list', role: 'listbox', 'aria-label': 'Results' });
     var count = el('div.pal-count', { 'aria-live': 'polite' });
     var source = el('div.pal-source', {
-      text: 'Screens and actions only. Bundled sample resources until the console API answers.'
+      text: shellMode() === 'sample'
+        ? 'Bundled sample resources, screens and actions. Nothing here has been measured.'
+        : 'Screens and actions. Reading the resource index from the console API.'
     });
 
     var recentItems = A.recents().map(function (r) {
@@ -958,16 +1169,34 @@
   };
 
   A.freeze = function () {
+    if (shellMode() !== 'sample') return null;
     var f = A.data.policy && A.data.policy.freeze;
     if (!f) return null;
     if (f.until && f.until.getTime() <= A.data.now.getTime()) return null;
     return f;
   };
 
+  var ENV_WORD = { sandbox: 'Sandbox stack', staging: 'Staging stack', production: 'Production stack', development: 'Development stack' };
+
   function paintEnv() {
     var env = A.state.env;
     var pill = document.getElementById('envbtn');
     if (!pill) return;
+    var text = document.getElementById('envtext');
+    if (shellMode() !== 'sample') {
+      pill.hidden = true;
+      if (text) {
+        var caps = typeof A.capabilities === 'function' ? A.capabilities() : null;
+        var raw = caps && typeof caps.environment === 'string' ? caps.environment.toLowerCase() : '';
+        var word = ENV_WORD[raw] || '';
+        text.textContent = word;
+        text.hidden = !word;
+        if (word) text.title = 'Reported by the console API. The console cannot switch it.';
+      }
+      return;
+    }
+    pill.hidden = false;
+    if (text) text.hidden = true;
     var frozen = !!A.freeze();
     clear(pill);
     pill.classList.toggle('is-staging', env === 'staging');
@@ -1031,7 +1260,7 @@
   function paintElevation() {
     var host = document.getElementById('elevation');
     clear(host);
-    var e = A.data.me.elevation;
+    var e = shellMode() === 'sample' ? A.data.me.elevation : null;
     if (!e) { host.hidden = true; if (elevationTimer) { clearInterval(elevationTimer); elevationTimer = null; } return; }
     host.hidden = false;
 
@@ -1107,12 +1336,12 @@
         screenText = 'Hypervisor console attached to ' + vm.name + ' on ' + vm.host + '.\n' +
           'The guest network is not needed for this session.\n\n';
       } else {
-        screenText = 'Connected to ' + vm.name + ' (' + vm.ip + ')\nOne-time credential issued by OpenBao and never shown.\n\nC:\\Users\\adil> ';
+        screenText = 'Connected to ' + vm.name + ' (' + vm.ip + ')\nOne-time credential issued by OpenBao and never shown.\n\nC:\\Users\\' + A.me() + '> ';
       }
       A.record('session.start', vm.name + ' (' + label + ', recorded)');
       var startedAt = Date.now();
       var keys = [];
-      var prompt = proto === 'SSH' ? vm.name + ':~$ ' : proto === 'POWERSHELL' ? '[' + vm.name + ']: PS> ' : 'C:\\Users\\adil> ';
+      var prompt = proto === 'SSH' ? vm.name + ':~$ ' : proto === 'POWERSHELL' ? '[' + vm.name + ']: PS> ' : 'C:\\Users\\' + A.me() + '> ';
       var screen = el('pre.term-screen', { tabindex: '0', 'aria-label': label + ' session on ' + vm.name + '. Output of what you type appears here.' }, screenText);
       var line = el('input.term-input', {
         type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off',
@@ -1237,7 +1466,7 @@
     ['g then o', 'Overview'], ['g then a', 'Applications'], ['g then d', 'Deployments'],
     ['g then c', 'Compute'], ['g then t', 'Data'], ['g then i', 'Identity and secrets'],
     ['g then s', 'Security'], ['g then m', 'ML and geospatial'], ['g then p', 'Operations'],
-    ['g then u', 'Audit'], ['g then k', 'Stack'], ['g then y', 'System'],
+    ['g then u', 'Audit'], ['g then k', 'Services'], ['g then y', 'System'],
     ['g then b', 'Object storage'], ['g then l', 'Logs'], ['g then v', 'Advisor'],
     ['?', 'This list'], ['Escape', 'Close a dialog, drawer or palette'],
     ['g then ,', 'Console preferences']
@@ -1287,7 +1516,7 @@
         get: function () { return prefs.idleLock; },
         set: function (v) { A.setIdleLock(v); }
       }
-    ];
+    ].filter(function (g) { return g.key !== 'idleLock' || shellMode() === 'sample'; });
 
     A.dialog({
       title: 'Console preferences',
@@ -1341,13 +1570,18 @@
     if (first) first.focus();
   }
 
-  var MODE_WORD = { live: 'Live', sample: 'Sample data', stale: 'Stale', down: 'API down', unknown: 'Connecting', signedout: 'Signed out' };
+  var MODE_WORD = { live: 'Live', sample: 'Sample data', stale: 'Stale', down: 'API down', unknown: 'Connecting', signedout: 'Signed out', unreachable: 'API unreachable' };
 
   function paintMode(snap) {
     var pill = document.getElementById('modepill');
     if (!pill) return;
     var key, detail;
-    if (snap.mode === 'live' && snap.signedOut) {
+    if (snap.mode === 'live' && snap.unreachable) {
+      key = 'unreachable';
+      detail = 'The console API did not answer' +
+        (snap.probeError && snap.probeError.message ? ': ' + snap.probeError.message : '.') +
+        (snap.reprobeAt ? ' The console asks again at ' + ui.fmt.clock(new Date(snap.reprobeAt)) + '.' : '');
+    } else if (snap.mode === 'live' && snap.signedOut) {
       key = 'signedout';
       detail = 'The console API is there but this browser is not signed in. Nothing live can be read until you sign in.';
     } else if (snap.mode === 'live' && snap.stale) {
@@ -1379,46 +1613,219 @@
 
   var lastSnap = null, lastKey = 'unknown', lastDetail = '';
 
-  A.livePanel = function (title, path, render, opts) {
+  A.isLive = function () {
+    return typeof A.storeMode === 'function' && !!A.MODE && A.storeMode() === A.MODE.LIVE;
+  };
+
+  var REASON_STATE = {
+    unauthenticated: 'signedOut', 'session-expired': 'signedOut',
+    'invalid-credentials': 'signedOut', 'duplicate-session-cookie': 'signedOut', 'cross-site': 'forbidden',
+    'not-configured': 'notConfigured', 'not-deployed': 'notConfigured', 'no-sdk': 'notConfigured',
+    'no-driver': 'notConfigured', 'no-buckets-declared': 'notConfigured', 'extension-not-created': 'notConfigured',
+    role: 'forbidden', forbidden: 'forbidden', denied: 'forbidden', 'no-read-privilege': 'forbidden',
+    'not-found': 'notFound', 'no-such-endpoint': 'notFound', 'no-such-bucket': 'notFound', 'no-such-database': 'notFound',
+    unreachable: 'unreachable', 'not-connectable': 'unreachable',
+    timeout: 'timeout'
+  };
+
+  A.envelopeState = function (env) {
+    if (!env) return 'failed';
+    var sampleMode = A.MODE ? A.MODE.SAMPLE : 'sample';
+    if (env.mode === sampleMode) return 'sample';
+    if (env.ok) return env.stale ? 'stale' : 'ok';
+    var e = env.error || {};
+    var reason = String(e.reason || '');
+    if (Object.prototype.hasOwnProperty.call(REASON_STATE, reason)) return REASON_STATE[reason];
+    var status = Number(e.status) || 0;
+    var m = /^http-(\d{3})$/.exec(reason);
+    if (!status && m) status = Number(m[1]);
+    if (status === 401) return 'signedOut';
+    if (status === 403) return 'forbidden';
+    if (status === 404 || /^no-such-/.test(reason)) return 'notFound';
+    if (status === 504) return 'timeout';
+    if (status === 502 || status === 503) return 'unreachable';
+    return 'failed';
+  };
+
+  A.state.renderedGen = 0;
+  A.state.pendingPanels = 0;
+  var anchorWanted = null;
+
+  function revealAnchor() {
+    if (!anchorWanted || anchorWanted.gen !== routeGen) { anchorWanted = null; return; }
+    var node = document.getElementById(anchorWanted.id);
+    if (!node || !mount || !mount.contains(node)) return;
+    anchorWanted = null;
+    if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1');
+    try { node.scrollIntoView({ block: 'start' }); } catch (e) { node.scrollIntoView(); }
+    node.focus({ preventScroll: true });
+  }
+
+  function settled() { A.state.renderedGen += 1; revealAnchor(); }
+
+  A.settling = function (promise) {
+    var open = true;
+    A.state.pendingPanels += 1;
+    function done() {
+      if (!open) return;
+      open = false;
+      A.state.pendingPanels = Math.max(0, A.state.pendingPanels - 1);
+      settled();
+    }
+    A.onLeave(done);
+    Promise.resolve(promise).then(done, done);
+    return promise;
+  };
+
+  function staleWhy(env) {
+    var e = (env && env.error) || {};
+    var because = env && env.data && env.data.staleBecause;
+    return e.message || (because && because.message) || '';
+  }
+
+  function stateDetail(state, env, opts) {
+    var e = (env && env.error) || {};
+    if (state === 'sample') return opts.sampleDetail || 'This panel reads the console API. Open the console the API serves and sign in to read it.';
+    if (state === 'signedOut') return 'The console API answers only to a signed-in operator.';
+    if (state === 'forbidden') return e.message || 'The console API refused this read for the roles this operator holds.';
+    return e.message || '';
+  }
+
+  A.livePanel = function (title, path, draw, opts) {
     opts = opts || {};
-    var body = el('div');
-    var card = ui.card(title, body, opts.card || {});
+    var on = opts.on || {};
+    var body = el('div.livepanel', { 'data-state': 'loading', 'data-path': path });
+    var card = ui.card(title, body, opts.card || { flush: opts.flush, actions: opts.actions });
     var alive = true;
-    A.onLeave(function () { alive = false; });
-    body.appendChild(ui.skeleton(opts.skeletonRows || 3));
-    A.read(path, { ttlMs: opts.ttlMs === undefined ? 15000 : opts.ttlMs }).then(function (env) {
-      if (!alive) return;
+    var pending = false;
+    function release() { if (pending) { pending = false; A.state.pendingPanels = Math.max(0, A.state.pendingPanels - 1); } }
+    A.onLeave(function () { alive = false; release(); });
+
+    function mark(state, reason) {
+      body.setAttribute('data-state', state);
+      if (reason) body.setAttribute('data-reason', reason);
+      else body.removeAttribute('data-reason');
+    }
+
+    function retry() { A.forget(path); load(); }
+
+    function paint(env) {
       ui.clear(body);
-      if (env.mode === A.MODE.SAMPLE) {
-        if (opts.sample) { opts.sample(body); return; }
-        body.appendChild(ui.emptyState(
-          opts.sampleTitle || 'Not available on sample data',
-          opts.sampleDetail || 'This panel reads the console API. Open the console the API serves and sign in to read it.'));
-        return;
-      }
-      if (!env.ok) {
-        var e = env.error || {};
-        if (e.reason === 'unauthenticated') {
-          body.appendChild(ui.emptyState('Sign in to read this', 'The console API answers only to a signed-in operator.'));
+      var state = A.envelopeState(env);
+      var e = (env && env.error) || {};
+      mark(state, e.reason || null);
+      try {
+        if (state !== 'ok' && state !== 'stale') {
+          if (typeof on[state] === 'function') { on[state](body, env, ui.TRANSIENT[state] ? retry : null); return; }
+          if (state === 'sample' && typeof opts.sample === 'function') { opts.sample(body); return; }
+          if (state === 'notConfigured' && typeof opts.notConfigured === 'function') { opts.notConfigured(body, e); return; }
+          body.appendChild(ui.stateBlock(state, {
+            reason: e.reason, detail: stateDetail(state, env, opts),
+            retry: ui.TRANSIENT[state] ? retry : null
+          }));
           return;
         }
-        if (e.reason === 'not-configured' && opts.notConfigured) { opts.notConfigured(body, e); return; }
-        body.appendChild(ui.errorState(
-          opts.errorTitle || 'This could not be read',
-          e.message || 'The request failed.',
-          function () { A.forget(path); A.refresh(); }));
-        return;
+        if (state === 'stale') {
+          if (typeof on.stale === 'function') on.stale(body, env, retry);
+          else {
+            body.appendChild(ui.stateBlock('stale', {
+              reason: e.reason,
+              detail: 'A fresh read failed' + (staleWhy(env) ? ': ' + staleWhy(env) : '.') + ' What is below was read at ' + ui.fmt.clock(new Date(env.at)) + '.'
+            }));
+          }
+        }
+        draw(body, env.data, env);
+        if (opts.stamp !== false && env.at) {
+          var at = new Date(env.at);
+          body.appendChild(el('p.readstamp', { 'data-read-at': at.toISOString(), text: 'Read ' + ui.fmt.clock(at) }));
+        }
+      } catch (err) {
+        ui.clear(body);
+        mark('failed', 'render');
+        body.appendChild(ui.stateBlock('failed', {
+          reason: 'render',
+          detail: 'The answer arrived but the console could not draw it: ' + String(err && err.message ? err.message : err) + '.'
+        }));
+        if (window.console && window.console.error) window.console.error(err);
       }
-      if (env.stale) {
-        body.appendChild(el('div.callout.warn', [
-          el('strong', { text: 'Showing the last value that could be read.' }),
-          el('p', { text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
-            ' The figures below are from ' + ui.fmt.stamp(new Date(env.at)) + '.' })
-        ]));
-      }
-      render(body, env.data, env);
-    });
+    }
+
+    function load() {
+      ui.clear(body);
+      mark('loading', null);
+      body.appendChild(ui.skeleton(opts.skeletonRows || 3));
+      if (!pending) { pending = true; A.state.pendingPanels += 1; }
+      var readOpts = { ttlMs: opts.ttlMs === undefined ? 15000 : opts.ttlMs };
+      if (opts.timeoutMs) readOpts.timeoutMs = opts.timeoutMs;
+      A.read(path, readOpts).then(function (env) {
+        if (!alive) return;
+        paint(env);
+        release();
+        settled();
+      }, function (err) {
+        if (!alive) return;
+        paint({ ok: false, data: null, mode: A.MODE ? A.MODE.LIVE : 'live', at: Date.now(), error: err || {} });
+        release();
+        settled();
+      });
+    }
+
+    load();
     return card;
+  };
+
+  var PAGING = { page: true, critical: true };
+  var ALERT_RANK = { page: 0, critical: 0, error: 1, high: 1, warning: 2, medium: 2, info: 3, low: 3, none: 4 };
+  function alertRank(sev) { return Object.prototype.hasOwnProperty.call(ALERT_RANK, sev) ? ALERT_RANK[sev] : 4; }
+
+  A.openAlerts = function (liveAnswer) {
+    if (!liveAnswer) return null;
+    var data = liveAnswer;
+    if (Object.prototype.hasOwnProperty.call(liveAnswer, 'mode') && Object.prototype.hasOwnProperty.call(liveAnswer, 'data')) {
+      if (!liveAnswer.ok) return null;
+      data = liveAnswer.data;
+    }
+    var list = (data && Array.isArray(data.alerts)) ? data.alerts : null;
+    if (!list) return null;
+    var byName = {};
+    var order = [];
+    list.forEach(function (a) {
+      if (!a) return;
+      var state = String(a.state || 'active');
+      if (state !== 'active' && state !== 'firing') return;
+      if ((a.silencedBy && a.silencedBy.length) || (a.inhibitedBy && a.inhibitedBy.length)) return;
+      var labels = a.labels || {};
+      var name = a.name || labels.alertname || 'unnamed alert';
+      var sev = String(labels.severity || a.severity || 'none').toLowerCase();
+      var g = byName[name];
+      if (!g) {
+        g = byName[name] = { name: name, severity: sev, count: 0, alerts: [], summary: a.summary || null,
+          generatorURL: a.generatorURL || null, startsAt: a.startsAt || null, paging: false };
+        order.push(g);
+      }
+      g.count += 1;
+      g.alerts.push(a);
+      if (alertRank(sev) < alertRank(g.severity)) g.severity = sev;
+      if (!g.summary && a.summary) g.summary = a.summary;
+      if (!g.generatorURL && a.generatorURL) g.generatorURL = a.generatorURL;
+      if (a.startsAt && (!g.startsAt || String(a.startsAt) < String(g.startsAt))) g.startsAt = a.startsAt;
+      if (PAGING[sev]) g.paging = true;
+    });
+    order.sort(function (a, b) {
+      var r = alertRank(a.severity) - alertRank(b.severity);
+      if (r) return r;
+      if (b.count !== a.count) return b.count - a.count;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+    var total = order.reduce(function (n, g) { return n + g.count; }, 0);
+    var paging = order.filter(function (g) { return g.paging; });
+    return {
+      total: total,
+      groups: order,
+      paging: paging,
+      pagingCount: paging.reduce(function (n, g) { return n + g.count; }, 0),
+      worst: order.length ? order[0].severity : null
+    };
   };
 
   A.whenProbed = function (fn) {
@@ -1436,10 +1843,7 @@
   };
 
   A.notInStack = function (what, detail) {
-    return el('div.callout.info', { 'data-not-in-stack': what || '' }, [
-      el('strong', { text: 'Not in this stack.' }),
-      el('p', { text: what + ' ' + (detail || 'has no source the console can read here, so nothing is shown rather than a figure nobody measured.') })
-    ]);
+    return ui.stateBlock('notInStack', { what: what || '', detail: detail });
   };
 
   A.dataSource = function () {
@@ -1468,6 +1872,17 @@
       },
       actions: function (close) {
         var out = [ui.btn('Close', { variant: 'ghost', onClick: close })];
+        if (snap.mode === 'live' && snap.unreachable) {
+          out.push(ui.btn('Browse sample data instead', {
+            variant: 'ghost',
+            onClick: function () { close(); if (typeof A.useSample === 'function') A.useSample('chosen'); A.refresh(); }
+          }));
+          out.push(ui.btn('Ask the console API again', {
+            variant: 'primary',
+            onClick: function () { close(); if (typeof A.reprobeNow === 'function') A.reprobeNow(); }
+          }));
+          return out;
+        }
         if (snap.auth && snap.auth.authenticated) {
           out.push(ui.btn('Sign out', { variant: 'ghost', onClick: function () { close(); A.signOutNow(); } }));
         } else if (snap.mode === 'live' && snap.signedOut) {
@@ -1494,7 +1909,7 @@
     return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
   }
 
-  var sampleMe = null;
+  var sampleMe = A.data && A.data.me ? { name: A.data.me.name, upn: A.data.me.upn } : { name: 'Sample operator', upn: 'sample' };
 
   function paintWho(snap) {
     var who = document.getElementById('whobtn');
@@ -1502,22 +1917,31 @@
     var avatar = who.querySelector('.avatar');
     var name = who.querySelector('.who-text b');
     var role = who.querySelector('.who-text span');
-    if (!sampleMe) sampleMe = { name: A.data.me.name, upn: A.data.me.upn, text: role ? role.textContent : '' };
-    var principal = snap.auth && snap.auth.authenticated ? snap.auth.principal : null;
-    if (principal) {
-      A.data.me.name = principal.displayName || principal.subject;
-      A.data.me.upn = principal.subject;
-      if (avatar) avatar.textContent = initialsOf(A.data.me.name);
-      if (name) name.textContent = A.data.me.name;
-      if (role) role.textContent = principal.roles && principal.roles.length ? principal.roles.join(' · ') : 'Operator';
-      who.title = 'Signed in as ' + principal.subject;
-    } else {
+    function show(n, r, initials, title) {
+      if (avatar) avatar.textContent = initials;
+      if (name) name.textContent = n;
+      if (role) role.textContent = r;
+      who.title = title;
+    }
+    if (snap.mode === 'sample') {
       A.data.me.name = sampleMe.name;
       A.data.me.upn = sampleMe.upn;
-      if (avatar) avatar.textContent = initialsOf(sampleMe.name);
-      if (name) name.textContent = sampleMe.name;
-      if (role) role.textContent = sampleMe.text;
-      who.title = '';
+      show(sampleMe.name, (A.data.me.role || 'Operator') + ' · Tier ' + A.data.me.tier, initialsOf(sampleMe.name), 'The sample operator. Nothing here is a real identity.');
+      return;
+    }
+    var principal = snap.auth && snap.auth.authenticated ? snap.auth.principal : null;
+    if (principal) {
+      var display = principal.displayName || principal.subject;
+      A.data.me.name = display;
+      A.data.me.upn = principal.subject;
+      var tierWord = principal.tier ? principal.tier : (principal.roles && principal.roles.length ? principal.roles.join(' · ') : 'no role');
+      show(display, tierWord, initialsOf(display), 'Signed in as ' + principal.subject + (principal.roles && principal.roles.length ? ', roles ' + principal.roles.join(', ') : ''));
+    } else if (snap.mode === 'live' && snap.unreachable) {
+      show('Not connected', 'Identity not read', '?', 'The console API did not answer, so nobody is signed in here.');
+    } else if (snap.mode === 'live') {
+      show('Signed out', 'Sign in to read the API', '?', 'Nobody is signed in to the console API in this browser.');
+    } else {
+      show('Connecting', 'Identity not read yet', '', '');
     }
   }
 
@@ -1525,7 +1949,17 @@
     if (signInHandle) return signInHandle;
     if (typeof A.signIn !== 'function') return null;
     var subject = el('input.field', { type: 'text', id: 'signin-subject', autocomplete: 'username', autocapitalize: 'none', spellcheck: 'false', placeholder: 'operator' });
-    var password = el('input.field', { type: 'password', id: 'signin-password', autocomplete: 'current-password' });
+    var password = el('input.field', { type: 'password', id: 'signin-password', autocomplete: 'current-password', 'aria-describedby': 'signin-where' });
+    var reveal = el('button.btn.ghost.pw-toggle', {
+      type: 'button', id: 'signin-reveal', 'aria-pressed': 'false', 'aria-controls': 'signin-password',
+      on: {
+        click: function () {
+          var showing = password.type === 'text';
+          password.type = showing ? 'password' : 'text';
+          reveal.setAttribute('aria-pressed', showing ? 'false' : 'true');
+        }
+      }
+    }, 'Show password');
     var error = el('p.form-error', { id: 'signin-error', role: 'alert', hidden: true });
     var busy = false;
     var go;
@@ -1576,7 +2010,13 @@
         return [
           el('p', { text: 'This console is served by the Argus API, which answers only to a signed-in operator. Use the operator name and password from the stack bootstrap.' }),
           el('label.fieldlabel', { for: 'signin-subject', text: 'Operator' }), subject,
-          el('label.fieldlabel', { for: 'signin-password', text: 'Password' }), password,
+          el('label.fieldlabel', { for: 'signin-password', text: 'Password' }),
+          el('div.pw-row', [password, reveal]),
+          el('p.hint', { id: 'signin-where' }, [
+            'After the bootstrap the password is in ',
+            el('code', { text: 'platform/compose/secrets/console_operator_password' }),
+            ' on the machine that runs the stack.'
+          ]),
           error,
           el('p.hint', { text: 'Five failed attempts lock the operator for a while. The session ends after thirty minutes idle or eight hours in all.' })
         ];
@@ -1584,30 +2024,54 @@
       actions: function (close) {
         go = ui.btn('Sign in', { variant: 'primary', onClick: function () { submit(close); } });
         return [
+          go,
           ui.btn('Browse sample data instead', {
             variant: 'ghost',
             onClick: function () {
               signInHandle = null;
               close();
-              if (typeof A.useSample === 'function') A.useSample('signed-out');
+              if (typeof A.useSample === 'function') A.useSample('chosen');
               A.announce('Showing sample data');
               A.refresh();
             }
-          }),
-          go
+          })
         ];
       }
     });
+    var refusalNow = typeof A.authRefusal === 'function' ? A.authRefusal() : null;
+    if (refusalNow && refusalNow.reason === 'duplicate-session-cookie') {
+      error.hidden = false;
+      error.textContent = refusalNow.message;
+    }
     window.setTimeout(function () { subject.focus(); }, 0);
     return signInHandle;
   };
 
+  var lastShellKey = null;
+  var bannerNode = null;
+
+  function sessionBanner() {
+    if (bannerNode && bannerNode.isConnected) return;
+    bannerNode = A.flash('warn', 'Your session has ended',
+      'The console stopped reading the API at the first refusal. Sign in again and the screen reloads.', { sticky: true });
+    bannerNode.setAttribute('data-session-banner', '');
+  }
+
+  function dropSessionBanner() {
+    if (bannerNode && bannerNode.parentNode) bannerNode.parentNode.removeChild(bannerNode);
+    bannerNode = null;
+  }
+
   A.signOutNow = function () {
     if (typeof A.signOut !== 'function') return;
-    A.signOut().then(function () {
+    return A.signOut().then(function () {
       A.announce('Signed out');
-      A.flash('info', 'Signed out', 'The console API session has ended.');
+      A.flash('info', 'Signed out', 'The console API answered 204 and the session has ended.');
       A.refresh();
+      return true;
+    }, function (err) {
+      A.flash('bad', 'Sign-out failed', ((err && err.message) || 'The console API did not confirm the sign-out.') + ' You are still signed in.');
+      return false;
     });
   };
 
@@ -1626,11 +2090,6 @@
   A.paintNavTitles = paintNavTitles;
 
   var sessionOpener = null;
-
-  A.isSessionOpen = function () {
-    var d = document.getElementById('drawer');
-    return !!d && !d.hidden;
-  };
 
   A.closeSession = function () {
     var drawer = document.getElementById('drawer');
@@ -1653,7 +2112,7 @@
 
   function armIdle() {
     if (idleTimer) { window.clearTimeout(idleTimer); idleTimer = null; }
-    var ms = idleMs();
+    var ms = shellMode() === 'sample' ? idleMs() : 0;
     if (!ms || lockHandle) return;
     idleTimer = window.setTimeout(function () { idleTimer = null; A.lock('idle for ' + prefs.idleLock + ' min'); }, ms);
   }
@@ -1669,6 +2128,7 @@
 
   A.lock = function (why) {
     if (lockHandle) return lockHandle;
+    if (shellMode() !== 'sample') return null;
     if (idleTimer) { window.clearTimeout(idleTimer); idleTimer = null; }
     A.dismissOverlays();
     A.closeSession();
@@ -1729,6 +2189,7 @@
 
     document.getElementById('kbar').addEventListener('click', A.palette);
     document.getElementById('envbtn').addEventListener('click', function () {
+      if (shellMode() !== 'sample') return;
       A.setEnv(A.state.env === 'production' ? 'staging' : 'production');
     });
     document.getElementById('burger').addEventListener('click', function () {
@@ -1760,7 +2221,20 @@
         A.watchStore(paintMode);
         A.watchStore(function (snap) {
           paintWho(snap);
-          if (snap.mode === 'live' && snap.signedOut) A.signInDialog();
+          var key = snap.mode + '|' + (snap.signedOut ? 'out' : 'in') + '|' + (snap.unreachable ? 'down' : 'up');
+          var changed = lastShellKey !== null && key !== lastShellKey;
+          var first = lastShellKey === null;
+          var fromSignedOut = !!lastShellKey && lastShellKey.indexOf('|out|') !== -1;
+          lastShellKey = key;
+          if (snap.mode === 'live' && snap.signedOut) {
+            if (snap.sessionEnded) sessionBanner();
+            A.signInDialog();
+            if (changed && mount && !mount.querySelector('.signedout-shell')) render({ keepOverlays: true });
+          } else {
+            dropSessionBanner();
+          }
+          if (changed && snap.mode === 'live' && !snap.signedOut && snap.recovered) render();
+          if ((first || (changed && !(fromSignedOut && !snap.signedOut))) && crumbHost) A.refreshBadges();
         });
       }
       if (typeof A.probe === 'function') A.probe();

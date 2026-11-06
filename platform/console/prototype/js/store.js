@@ -11,11 +11,47 @@
     probedAt: null,
     probeError: null,
     auth: { mode: null, authenticated: false, principal: null },
-    signedOut: false
+    signedOut: false,
+    unreachable: false,
+    reprobeAttempts: 0,
+    reprobeAt: null,
+    sessionEnded: false,
+    recovered: false
   };
 
   var inflight = {};
+  var CACHE_MAX = 200;
   var cached = {};
+  var cacheOrder = [];
+
+  function touch(path) {
+    var at = cacheOrder.indexOf(path);
+    if (at !== -1) cacheOrder.splice(at, 1);
+    cacheOrder.push(path);
+  }
+
+  function cacheGet(path) {
+    if (!Object.prototype.hasOwnProperty.call(cached, path)) return null;
+    touch(path);
+    return cached[path];
+  }
+
+  function cachePut(path, entry) {
+    touch(path);
+    cached[path] = entry;
+    while (cacheOrder.length > CACHE_MAX) delete cached[cacheOrder.shift()];
+  }
+
+  function cacheClear(path) {
+    if (path) {
+      delete cached[path];
+      var at = cacheOrder.indexOf(path);
+      if (at !== -1) cacheOrder.splice(at, 1);
+      return;
+    }
+    cached = {};
+    cacheOrder = [];
+  }
 
   function now() { return Date.now(); }
 
@@ -35,6 +71,10 @@
       failures: health.failures,
       stale: stale,
       signedOut: state.signedOut,
+      unreachable: state.unreachable,
+      reprobeAt: state.reprobeAt,
+      sessionEnded: state.sessionEnded,
+      recovered: state.recovered,
       auth: state.auth
     };
   }
@@ -101,18 +141,16 @@
     }).then(function (res) {
       release();
       if (res.status === 401 && state.auth.mode === 'session') {
-        markSignedOut();
-        return Promise.reject({
-          reason: 'unauthenticated',
-          message: 'The console API wants you to sign in again.'
+        return refusal(res, path).then(null, function (err) {
+          state.authRefusal = { reason: err.reason, message: err.message };
+          markSignedOut(true);
+          return Promise.reject({
+            reason: 'unauthenticated', status: 401, error: 'unauthenticated', serverReason: err.reason,
+            message: err.reason === 'duplicate-session-cookie' ? err.message : 'The console API wants you to sign in again.'
+          });
         });
       }
-      if (!res.ok) {
-        return Promise.reject({
-          reason: 'http-' + res.status,
-          message: 'The console API answered ' + res.status + ' for ' + path + '.'
-        });
-      }
+      if (!res.ok) return refusal(res, path);
       return res.json();
     }, function (err) {
       release();
@@ -129,11 +167,41 @@
     });
   }
 
-  function markSignedOut() {
+  var CODE = /^[a-z][a-z0-9-]{0,63}$/;
+
+  function refusal(res, path) {
+    var fallback = 'The console API answered ' + res.status + ' for ' + path + '.';
+    function reject(body) {
+      body = body && typeof body === 'object' ? body : {};
+      var reason = (typeof body.reason === 'string' && CODE.test(body.reason)) ? body.reason
+        : (typeof body.error === 'string' && CODE.test(body.error)) ? body.error
+          : 'http-' + res.status;
+      var out = {
+        reason: reason,
+        status: res.status,
+        error: typeof body.error === 'string' ? body.error : null,
+        message: typeof body.message === 'string' && body.message ? body.message : fallback
+      };
+      ['required', 'held', 'scope', 'limit'].forEach(function (k) {
+        if (typeof body[k] === 'string' || typeof body[k] === 'number') out[k] = body[k];
+      });
+      var retry = res.headers && res.headers.get ? Number(res.headers.get('retry-after')) : 0;
+      if (retry) out.retryAfter = retry;
+      return Promise.reject(out);
+    }
+    var parsed;
+    try { parsed = res.json(); } catch (e) { return reject(null); }
+    return Promise.resolve(parsed).then(reject, function () { return reject(null); });
+  }
+
+  function markSignedOut(byExpiry) {
     var was = state.signedOut;
+    var hadSession = !!(state.auth && state.auth.authenticated);
     state.signedOut = true;
+    if (byExpiry && hadSession) state.sessionEnded = true;
     state.auth = { mode: state.auth.mode || 'session', authenticated: false, principal: null };
-    cached = {};
+    cacheClear();
+    releaseQueue();
     if (!was) notify();
   }
 
@@ -147,11 +215,35 @@
         subject: auth.subject || '',
         displayName: auth.displayName || auth.subject || '',
         roles: auth.roles || [],
+        tier: typeof auth.tier === 'string' ? auth.tier : null,
         expiresAt: auth.expiresAt || null,
         idleExpiresAt: auth.idleExpiresAt || null
       } : null
     };
     state.signedOut = auth.mode === 'session' && !authenticated;
+  }
+
+  var PROBE_TIMEOUT_MS = 6000;
+  var REPROBE_MIN_MS = 1000;
+  var REPROBE_MAX_MS = 30000;
+  var reprobeTimer = null;
+
+  function chosenSample() {
+    return state.mode === MODE.SAMPLE && !!(state.probeError && state.probeError.chosen);
+  }
+
+  function scheduleReprobe() {
+    if (reprobeTimer) return;
+    state.reprobeAttempts += 1;
+    var delay = Math.min(REPROBE_MAX_MS, REPROBE_MIN_MS * Math.pow(2, Math.min(state.reprobeAttempts - 1, 6)));
+    state.reprobeAt = now() + delay;
+    reprobeTimer = window.setTimeout(function () {
+      reprobeTimer = null;
+      if (!state.unreachable) return;
+      state.probedAt = null;
+      state.probing = null;
+      A.probe();
+    }, delay);
   }
 
   A.probe = function () {
@@ -164,23 +256,42 @@
       return Promise.resolve(state);
     }
     if (!state.probing) {
-      state.probing = request('/api/capabilities', { timeoutMs: 2500, abortable: false }).then(function (caps) {
+      state.probing = request('/api/capabilities', { timeoutMs: PROBE_TIMEOUT_MS, abortable: false }).then(function (caps) {
+        if (chosenSample()) return state;
+        var was = state.unreachable;
         state.mode = MODE.LIVE;
+        state.unreachable = false;
+        state.reprobeAttempts = 0;
+        state.reprobeAt = null;
+        state.probeError = null;
         state.capabilities = caps;
         readAuth(caps);
         state.probedAt = now();
         health.lastOkAt = now();
+        cachePut('/api/capabilities', { at: now(), envelope: { ok: true, data: caps, mode: MODE.LIVE, at: now(), stale: false, error: null } });
+        state.recovered = was;
         notify();
+        state.recovered = false;
         return state;
       }, function (err) {
-        state.mode = MODE.SAMPLE;
+        if (chosenSample()) return state;
+        state.mode = MODE.LIVE;
+        state.unreachable = true;
         state.probeError = err;
         state.probedAt = now();
+        scheduleReprobe();
         notify();
         return state;
       });
     }
     return state.probing;
+  };
+
+  A.reprobeNow = function () {
+    if (reprobeTimer) { window.clearTimeout(reprobeTimer); reprobeTimer = null; }
+    state.probedAt = null;
+    state.probing = null;
+    return A.probe();
   };
 
   A.read = function (path, opts) {
@@ -198,17 +309,33 @@
       });
     }
 
-    if (state.signedOut) {
+    if (state.signedOut) return Promise.resolve(signedOutEnvelope());
+
+    if (state.unreachable) {
       return Promise.resolve({
         ok: false, data: null, mode: MODE.LIVE, at: now(), stale: false,
-        error: { reason: 'unauthenticated', message: 'Sign in to read this from the console API.' }
+        error: {
+          reason: 'unreachable',
+          message: 'The console API did not answer the last probe' +
+            (state.probeError && state.probeError.message ? ': ' + state.probeError.message : '.') +
+            ' The console asks again on its own.'
+        }
       });
     }
 
-    var hit = cached[path];
-    if (hit && now() - hit.at < ttl) return Promise.resolve(hit.envelope);
+    var hit = cacheGet(path);
+    if (hit && ttl > 0 && now() - hit.at < ttl) return Promise.resolve(hit.envelope);
     var ik = routeGeneration() + '|' + path;
     if (inflight[ik]) return inflight[ik];
+
+    if (gate) {
+      return new Promise(function (resolve) { gateQueue.push(resolve); }).then(function (go) {
+        if (!go || state.signedOut) return signedOutEnvelope();
+        return readNow(path, opts);
+      });
+    }
+    var leads = state.auth.mode === 'session' && sessionGateMs >= 0 &&
+      (health.lastOkAt === null || now() - health.lastOkAt >= sessionGateMs);
 
     var p = request(path, opts).then(function (data) {
       var envelope = {
@@ -216,7 +343,7 @@
         stale: !!(data && data.stale),
         error: data && data.ok === false ? { reason: data.reason, message: data.message } : null
       };
-      cached[path] = { at: now(), envelope: envelope };
+      if (ttl > 0) cachePut(path, { at: now(), envelope: envelope });
       delete inflight[ik];
       health.reads += 1;
       health.lastOkAt = now();
@@ -224,6 +351,7 @@
       return envelope;
     }, function (err) {
       delete inflight[ik];
+      if (err && err.reason === 'unauthenticated' && state.signedOut) return signedOutEnvelope();
       if (err && err.reason === 'cancelled' && hit) return hit.envelope;
       if (!(err && err.reason === 'cancelled')) {
         health.failures += 1;
@@ -242,7 +370,36 @@
     });
 
     inflight[ik] = p;
+    if (leads) {
+      gate = p;
+      var gateTimer = window.setTimeout(function () { if (gate === p) releaseQueue(); }, GATE_HOLD_MS);
+      p.then(function () { window.clearTimeout(gateTimer); if (gate === p) releaseQueue(); });
+    }
     return p;
+  }
+
+  var gate = null;
+  var gateQueue = [];
+  var sessionGateMs = 60000;
+  var GATE_HOLD_MS = 1500;
+
+  function releaseQueue() {
+    gate = null;
+    var waiting = gateQueue;
+    gateQueue = [];
+    var go = !state.signedOut;
+    waiting.forEach(function (resolve) { resolve(go); });
+  }
+
+  function gateSettled() {
+    return gate ? gate.then(function () { return null; }, function () { return null; }) : null;
+  }
+
+  function signedOutEnvelope() {
+    return {
+      ok: false, data: null, mode: MODE.LIVE, at: now(), stale: false,
+      error: { reason: 'unauthenticated', status: 401, message: 'Sign in to read this from the console API.' }
+    };
   }
 
   var STREAM = {
@@ -254,7 +411,7 @@
   };
 
   var CONNECTING = 0;
-  var MAX_OPEN_STREAMS = 4;
+  var MAX_OPEN_STREAMS = 2;
   var MAX_OPENING_ATTEMPTS = 4;
   var BACKOFF_MIN_MS = 1000;
   var BACKOFF_MAX_MS = 30000;
@@ -290,9 +447,6 @@
   }
 
   var jitterEnabled = true;
-
-  A.setJitter = function (on) { jitterEnabled = !!on; };
-  A.jitterEnabled = function () { return jitterEnabled; };
 
   function backoffFor(attempts) {
     var steps = Math.max(0, attempts - 1);
@@ -433,6 +587,13 @@
     es.addEventListener('error', onError);
     rec.listeners.push(['error', onError]);
 
+    var onEnded = function () {
+      if (rec.es !== es) return;
+      sessionEndedByStream();
+    };
+    es.addEventListener('session-ended', onEnded);
+    rec.listeners.push(['session-ended', onEnded]);
+
     Object.keys(rec.names).forEach(function (name) { attachEvent(rec, es, name); });
   }
 
@@ -497,7 +658,7 @@
 
     if (typeof A.onLeave === 'function') A.onLeave(close);
 
-    A.probe().then(function () {
+    A.probe().then(gateSettled).then(function () {
       if (cancelled) return;
       var key = streamKey(path, topics);
       var blocked = streamBlockedBy(key);
@@ -529,7 +690,23 @@
 
   A.STREAM = STREAM;
 
-  A.streamSnapshot = function () {
+  function sessionEndedByStream() {
+    Object.keys(streams).forEach(function (k) {
+      var rec = streams[k];
+      var subs = rec.subs.slice();
+      teardownStream(rec);
+      rec.subs = [];
+      subs.forEach(function (sub) {
+        if (!sub.onUnavailable) return;
+        try {
+          sub.onUnavailable({ reason: 'unauthenticated', message: 'The console API ended the session, so the stream closed and will not reconnect.' });
+        } catch (e) { if (window.console) window.console.warn('stream handler failed', e); }
+      });
+    });
+    if (state.auth.mode === 'session' || state.auth.authenticated) markSignedOut(true);
+  }
+
+  function streamSnapshot() {
     return Object.keys(streams).map(function (k) {
       var rec = streams[k];
       return {
@@ -539,7 +716,7 @@
         openedAt: rec.openedAt, stateAt: rec.stateAt
       };
     });
-  };
+  }
 
   A.seriesValues = function (payload) {
     if (payload && payload.series && payload.series.length && payload.series[0].points) {
@@ -573,7 +750,7 @@
       if (res.status === 204 || res.status === 200) return { ok: true, status: res.status };
       return res.json().then(function (data) {
         return Promise.reject({
-          reason: (data && data.error) || ('http-' + res.status),
+          reason: (data && (data.reason || data.error)) || ('http-' + res.status),
           status: res.status,
           retryAfter: Number(res.headers.get('retry-after')) || null,
           message: (data && data.message) || ('The console API answered ' + res.status + '.')
@@ -590,10 +767,11 @@
   }
 
   function reprobe() {
+    if (reprobeTimer) { window.clearTimeout(reprobeTimer); reprobeTimer = null; }
     state.probedAt = null;
     state.probing = null;
     state.probeError = null;
-    cached = {};
+    cacheClear();
     return A.probe();
   }
 
@@ -601,6 +779,8 @@
     return authRequest('/api/auth/login', { subject: String(subject || ''), password: String(password || '') })
       .then(function () {
         state.signedOut = false;
+        state.sessionEnded = false;
+        state.authRefusal = null;
         return reprobe();
       }).then(function () {
         if (state.signedOut) {
@@ -611,18 +791,30 @@
   };
 
   A.signOut = function () {
-    return authRequest('/api/auth/logout').then(function () { return null; }, function () { return null; }).then(function () {
+    return authRequest('/api/auth/logout').then(function (answer) {
+      if (!answer || answer.status !== 204) {
+        return Promise.reject({
+          reason: 'unexpected-status', status: answer ? answer.status : null,
+          message: 'The console API answered ' + (answer ? answer.status : 'nothing') +
+            ' to the sign-out instead of 204, so the session may still be open.'
+        });
+      }
       Object.keys(streams).forEach(function (k) { teardownStream(streams[k]); });
-      markSignedOut();
+      markSignedOut(false);
       return reprobe();
     });
   };
 
   A.useSample = function (why) {
+    if (reprobeTimer) { window.clearTimeout(reprobeTimer); reprobeTimer = null; }
     state.mode = MODE.SAMPLE;
     state.signedOut = false;
-    state.probeError = { reason: why || 'chosen', message: 'Bundled sample data, chosen instead of signing in. Nothing here has been measured.' };
-    cached = {};
+    state.unreachable = false;
+    state.sessionEnded = false;
+    state.probedAt = state.probedAt || now();
+    state.probeError = { reason: why || 'chosen', chosen: true, message: 'Bundled sample data, chosen by the operator. Nothing here has been measured.' };
+    cacheClear();
+    releaseQueue();
     notify();
   };
 
@@ -630,7 +822,16 @@
   A.reprobe = reprobe;
   A.storeMode = function () { return state.mode; };
   A.capabilities = function () { return state.capabilities; };
-  A.storeState = function () { return state; };
-  A.forget = function (path) { if (path) delete cached[path]; else cached = {}; };
+  A.forget = function (path) { cacheClear(path); };
+  A.__test = A.__test || {};
+  A.__test.storeState = function () { return state; };
+  A.__test.streamSnapshot = streamSnapshot;
+  A.__test.setJitter = function (on) { jitterEnabled = !!on; };
+  A.__test.jitterEnabled = function () { return jitterEnabled; };
+  A.__test.setSessionGateMs = function (ms) { sessionGateMs = Number(ms); };
+  A.__test.cacheSize = function () { return cacheOrder.length; };
+  A.__test.CACHE_MAX = CACHE_MAX;
+  A.__test.MAX_OPEN_STREAMS = MAX_OPEN_STREAMS;
+  A.authRefusal = function () { return state.authRefusal || null; };
   A.MODE = MODE;
 })();

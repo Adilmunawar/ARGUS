@@ -3,21 +3,6 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
-  function registerScreen(id, def) {
-    if (typeof A.screen === 'function') { A.screen(id, def); return; }
-    var q = (A._screenQueue = A._screenQueue || []);
-    q.push([id, def]);
-    if (q.length > 1) return;
-    Object.defineProperty(A, 'screen', {
-      configurable: true,
-      get: function () { return undefined; },
-      set: function (fn) {
-        Object.defineProperty(A, 'screen', { value: fn, writable: true, configurable: true, enumerable: true });
-        while (q.length) { var p = q.shift(); fn(p[0], p[1]); }
-      }
-    });
-  }
-
   function healthPill(health) {
     return ui.pill(health === 'ok' ? 'Healthy' : 'Degraded', health === 'ok' ? 'ok' : 'warn');
   }
@@ -889,10 +874,7 @@
   function renderDetail(mount, ctx) {
     var app = d.appByName(ctx.rest[0]);
     if (!app) {
-      mount.appendChild(ui.errorState(
-        'No such application',
-        'Nothing on this platform is called "' + ctx.rest[0] + '". It may have been renamed, or the link may come from an older runbook.',
-        function () { A.go('apps'); }));
+      mount.appendChild(ui.notFound('application', ctx.rest[0], 'apps', 'All applications'));
       return;
     }
 
@@ -955,7 +937,7 @@
   };
 
   function readAt(env, source) {
-    return el('p.hint', { text: 'Read at ' + fmt.stamp(new Date(env.at)) + (source ? ' from ' + source : '') + '.' });
+    return source ? el('p.hint', { text: 'From ' + source + '.' }) : null;
   }
 
   function dash() { return el('span.muted', { text: 'not declared' }); }
@@ -1118,9 +1100,7 @@
           ', read at ' + fmt.stamp(new Date(envEnv.at)) + '. ' + (envEnv.data.note || '');
         paint();
       });
-    }, { skeletonRows: 5, errorTitle: 'The application specs could not be read', notConfigured: function (body, e) {
-      body.appendChild(ui.emptyState('GitOps repository not configured', e.message || 'ARGUS_GITOPS_DIR is not set on the console API.'));
-    } }));
+    }, { skeletonRows: 5 }));
   }
 
   function findApp(data, name) {
@@ -1130,9 +1110,7 @@
   }
 
   function notDeclared(name) {
-    return ui.emptyState('No such application',
-      'Nothing in the GitOps repository is declared as "' + name + '".',
-      ui.btn('All applications', { variant: 'ghost', onClick: function () { A.go('apps'); } }));
+    return ui.stateBlock('notFound', { reason: 'unknown-id', detail: 'Nothing in the GitOps repository is declared as "' + name + '".' });
   }
 
   function specPanel(name) {
@@ -1154,11 +1132,7 @@
         ['Spec changed', fmt.stamp(new Date(app.declaredAt))]
       ]));
       body.appendChild(readAt(env, data.source));
-    }, { notConfigured: gitopsMissing });
-  }
-
-  function gitopsMissing(body, e) {
-    body.appendChild(ui.emptyState('GitOps repository not configured', e.message || 'ARGUS_GITOPS_DIR is not set on the console API.'));
+    });
   }
 
   function servicesPanel(name) {
@@ -1196,7 +1170,7 @@
         rowKey: function (r) { return String(r.name); }
       }));
       body.appendChild(readAt(env, app.file));
-    }, { notConfigured: gitopsMissing });
+    });
   }
 
   function ingressPanel(name) {
@@ -1215,7 +1189,7 @@
         ['On failure', h && h.failureAction ? h.failureAction : dash()]
       ]));
       body.appendChild(readAt(env, app.file));
-    }, { notConfigured: gitopsMissing });
+    });
   }
 
   function egressPanel(name) {
@@ -1228,7 +1202,7 @@
         body.appendChild(el('ul', app.egress.map(function (h) { return el('li', [mono(h)]); })));
       }
       body.appendChild(readAt(env, app.file));
-    }, { notConfigured: gitopsMissing });
+    });
   }
 
   function secretsPanel(name) {
@@ -1244,7 +1218,7 @@
         })));
       }
       body.appendChild(readAt(env, app.file));
-    }, { notConfigured: gitopsMissing });
+    });
   }
 
   function severityPill(sev) {
@@ -1279,7 +1253,7 @@
       }));
       body.appendChild(el('p.hint', { text: 'Declared in ' + app.alertsFile + '. Whether Prometheus has loaded them is a question for the security screen.' }));
       body.appendChild(readAt(env, app.file));
-    }, { notConfigured: gitopsMissing });
+    });
   }
 
   function versionsPanel(name) {
@@ -1301,7 +1275,7 @@
       }
       if (data.note) body.appendChild(el('p.hint', { text: data.note }));
       body.appendChild(readAt(env, data.source));
-    }, { notConfigured: gitopsMissing });
+    });
   }
 
   function containerMatches(c, name) {
@@ -1329,26 +1303,22 @@
         }));
       }
       body.appendChild(readAt(env, 'the container runtime'));
-    }, {
-      errorTitle: 'Containers could not be listed',
-      notConfigured: function (body, e) {
-        body.appendChild(ui.emptyState('Container runtime not configured', e.message || 'The console API has no Docker proxy to ask.'));
-      }
     });
   }
 
   function notInStackPanel(name) {
-    return ui.card('Not in this stack', [
-      A.notInStack('Running instances of ' + name, 'need a Service Fabric cluster, and this stack has none; the only process list the console can read is the container runtime, in Running here.'),
-      A.notInStack('Request, latency and error metrics for ' + name, 'need an application that exports them to Prometheus, and nothing declared here does yet.'),
-      A.notInStack('Deployment history and promotion for ' + name, 'need a reconciler that applies the declarations, and this stack has none, so there is no Deploy or Promote action.'),
-      A.notInStack('Restarting ' + name, 'needs a reconciler to receive the request, and this stack has none, so the console offers no Restart.')
+    return ui.notInStackStrip([
+      { what: 'Running instances of ' + name, detail: 'need a Service Fabric cluster, and this stack has none; the only process list the console can read is the container runtime, in Running here.' },
+      { what: 'Request, latency and error metrics for ' + name, detail: 'need an application that exports them to Prometheus, and nothing declared here does yet.' },
+      { what: 'Deployment history and promotion for ' + name, detail: 'need a reconciler that applies the declarations, and this stack has none, so there is no Deploy or Promote action.' },
+      { what: 'Restarting ' + name, detail: 'needs a reconciler to receive the request, and this stack has none, so the console offers no Restart.' }
     ]);
   }
 
   function renderLiveDetail(mount, ctx) {
     var name = ctx.rest[0];
-    mount.appendChild(ui.pageHeader(name, 'Declared in the GitOps repository. What is below is the spec as written, not what is running.'));
+    var head = ui.pageHeader(name, 'Declared in the GitOps repository. What is below is the spec as written, not what is running.');
+    mount.appendChild(head);
     var holder = el('div.stack');
     mount.appendChild(holder);
     holder.appendChild(ui.skeleton(4));
@@ -1358,8 +1328,8 @@
       if (!alive) return;
       ui.clear(holder);
       if (env.ok && !findApp(env.data, name)) {
-        holder.appendChild(notDeclared(name));
-        holder.appendChild(readAt(env, env.data.source));
+        if (head.parentNode) head.parentNode.removeChild(head);
+        holder.appendChild(ui.notFound('application', name, 'apps', 'All applications'));
         return;
       }
       holder.appendChild(el('div.grid.grid-2', [specPanel(name), versionsPanel(name)]));
@@ -1381,9 +1351,14 @@
     else renderLiveList(mount, ctx);
   }
 
-  registerScreen('apps', {
+  A.screen('apps', {
     title: 'Applications',
     crumb: 'Applications',
+    liveCrumbs: function (rest) {
+      var out = [rest[0]];
+      if (rest[1]) out.push(rest[1].charAt(0).toUpperCase() + rest[1].slice(1));
+      return out;
+    },
     crumbs: function (rest) {
       if (A.storeMode() === 'live') return [rest[0]];
       var app = d.appByName(rest[0]);

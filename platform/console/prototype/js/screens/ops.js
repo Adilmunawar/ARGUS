@@ -33,7 +33,7 @@
         'Draining ' + host + ': 8 virtual machines to live-migrate',
         '  sql-01                 -> hv-01    14.2 s   0 dropped packets',
         '  adfs-01                -> hv-02     9.8 s   0 dropped packets',
-        '  legacy-landsurvey-01   -> hv-02    22.6 s   0 dropped packets',
+        '  legacy-app-01          -> hv-02    22.6 s   0 dropped packets',
         'Get-ClusterNode ' + host + ' : State = Paused, Drained',
         'Get-VirtualDisk : 3 of 3 fault domains healthy',
         'Runbook completed successfully in 96 s.'
@@ -192,11 +192,7 @@
     var rb = d.runbooks.filter(function (r) { return r.id === id; })[0];
 
     if (!rb) {
-      mount.appendChild(ui.pageHeader('Runbook not found', id));
-      mount.appendChild(ui.emptyState(
-        'No runbook has that identifier',
-        'The link may come from an older version of the console, or the runbook was retired.',
-        ui.btn('Back to runbooks', { variant: 'primary', onClick: function () { A.go('ops'); } })));
+      mount.appendChild(ui.notFound('runbook', id, 'ops/runbooks', 'All runbooks'));
       return;
     }
 
@@ -775,10 +771,6 @@
     return fmt.stamp(new Date(t));
   }
 
-  function readAt(env) {
-    return el('p.hint', { text: 'Read from the console API at ' + (stampIso(env && env.at) || 'an unknown time') + '.' });
-  }
-
   function liveOnly(sampleRender, liveRender) {
     if (A.storeMode() === A.MODE.SAMPLE) return sampleRender();
     var box = el('div.stack');
@@ -787,15 +779,6 @@
       ui.append(box, mode === A.MODE.LIVE ? liveRender() : sampleRender());
     });
     return box;
-  }
-
-  function notConfiguredCallout(what) {
-    return function (body, e) {
-      body.appendChild(el('div.callout.warn', [
-        el('strong', { text: what + ' is not configured.' }),
-        el('p', { text: (e && e.message) || 'The console API has no address for it, so nothing here has been read.' })
-      ]));
-    };
   }
 
   function inline(text) {
@@ -909,7 +892,7 @@
     ];
 
     return el('div.stack', [
-      A.livePanel('Runbooks', '/api/runbooks', function (body, data, env) {
+      A.livePanel('Runbooks', '/api/runbooks', function (body, data) {
         var rows = orderedRunbooks(data.runbooks);
         body.appendChild(el('div.callout.info', [
           el('strong', { text: 'Runbooks are documents here, not scripts the console can run.' }),
@@ -921,8 +904,7 @@
           rowKey: function (rb) { return rb.path; },
           onRow: function (rb) { A.go('ops', ['runbook', rb.id]); }
         }));
-        body.appendChild(readAt(env));
-      }, { notConfigured: notConfiguredCallout('The runbooks directory'), skeletonRows: 5 })
+      }, { skeletonRows: 5 })
     ]);
   }
 
@@ -932,20 +914,19 @@
     var alive = true;
     A.onLeave(function () { alive = false; });
 
+    function retry() { A.forget('/api/runbooks'); A.refresh(); }
+
     A.read('/api/runbooks', { ttlMs: 15000 }).then(function (env) {
       if (!alive) return;
       ui.clear(box);
-      if (!env.ok) {
+      var state = A.envelopeState(env);
+      if (state !== 'ok' && state !== 'stale') {
         var e = env.error || {};
         box.appendChild(ui.pageHeader('Runbook ' + id, 'The runbook list could not be read.', [backButton()]));
-        if (e.reason === 'unauthenticated') {
-          box.appendChild(ui.emptyState('Sign in to read this', 'The console API answers only to a signed-in operator.'));
-        } else if (e.reason === 'not-configured') {
-          notConfiguredCallout('The runbooks directory')(box, e);
-        } else {
-          box.appendChild(ui.errorState('The runbooks could not be read', e.message || 'The request failed.',
-            function () { A.forget('/api/runbooks'); A.refresh(); }));
-        }
+        box.appendChild(ui.stateBlock(state, {
+          reason: e.reason, detail: e.message,
+          retry: ui.TRANSIENT[state] ? retry : null
+        }));
         return;
       }
 
@@ -953,17 +934,12 @@
       var rb = list.filter(function (r) { return r.id === id; })[0];
 
       if (!rb) {
-        box.appendChild(ui.pageHeader('Runbook not found', id, [backButton()]));
-        box.appendChild(ui.emptyState(
-          'No runbook has that identifier',
-          'The runbooks directory read at ' + (stampIso(env.at) || 'an unknown time') + ' holds ' + fmt.num(list.length)
-            + ' document' + (list.length === 1 ? '' : 's') + ', and none is called ' + id
-            + '. The link may come from the sample dataset or from an older version of the console.'));
+        box.appendChild(ui.notFound('runbook', id, 'ops/runbooks', 'All runbooks'));
         if (list.length) {
           box.appendChild(ui.card('Runbooks that exist', el('ul', list.map(function (r) {
-            var a = A.link(r.id, 'ops', ['runbook', r.id]);
-            a.classList.add('mono');
-            return el('li', [a, el('span.muted', { text: ' ' + r.title })]);
+            var a2 = A.link(r.id, 'ops', ['runbook', r.id]);
+            a2.classList.add('mono');
+            return el('li', [a2, el('span.muted', { text: ' ' + r.title })]);
           }))));
         }
         return;
@@ -1000,15 +976,14 @@
         paramsNode
       ]));
 
-      box.appendChild(A.livePanel('Runbook', '/api/runbooks/body?path=' + encodeURIComponent(rb.path), function (body, data, env2) {
+      box.appendChild(A.livePanel('Runbook', '/api/runbooks/body?path=' + encodeURIComponent(rb.path), function (body, data) {
         var nodes = markdownNodes(data.body);
         if (!nodes.length) {
           body.appendChild(ui.emptyState('The runbook is empty', 'The file holds front matter and nothing else.'));
         } else {
           body.appendChild(el('div.prose', nodes));
         }
-        body.appendChild(readAt(env2));
-      }, { skeletonRows: 8, errorTitle: 'The runbook body could not be read' }));
+      }, { skeletonRows: 8 }));
     });
   }
 
@@ -1046,12 +1021,33 @@
       }
     ];
 
+    var alertCols = [
+      { key: 'name', label: 'Alert', render: function (g) { return el('span.mono', { text: g.name }); } },
+      {
+        key: 'severity', label: 'Severity', status: true,
+        render: function (g) { return ui.pill(g.severity, g.paging ? 'bad' : g.severity === 'warning' ? 'warn' : 'idle'); }
+      },
+      { key: 'count', label: 'Open', align: 'right', render: function (g) { return fmt.num(g.count); } },
+      { key: 'startsAt', label: 'Since', render: function (g) { return el('span.mono', { text: stampIso(g.startsAt) || 'unknown' }); } },
+      { key: 'summary', label: 'Summary', sortable: false, render: function (g) { return g.summary || el('span.muted', { text: 'none given' }); } }
+    ];
+
     return el('div.stack', [
-      el('div.callout.info', [
-        el('strong', { text: 'An alarm here is a Prometheus rule in Git.' }),
-        el('p', { text: 'The console reads the rules Prometheus has loaded and the silences Alertmanager holds. It has no write path, so there is nothing to create, edit or delete on this screen; a rule changes through a pull request.' })
-      ]),
-      A.livePanel('Alerting and recording rules', '/api/metrics/rules', function (body, data, env) {
+      el('p.hint', { text: 'An alarm here is a Prometheus rule in Git. The console reads what Prometheus and Alertmanager hold and has no write path: a rule changes through a pull request.' }),
+      A.livePanel('Open alerts', '/api/alerts/active', function (body, data, env) {
+        var open = A.openAlerts(env) || { total: 0, groups: [], pagingCount: 0 };
+        body.appendChild(el('div.tiles', [
+          ui.statTile('Open alerts', fmt.num(open.total), { note: 'now: firing, not silenced or inhibited' }),
+          ui.statTile('Paging', fmt.num(open.pagingCount), { note: 'severity page or critical' }),
+          ui.statTile('Alert names', fmt.num(open.groups.length), { note: 'open alerts grouped by name' })
+        ]));
+        body.appendChild(ui.table(alertCols, open.groups, {
+          caption: 'Open alerts grouped by name, worst severity first',
+          empty: 'Alertmanager answered and holds no open alert.',
+          rowKey: function (g) { return g.name; }
+        }));
+      }, { skeletonRows: 3 }),
+      A.livePanel('Alerting and recording rules', '/api/metrics/rules', function (body, data) {
         var rows = [];
         (data.groups || []).forEach(function (g) {
           (g.rules || []).forEach(function (r) {
@@ -1063,72 +1059,56 @@
           if (t !== 0) return t;
           return String(a.name || '').localeCompare(String(b.name || ''));
         });
-        var firing = rows.filter(function (r) { return r.state === 'firing'; }).length;
         var alerting = rows.filter(function (r) { return r.type === 'alerting'; }).length;
-        body.appendChild(el('div.tiles', [
-          ui.statTile('Rule groups', fmt.num((data.groups || []).length), { note: 'loaded by Prometheus' }),
-          ui.statTile('Alerting rules', fmt.num(alerting), { note: 'of ' + fmt.num(rows.length) + ' rules in total' }),
-          ui.statTile('Firing', fmt.num(firing), { note: firing ? 'alerting rules in the firing state' : 'no alerting rule is firing' })
-        ]));
+        body.appendChild(el('p.hint', {
+          text: fmt.num((data.groups || []).length) + ' rule groups loaded by Prometheus, ' + fmt.num(alerting) + ' alerting rules of ' +
+            fmt.num(rows.length) + ' in total. The open alerts above are what these rules raised.'
+        }));
         body.appendChild(ui.table(ruleCols, rows, {
           caption: 'Rules loaded by Prometheus, alerting rules first, with their state and health',
           empty: 'Prometheus answered and has no rule loaded.',
           rowKey: function (r) { return r.group + '/' + r.name; }
         }));
-        body.appendChild(readAt(env));
-      }, { notConfigured: notConfiguredCallout('Prometheus'), skeletonRows: 4 }),
-      A.livePanel('Silences', '/api/alerts/silences', function (body, data, env) {
+      }, { skeletonRows: 4 }),
+      A.livePanel('Silences', '/api/alerts/silences', function (body, data) {
         body.appendChild(ui.table(silenceCols, data.silences || [], {
           caption: 'Active silences held by Alertmanager',
           empty: 'Alertmanager answered and holds no active silence.',
           rowKey: function (s) { return s.id; }
         }));
-        body.appendChild(readAt(env));
-      }, { notConfigured: notConfiguredCallout('Alertmanager'), skeletonRows: 2 })
+      }, { skeletonRows: 2 })
     ]);
   }
 
   function liveMaintenanceTab() {
     return el('div.stack', [
-      A.notInStack('Change freezes', 'are a console-only policy with no source in this stack: nothing records one, so none can be declared, lifted or shown here.'),
-      A.notInStack('Maintenance windows', 'have no calendar in this stack. There is no patch schedule the console can read, so none is drawn rather than a picture nobody keeps.')
+      ui.notInStackStrip([
+        { what: 'Change freezes', detail: 'are a console-only policy with no source in this stack: nothing records one, so none can be declared, lifted or shown here.' },
+        { what: 'Maintenance windows', detail: 'have no calendar in this stack. There is no patch schedule the console can read, so none is drawn.' }
+      ])
     ]);
   }
 
   function liveBackupsTab() {
-    var cols = [
-      { key: 'name', label: 'Bucket', render: function (b) { var a = A.link(b.name, 'data', ['bucket', b.name]); a.classList.add('mono'); return a; } },
-      { key: 'owner', label: 'Owner', render: function (b) { return b.owner || el('span.muted', { text: 'undeclared' }); } },
-      {
-        key: 'lock', label: 'Object lock',
-        render: function (b) {
-          if (b.lock) return b.lock + (b.lockDays ? ' ' + fmt.num(b.lockDays) + ' d' : '');
-          return b.lockDeclared ? 'declared ' + b.lockDeclared : el('span.muted', { text: 'none' });
-        }
-      },
-      {
-        key: 'versioning', label: 'Versioning',
-        render: function (b) { return b.versioning === null || b.versioning === undefined ? el('span.muted', { text: 'unknown' }) : (b.versioning ? 'on' : 'off'); }
-      },
-      {
-        key: 'diskBytes', label: 'On disk', align: 'right',
-        render: function (b) { return b.diskBytes === null || b.diskBytes === undefined ? el('span.muted', { text: 'unknown' }) : fmt.bytesTB(b.diskBytes / 1099511627776); }
-      },
-      { key: 'replication', label: 'Replication', render: function (b) { return b.replication || 'not configured'; } }
-    ];
     return el('div.stack', [
       A.notInStack('Backups and restore drills', 'have no source here: no Kopia, no wal-g and no drill record run in this stack, so no backup age, drill outcome or RPO is shown.'),
-      A.livePanel('Buckets named for backups', '/api/storage/buckets', function (body, data, env) {
-        var rows = (data.buckets || []).filter(function (b) { return /backup/i.test(b.name || ''); });
-        body.appendChild(el('p.hint', { text: 'The only backup-shaped thing the console can read is the object store. These are the buckets whose name contains "backup"; whether anything writes to them is not known from here.' }));
-        if (data.declaredError) body.appendChild(el('p.muted', { text: 'Declared buckets could not be read: ' + data.declaredError }));
-        body.appendChild(ui.table(cols, rows, {
-          caption: 'Buckets in the object store whose name contains backup',
-          empty: 'The object store answered and no bucket is named for backups.',
-          rowKey: function (b) { return b.name; }
-        }));
-        body.appendChild(readAt(env));
-      }, { notConfigured: notConfiguredCallout('The object store'), skeletonRows: 2 })
+      A.livePanel('Buckets named for backups', '/api/storage/buckets', function (body, data) {
+        var rows = (data.buckets || []).filter(function (b) { return /backup/i.test(b.name || ''); })
+          .sort(function (x, y) { return String(x.name).localeCompare(String(y.name)); });
+        var line = el('p', { 'data-bucket-summary': String(rows.length) });
+        if (!rows.length) {
+          line.appendChild(document.createTextNode('The object store lists no bucket named for backups. '));
+        } else {
+          line.appendChild(document.createTextNode(fmt.num(rows.length) + ' bucket' + (rows.length === 1 ? ' is' : 's are') + ' named for backups: '));
+          rows.forEach(function (b, i) {
+            if (i) line.appendChild(document.createTextNode(', '));
+            line.appendChild(A.link(b.name, 'storage', null, { bucket: b.name }, 'rlink'));
+          });
+          line.appendChild(document.createTextNode('. Whether anything writes to them is not known from here. '));
+        }
+        line.appendChild(A.link('Sizes, locks and contents are on the Storage screen', 'storage', null, null, 'rlink'));
+        body.appendChild(line);
+      }, { skeletonRows: 1 })
     ]);
   }
 
@@ -1138,13 +1118,16 @@
     ]);
   }
 
+  function opsCrumbs(rest) {
+    if (rest[0] === 'runbook' && rest[1]) return ['Runbooks', rest[1]];
+    return rest.map(function (s) { return s.charAt(0).toUpperCase() + s.slice(1); });
+  }
+
   A.screen('ops', {
     title: 'Operations',
     crumb: 'Operations',
-    crumbs: function (rest) {
-      if (rest[0] === 'runbook' && rest[1]) return ['Runbooks', rest[1]];
-      return rest.map(function (s) { return s.charAt(0).toUpperCase() + s.slice(1); });
-    },
+    crumbs: opsCrumbs,
+    liveCrumbs: opsCrumbs,
     render: function (mount, ctx) {
       if (ctx.rest[0] === 'runbook' && ctx.rest[1]) {
         if (A.storeMode() === A.MODE.SAMPLE) { runbookDetail(mount, ctx.rest[1]); return; }

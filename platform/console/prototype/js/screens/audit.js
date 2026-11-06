@@ -80,8 +80,6 @@
     return step();
   }
 
-  A.verifyAuditChain = function () { return verifyChain(A.data.audit); };
-
   function chainCard(d) {
     var status = el('p', { role: 'status', text: 'Not verified in this session yet.' });
     var sealedCount = d.audit.filter(function (r) { return r.hash; }).length;
@@ -401,10 +399,6 @@
     });
   }
 
-  function readNote(env) {
-    return el('p.hint', { text: 'Read from the console API at ' + fmt.stamp(new Date(env.at)) + '.' });
-  }
-
   function liveHeader(body, data, env) {
     var rows = liveRowsOf(env).rows;
     body.appendChild(el('div.tiles', [
@@ -424,7 +418,6 @@
       A.link('the Logs screen', 'logs'),
       '.'
     ]));
-    body.appendChild(readNote(env));
   }
 
   function liveChain(body, data, env) {
@@ -463,8 +456,11 @@
       el('strong', { text: 'What this proves.' }),
       el('p', { text: 'It shows the rows were not altered between the API and this browser, and that none has been changed or removed since they arrived. It does not show the API\'s memory was untouched: the seals are made here, after the API answered.' })
     ]));
-    body.appendChild(el('div.row', [verify, alter, restore, status]));
-    body.appendChild(readNote(env));
+    body.appendChild(el('div.row', [verify, status]));
+    body.appendChild(ui.disclosure('Demonstration of tamper evidence', [
+      el('p.hint', { text: 'Alter one row in this page only, then verify: the chain breaks at that row. Restore it and verify again.' }),
+      el('div.row', [alter, restore])
+    ]));
   }
 
   function liveTablePanel(body, data, env, ctx) {
@@ -517,7 +513,6 @@
     }, { initial: ui.decodeTokens((ctx && ctx.params && ctx.params.f) || (A.state.params && A.state.params.f)) });
     body.appendChild(el('div.row', [filter, el('span.spacer'), ui.columnsButton(function () { return liveTable; }, 'audit events')]));
     body.appendChild(host);
-    body.appendChild(readNote(env));
     paint(filter.tokens());
   }
 
@@ -561,7 +556,7 @@
           }
         })
       ]));
-    var opts = { ttlMs: 5000, skeletonRows: 4, errorTitle: 'The audit trail could not be read' };
+    var opts = { ttlMs: 5000, skeletonRows: 4 };
     mount.appendChild(A.livePanel('Audit trail held by the API', LIVE_PATH, liveHeader, opts));
     mount.appendChild(A.livePanel('Tamper evidence', LIVE_PATH, liveChain, opts));
     mount.appendChild(A.livePanel('Events, newest first', LIVE_PATH, function (b, d, e) { liveTablePanel(b, d, e, ctx); }, opts));

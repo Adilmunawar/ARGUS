@@ -38,7 +38,16 @@ const BUDGET = {
 
 const results = [];
 const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail: String(detail == null ? '' : detail) });
-const skip = (suite, id, detail) => results.push({ suite, id, pass: true, skipped: true, detail: String(detail == null ? '' : detail) });
+const skips = [];
+const skip = (suite, id, detail) => skips.push({ suite, id, detail: String(detail == null ? '' : detail) });
+
+const EXPECTED_SKIPS = [
+  { suite: 'SUSTAIN', id: /^data\/buckets exposes a sortable column$/, why: 'the Data screen reads only the console API, so on sample data it draws no bucket table to sort' }
+];
+
+function expectedSkip(s) {
+  return EXPECTED_SKIPS.some(e => e.suite === s.suite && e.id.test(s.id));
+}
 
 const round = (n, dp) => Math.round(n * Math.pow(10, dp || 1)) / Math.pow(10, dp || 1);
 const median = xs => { const s = xs.slice().sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
@@ -281,7 +290,7 @@ async function suiteLeak(browser) {
 
 async function suiteInteraction(browser) {
   const scale = SCALES[SCALES.length - 1];
-  const { ctx, page, cdp, errors } = await newPage(browser);
+  const { ctx, page, errors } = await newPage(browser);
   await page.evaluate(INFLATE, scale);
 
   const timed = async (id, route, fn) => {
@@ -305,7 +314,7 @@ async function suiteInteraction(browser) {
     const input = document.querySelector('.pf-input');
     if (!input) return null;
     const t0 = performance.now();
-    input.value = 'adil';
+    input.value = 'alex';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     return performance.now() - t0;
@@ -758,19 +767,27 @@ async function suiteParallel(browser) {
 
 function report(scaleTable, leakSeries, sustain, soak, flash, search, player, scroll) {
   ['INTER', 'SUSTAIN', 'PLAYER'].forEach(suite => {
-    const mine = results.filter(r => r.suite === suite);
-    if (mine.length && mine.every(r => r.skipped)) {
+    const ran = results.filter(r => r.suite === suite).length;
+    const skippedHere = skips.filter(r => r.suite === suite).length;
+    if (skippedHere && !ran) {
       rec(suite, `${suite} found a control to measure`, false,
         'every check in this suite skipped, so the suite proves nothing');
     }
   });
 
+  skips.filter(sk => !expectedSkip(sk)).forEach(sk => {
+    rec(sk.suite, 'unexpected skip: ' + sk.id, false, sk.detail + '. A skip must be listed in EXPECTED_SKIPS with its reason, or the check must run.');
+  });
+
   const suites = {};
   results.forEach(r => {
     suites[r.suite] = suites[r.suite] || { pass: 0, fail: 0, skip: 0 };
-    if (r.skipped) suites[r.suite].skip++;
-    else if (r.pass) suites[r.suite].pass++;
+    if (r.pass) suites[r.suite].pass++;
     else suites[r.suite].fail++;
+  });
+  skips.forEach(sk => {
+    suites[sk.suite] = suites[sk.suite] || { pass: 0, fail: 0, skip: 0 };
+    suites[sk.suite].skip++;
   });
 
   console.log('');
@@ -808,6 +825,12 @@ function report(scaleTable, leakSeries, sustain, soak, flash, search, player, sc
       (v.skip ? String(v.skip).padStart(5) + ' skipped' : ''));
   });
 
+  if (skips.length) {
+    console.log('');
+    console.log('  Skipped (' + skips.length + '):');
+    skips.forEach(sk => console.log('  SKIP  [' + sk.suite + '] ' + sk.id + ': ' + sk.detail + (expectedSkip(sk) ? ' (expected)' : ' (UNEXPECTED)')));
+  }
+
   const failures = results.filter(r => !r.pass);
   if (failures.length) {
     console.log('');
@@ -820,7 +843,7 @@ function report(scaleTable, leakSeries, sustain, soak, flash, search, player, sc
 
   fs.writeFileSync(JSON_OUT, JSON.stringify({
     url: URL, cycles: CYCLES, scales: SCALES, workers: WORKERS,
-    budget: BUDGET, scaleTable, leakSeries, sustain, soak, flash, search, player, scroll, results
+    budget: BUDGET, scaleTable, leakSeries, sustain, soak, flash, search, player, scroll, results, skips
   }, null, 2));
 
   return failures.length;
@@ -853,5 +876,5 @@ function report(scaleTable, leakSeries, sustain, soak, flash, search, player, sc
     await browser.close();
   }
 
-  process.exit(report(scaleTable, leakSeries, sustain, soak, flash, search, player, scroll));
+  process.exit(report(scaleTable, leakSeries, sustain, soak, flash, search, player, scroll) ? 1 : 0);
 })();

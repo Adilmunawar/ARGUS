@@ -38,8 +38,8 @@
     ],
 
     me: {
-      name: 'Adil Munawar',
-      upn: 'adil@argus.local',
+      name: 'Alex Rivera',
+      upn: 'alex@argus.local',
       role: 'Operator',
       roles: ['Viewer', 'Operator', 'Approver', 'Security', 'Admin'],
       tier: 1,
@@ -70,7 +70,7 @@
       { name: 'dc-02', host: 'hv-02', site: 'a', os: 'Windows Server 2025 Core', role: 'AD DS, DNS', vcpu: 4, ram: 8, ip: '10.11.0.11', state: 'running', replica: 'off', checkpointAgeMin: 0, connect: ['powershell'], zone: 'TIER0 11' },
       { name: 'adfs-01', host: 'hv-03', site: 'a', os: 'Windows Server 2025', role: 'AD FS, OIDC and SAML', vcpu: 4, ram: 8, ip: '10.11.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 9, connect: ['rdp', 'powershell'], zone: 'TIER0 11' },
       { name: 'ca-issuing-01', host: 'hv-02', site: 'a', os: 'Windows Server 2025', role: 'AD CS issuing CA', vcpu: 4, ram: 8, ip: '10.11.0.30', state: 'running', replica: 'healthy', checkpointAgeMin: 11, connect: ['rdp'], zone: 'TIER0 11' },
-      { name: 'legacy-landsurvey-01', host: 'hv-03', site: 'a', os: 'Windows Server 2019', role: 'Legacy LandSurvey API (IIS)', vcpu: 4, ram: 16, ip: '10.30.1.40', state: 'running', replica: 'healthy', checkpointAgeMin: 6, connect: ['rdp', 'powershell'], zone: 'PLATFORM 30' },
+      { name: 'legacy-app-01', host: 'hv-03', site: 'a', os: 'Windows Server 2019', role: 'Legacy app (IIS)', vcpu: 4, ram: 16, ip: '10.30.1.40', state: 'running', replica: 'healthy', checkpointAgeMin: 6, connect: ['rdp', 'powershell'], zone: 'PLATFORM 30' },
       { name: 'siem-01', host: 'hv-03', site: 'a', os: 'Ubuntu 24.04 LTS', role: 'Wazuh manager, indexer, dashboard', vcpu: 8, ram: 32, ip: '10.12.0.10', state: 'running', replica: 'healthy', checkpointAgeMin: 5, connect: ['ssh'], zone: 'SEC 12' },
       { name: 'guac-01', host: 'hv-02', site: 'a', os: 'Ubuntu 24.04 LTS', role: 'Guacamole RDP/SSH gateway', vcpu: 4, ram: 8, ip: '10.30.1.50', state: 'running', replica: 'healthy', checkpointAgeMin: 8, connect: ['ssh'], zone: 'PLATFORM 30' },
       { name: 'wef-01', host: 'hv-01', site: 'a', os: 'Windows Server 2025', role: 'Event forwarding collector', vcpu: 4, ram: 16, ip: '10.12.0.20', state: 'running', replica: 'healthy', checkpointAgeMin: 12, connect: ['rdp', 'powershell'], zone: 'SEC 12' },
@@ -113,8 +113,8 @@
         trend: { rps: series(24, 9, 6, 17), p95: series(24, 143, 40, 19), err: series(24, 0.05, 0.1, 23) }
       },
       {
-        name: 'maps', display: 'Maps', owner: 'adil', tier: 2, env: 'production',
-        tags: { 'cost-centre': 'ml', 'data-class': 'internal', team: 'research', 'on-call': 'adil' },
+        name: 'maps', display: 'Maps', owner: 'alex', tier: 2, env: 'production',
+        tags: { 'cost-centre': 'ml', 'data-class': 'internal', team: 'research', 'on-call': 'alex' },
         version: '2026.08.22.4', staging: '2026.09.05.1', health: 'warn', instances: 2,
         p95: 688, rps: 4, errorRate: 0.0139, slo: 99.71, uptimeDays: 17,
         deployedAt: daysAgo(17), identity: 'gmsa-maps$', host: 'maps.example.com',
@@ -123,8 +123,8 @@
         trend: { rps: series(24, 4, 3, 29), p95: series(24, 688, 260, 31), err: series(24, 1.4, 1.2, 37) }
       },
       {
-        name: 'console', display: 'Argus Console', owner: 'adil', tier: 0, env: 'production',
-        tags: { 'cost-centre': 'platform', 'data-class': 'restricted', team: 'platform', 'on-call': 'adil' },
+        name: 'console', display: 'Argus Console', owner: 'alex', tier: 0, env: 'production',
+        tags: { 'cost-centre': 'platform', 'data-class': 'restricted', team: 'platform', 'on-call': 'alex' },
         version: '0.5.0', staging: '0.5.1', health: 'ok', instances: 3,
         p95: 74, rps: 3, errorRate: 0, slo: 100, uptimeDays: 21,
         deployedAt: daysAgo(2), identity: 'gmsa-console$', host: 'console.example.com',
@@ -169,10 +169,10 @@
 
     deployments: [
       { id: 1847, app: 'orders', version: '2026.09.08.2', env: 'production', author: 'riley', state: 'awaiting', opened: minutesAgo(24), approvals: [], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: '4f2a91c', plan: [{ kind: 'ServiceFabricApp', name: 'orders', from: '2026.09.08.1', to: '2026.09.08.2', action: 'upgrade' }, { kind: 'PrometheusRule', name: 'OrdersSlowP95', from: '> 1s', to: '> 800ms', action: 'update' }], blast: { services: ['OrdersApi (3)', 'OrdersWeb (2)', 'OrdersGateway (2)'], dependents: ['OrdersWeb', 'OrdersGateway', 'functions-orders-ingest', 'functions-orders-precompute'], sessions: 4 } },
-      { id: 1846, app: 'maps', version: '2026.09.05.1', env: 'staging', author: 'adil', state: 'inflight', opened: minutesAgo(6), approvals: ['adil'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'warn' }, sha: 'b71e0d4', progress: { ud: 2, total: 5, healthy: true }, plan: [{ kind: 'ServiceFabricApp', name: 'maps', from: '2026.08.22.4', to: '2026.09.05.1', action: 'upgrade' }], blast: { services: ['AgisWeb (2)'], dependents: [], sessions: 0 } },
-      { id: 1845, app: 'console', version: '0.5.0', env: 'production', author: 'adil', state: 'done', opened: daysAgo(2), approvals: ['riley'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: 'aaa5607', durationS: 214, outcome: 'healthy', plan: [], blast: { services: [], dependents: [], sessions: 0 } },
-      { id: 1844, app: 'orders', version: '2026.09.08.1', env: 'production', author: 'riley', state: 'done', opened: hoursAgo(3), approvals: ['adil'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: '9c3d10a', durationS: 187, outcome: 'healthy', plan: [], blast: { services: [], dependents: [], sessions: 0 } },
-      { id: 1843, app: 'orders', version: '2026.09.07.4', env: 'production', author: 'riley', state: 'rolledback', opened: daysAgo(1), approvals: ['adil'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: '2e88f31', durationS: 96, outcome: 'health policy failed at UD 1, rolled back automatically', plan: [], blast: { services: [], dependents: [], sessions: 0 } }
+      { id: 1846, app: 'maps', version: '2026.09.05.1', env: 'staging', author: 'alex', state: 'inflight', opened: minutesAgo(6), approvals: ['alex'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'warn' }, sha: 'b71e0d4', progress: { ud: 2, total: 5, healthy: true }, plan: [{ kind: 'ServiceFabricApp', name: 'maps', from: '2026.08.22.4', to: '2026.09.05.1', action: 'upgrade' }], blast: { services: ['AgisWeb (2)'], dependents: [], sessions: 0 } },
+      { id: 1845, app: 'console', version: '0.5.0', env: 'production', author: 'alex', state: 'done', opened: daysAgo(2), approvals: ['riley'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: 'aaa5607', durationS: 214, outcome: 'healthy', plan: [], blast: { services: [], dependents: [], sessions: 0 } },
+      { id: 1844, app: 'orders', version: '2026.09.08.1', env: 'production', author: 'riley', state: 'done', opened: hoursAgo(3), approvals: ['alex'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: '9c3d10a', durationS: 187, outcome: 'healthy', plan: [], blast: { services: [], dependents: [], sessions: 0 } },
+      { id: 1843, app: 'orders', version: '2026.09.07.4', env: 'production', author: 'riley', state: 'rolledback', opened: daysAgo(1), approvals: ['alex'], checks: { build: 'pass', tests: 'pass', trivy: 'pass', sbom: 'pass', signature: 'verified', vulnerable: 'pass' }, sha: '2e88f31', durationS: 96, outcome: 'health policy failed at UD 1, rolled back automatically', plan: [], blast: { services: [], dependents: [], sessions: 0 } }
     ],
 
     buckets: [
@@ -217,15 +217,15 @@
     ],
 
     people: [
-      { name: 'Adil Munawar', upn: 'adil', tier: 1, mfa: 'FIDO2', lastSignIn: minutesAgo(14), groups: ['Argus-Console-Operators', 'Argus-Console-Approvers'], elevated: false },
+      { name: 'Alex Rivera', upn: 'alex', tier: 1, mfa: 'FIDO2', lastSignIn: minutesAgo(14), groups: ['Argus-Console-Operators', 'Argus-Console-Approvers'], elevated: false },
       { name: 'Riley', upn: 'riley', tier: 1, mfa: 'FIDO2', lastSignIn: hoursAgo(2), groups: ['Argus-Console-Operators'], elevated: false },
       { name: 'Sam', upn: 'sam', tier: 2, mfa: 'TOTP', lastSignIn: daysAgo(1), groups: ['Argus-Console-Viewers'], elevated: false },
       { name: 'Platform contractor', upn: 'contractor', tier: 1, mfa: 'FIDO2', lastSignIn: hoursAgo(5), groups: ['Argus-Console-Operators'], elevated: true, elevationExpires: minutesAgo(-88) }
     ],
 
     grants: [
-      { id: 'g-441', principal: 'contractor', group: 'Argus-Tier1-Operators', reason: 'September restore drill', granted: minutesAgo(32), expires: minutesAgo(-88), approver: 'adil', state: 'active' },
-      { id: 'g-440', principal: 'riley', group: 'Argus-Tier0-Admins', reason: 'CA CRL renewal', granted: daysAgo(2), expires: daysAgo(2), approver: 'adil', state: 'expired' },
+      { id: 'g-441', principal: 'contractor', group: 'Argus-Tier1-Operators', reason: 'September restore drill', granted: minutesAgo(32), expires: minutesAgo(-88), approver: 'alex', state: 'active' },
+      { id: 'g-440', principal: 'riley', group: 'Argus-Tier0-Admins', reason: 'CA CRL renewal', granted: daysAgo(2), expires: daysAgo(2), approver: 'alex', state: 'expired' },
       { id: 'g-442', principal: 'sam', group: 'Argus-Console-Operators', reason: 'Cover on-call Friday', granted: null, expires: null, approver: null, state: 'requested' }
     ],
 
@@ -252,11 +252,11 @@
     incidents: [
       {
         id: 'inc-31', title: 'CIS baseline drift on hv-03', severity: 'medium', state: 'mitigated',
-        commander: 'adil', host: 'hv-03', alerts: ['al-9017'], opened: hoursAgo(7), updated: hoursAgo(2),
+        commander: 'alex', host: 'hv-03', alerts: ['al-9017'], opened: hoursAgo(7), updated: hoursAgo(2),
         timeline: [
-          { at: hoursAgo(7), who: 'adil', text: 'Opened from alert al-9017. Audit family at 71% after the September patch set.' },
+          { at: hoursAgo(7), who: 'alex', text: 'Opened from alert al-9017. Audit family at 71% after the September patch set.' },
           { at: hoursAgo(5), who: 'riley', text: 'Audit policy GPO was reverted by the patch. Re-linked and forced a gpupdate.' },
-          { at: hoursAgo(2), who: 'adil', text: 'SCA re-run shows 96%. Holding at mitigated until the 02:00 scheduled evaluation agrees.' }
+          { at: hoursAgo(2), who: 'alex', text: 'SCA re-run shows 96%. Holding at mitigated until the 02:00 scheduled evaluation agrees.' }
         ]
       },
       {
@@ -271,16 +271,16 @@
     ],
 
     sessions: [
-      { id: 's-2291', user: 'contractor', target: 'sql-01', protocol: 'RDP', started: minutesAgo(28), duration: 1680, reason: 'September restore drill', approver: 'adil', recorded: true, sizeMB: 412, state: 'active' },
-      { id: 's-2290', user: 'adil', target: 'gpu-01', protocol: 'SSH', started: hoursAgo(3), duration: 540, reason: 'Ray worker would not start', approver: 'self', recorded: true, sizeMB: 3, state: 'closed' },
-      { id: 's-2289', user: 'riley', target: 'legacy-landsurvey-01', protocol: 'RDP', started: daysAgo(1), duration: 2100, reason: 'IIS application pool recycle', approver: 'adil', recorded: true, sizeMB: 588, state: 'closed' },
-      { id: 's-2288', user: 'adil', target: 'siem-01', protocol: 'SSH', started: daysAgo(2), duration: 900, reason: 'Wazuh rule tuning', approver: 'self', recorded: true, sizeMB: 5, state: 'closed' }
+      { id: 's-2291', user: 'contractor', target: 'sql-01', protocol: 'RDP', started: minutesAgo(28), duration: 1680, reason: 'September restore drill', approver: 'alex', recorded: true, sizeMB: 412, state: 'active' },
+      { id: 's-2290', user: 'alex', target: 'gpu-01', protocol: 'SSH', started: hoursAgo(3), duration: 540, reason: 'Ray worker would not start', approver: 'self', recorded: true, sizeMB: 3, state: 'closed' },
+      { id: 's-2289', user: 'riley', target: 'legacy-app-01', protocol: 'RDP', started: daysAgo(1), duration: 2100, reason: 'IIS application pool recycle', approver: 'alex', recorded: true, sizeMB: 588, state: 'closed' },
+      { id: 's-2288', user: 'alex', target: 'siem-01', protocol: 'SSH', started: daysAgo(2), duration: 900, reason: 'Wazuh rule tuning', approver: 'self', recorded: true, sizeMB: 5, state: 'closed' }
     ],
 
     vulns: [
       { id: 'CVE-2026-21882', severity: 'high', component: 'System.Text.Json 9.0.1', app: 'orders', fixedIn: '9.0.4', waiver: null, found: daysAgo(3) },
       { id: 'CVE-2026-19044', severity: 'medium', component: 'node 22.11.0', app: 'maps', fixedIn: '22.14.0', waiver: null, found: daysAgo(9) },
-      { id: 'CVE-2026-18220', severity: 'medium', component: 'Caddy 2.10.0', app: 'caddy', fixedIn: '2.10.2', waiver: { owner: 'adil', until: daysAgo(-21), reason: 'Not reachable, no HTTP/3 in this deployment' }, found: daysAgo(14) },
+      { id: 'CVE-2026-18220', severity: 'medium', component: 'Caddy 2.10.0', app: 'caddy', fixedIn: '2.10.2', waiver: { owner: 'alex', until: daysAgo(-21), reason: 'Not reachable, no HTTP/3 in this deployment' }, found: daysAgo(14) },
       { id: 'CVE-2026-14001', severity: 'low', component: 'Newtonsoft.Json 13.0.3', app: 'billing', fixedIn: '13.0.4', waiver: null, found: daysAgo(21) }
     ],
 
@@ -305,9 +305,9 @@
     ],
 
     drills: [
-      { id: '2026-08-14-sql-01-restore-drill', kind: 'Restore', target: 'orders_db', ran: daysAgo(25), durationMin: 47, rtoTargetMin: 480, outcome: 'pass', by: 'adil' },
+      { id: '2026-08-14-sql-01-restore-drill', kind: 'Restore', target: 'orders_db', ran: daysAgo(25), durationMin: 47, rtoTargetMin: 480, outcome: 'pass', by: 'alex' },
       { id: '2026-07-11-sql-01-restore-drill', kind: 'Restore', target: 'orders_db', ran: daysAgo(59), durationMin: 52, rtoTargetMin: 480, outcome: 'pass', by: 'riley' },
-      { id: '2026-06-20-dr-01-site-a-loss', kind: 'DR', target: 'Site A', ran: daysAgo(80), durationMin: 402, rtoTargetMin: 480, outcome: 'pass', by: 'adil' }
+      { id: '2026-06-20-dr-01-site-a-loss', kind: 'DR', target: 'Site A', ran: daysAgo(80), durationMin: 402, rtoTargetMin: 480, outcome: 'pass', by: 'alex' }
     ],
 
     pipelines: [
@@ -332,7 +332,7 @@
       { name: 'segformer/infer', backend: 'Ray Serve', p95: 1240, rps: 0.2, canary: 10, state: 'ok' }
     ],
 
-    gpu: { name: 'gpu-01', cards: [{ id: 0, model: 'L40S 48 GB', util: 91, memUsedGB: 41, memTotalGB: 48, tempC: 71, user: 'dagster: v5_model' }, { id: 1, model: 'L40S 48 GB', util: 12, memUsedGB: 6, memTotalGB: 48, tempC: 44, user: 'jupyterhub: sam' }], queue: [{ job: 'segformer-b5-05', user: 'adil', waitingMin: 12 }] },
+    gpu: { name: 'gpu-01', cards: [{ id: 0, model: 'L40S 48 GB', util: 91, memUsedGB: 41, memTotalGB: 48, tempC: 71, user: 'dagster: v5_model' }, { id: 1, model: 'L40S 48 GB', util: 12, memUsedGB: 6, memTotalGB: 48, tempC: 44, user: 'jupyterhub: sam' }], queue: [{ job: 'segformer-b5-05', user: 'alex', waitingMin: 12 }] },
 
     runbooks: [
       { id: 'hv-01-drain-node', title: 'Live-migrate VMs off a host for maintenance', tier: 1, approval: 'operator', params: [{ name: 'Host', type: 'select', options: ['hv-01', 'hv-02', 'hv-03'] }], lastRun: daysAgo(11) },
@@ -361,24 +361,24 @@
     },
 
     audit: [
-      { at: minutesAgo(6), actor: 'adil', role: 'Operator', action: 'deployment.approve', target: 'maps 2026.09.05.1 (staging)', pr: 1846, ip: '10.99.0.14' },
+      { at: minutesAgo(6), actor: 'alex', role: 'Operator', action: 'deployment.approve', target: 'maps 2026.09.05.1 (staging)', pr: 1846, ip: '10.99.0.14' },
       { at: minutesAgo(24), actor: 'riley', role: 'Operator', action: 'deployment.open', target: 'orders 2026.09.08.2 (production)', pr: 1847, ip: '10.99.0.21' },
       { at: minutesAgo(28), actor: 'contractor', role: 'Operator', action: 'session.start', target: 'sql-01 (RDP, recorded)', pr: null, ip: '10.99.0.31' },
-      { at: minutesAgo(32), actor: 'adil', role: 'Approver', action: 'grant.approve', target: 'contractor to Argus-Tier1-Operators for 2 h', pr: null, ip: '10.99.0.14' },
+      { at: minutesAgo(32), actor: 'alex', role: 'Approver', action: 'grant.approve', target: 'contractor to Argus-Tier1-Operators for 2 h', pr: null, ip: '10.99.0.14' },
       { at: hoursAgo(3), actor: 'reconciler', role: 'System', action: 'reconcile.apply', target: 'orders 2026.09.08.1 to production', pr: 1844, ip: '10.30.0.31' },
-      { at: hoursAgo(3), actor: 'adil', role: 'Operator', action: 'secret.rotate', target: 'kv/orders/jwt-signing-key', pr: null, ip: '10.99.0.14' },
+      { at: hoursAgo(3), actor: 'alex', role: 'Operator', action: 'secret.rotate', target: 'kv/orders/jwt-signing-key', pr: null, ip: '10.99.0.14' },
       { at: hoursAgo(8), actor: 'system', role: 'System', action: 'alert.raise', target: 'CIS score fell below 95% on hv-03', pr: null, ip: '10.12.0.10' },
       { at: daysAgo(1), actor: 'reconciler', role: 'System', action: 'reconcile.rollback', target: 'orders 2026.09.07.4, health policy failed', pr: 1843, ip: '10.30.0.31' },
-      { at: daysAgo(1), actor: 'riley', role: 'Operator', action: 'session.start', target: 'legacy-landsurvey-01 (RDP, recorded)', pr: null, ip: '10.99.0.21' },
-      { at: daysAgo(2), actor: 'adil', role: 'Admin', action: 'reconciler.pause', target: 'paused 11 min for manual repair', pr: null, ip: '10.99.0.14' }
+      { at: daysAgo(1), actor: 'riley', role: 'Operator', action: 'session.start', target: 'legacy-app-01 (RDP, recorded)', pr: null, ip: '10.99.0.21' },
+      { at: daysAgo(2), actor: 'alex', role: 'Admin', action: 'reconciler.pause', target: 'paused 11 min for manual repair', pr: null, ip: '10.99.0.14' }
     ],
 
     reconciler: { state: 'running', lastSync: minutesAgo(1), head: 'aaa5607', drift: 0, pendingPlans: 1, applyLagS: 42 },
 
     alarms: [
-      { id: 'alm-1', name: 'Maps p95 above 500 ms', app: 'maps', metric: 'p95', op: '>', threshold: 500, forMin: 10, owner: 'adil' },
+      { id: 'alm-1', name: 'Maps p95 above 500 ms', app: 'maps', metric: 'p95', op: '>', threshold: 500, forMin: 10, owner: 'alex' },
       { id: 'alm-2', name: 'Orders error rate above 0.5%', app: 'orders', metric: 'errorRate', op: '>', threshold: 0.5, forMin: 5, owner: 'riley' },
-      { id: 'alm-3', name: 'Caddy traffic collapsed', app: 'caddy', metric: 'rps', op: '<', threshold: 10, forMin: 5, owner: 'adil' }
+      { id: 'alm-3', name: 'Caddy traffic collapsed', app: 'caddy', metric: 'rps', op: '<', threshold: 10, forMin: 5, owner: 'alex' }
     ],
 
     advisorSuppressed: [],

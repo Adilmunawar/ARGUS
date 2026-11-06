@@ -3,11 +3,6 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
 
-  function registerScreen(id, def) {
-    if (typeof A.screen === 'function') { A.screen(id, def); return; }
-    document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
-  }
-
   var CATEGORIES = [
     { id: 'security', label: 'Security', tone: 'bad', what: 'What an attacker or an auditor would find first.' },
     { id: 'resilience', label: 'Fault tolerance', tone: 'warn', what: 'What fails to come back after a host, a disk or a site is lost.' },
@@ -226,25 +221,28 @@
     { key: 'containers', nc: 'docker', label: 'The Docker proxy' }
   ];
 
-  var STATUS_WORD = { ok: 'read', 'not-configured': 'not configured', failed: 'failed', cancelled: 'cancelled' };
+  var STATUS_WORD = {
+    ok: 'read', notConfigured: 'not configured', failed: 'failed', cancelled: 'cancelled', unreachable: 'unreachable',
+    timeout: 'timed out', forbidden: 'refused', notFound: 'no such route', signedOut: 'signed out', sample: 'sample data'
+  };
+  var FAILED_STATES = { failed: true, unreachable: true, timeout: true };
 
   function stampIso(s) { return String(s).slice(0, 19).replace('T', ' ') + 'Z'; }
 
-  function bytes(n) {
-    if (n === null || n === undefined) return '-';
-    var gb = n / 1073741824;
-    if (gb >= 1024) return fmt.num(gb / 1024, 2) + ' TB';
-    if (gb >= 1) return fmt.num(gb, 1) + ' GB';
-    return fmt.num(n / 1048576, 0) + ' MB';
+  function readStatus(env) {
+    if (env && env.error && env.error.reason === 'cancelled') return 'cancelled';
+    var state = A.envelopeState(env);
+    if (state !== 'ok' && state !== 'stale') return state;
+    var d = env.data || {};
+    if (d.configured === false || d.state === 'not-configured') return 'notConfigured';
+    return 'ok';
   }
 
-  function readStatus(env) {
-    if (!env) return 'failed';
-    if (env.error && env.error.reason === 'cancelled') return 'cancelled';
-    if (!env.ok) return env.error && env.error.reason === 'not-configured' ? 'not-configured' : 'failed';
-    var d = env.data || {};
-    if (d.reason === 'not-configured' || d.configured === false || d.state === 'not-configured') return 'not-configured';
-    return 'ok';
+  function tokenParam(tokens) {
+    if (!tokens || !tokens.length) return null;
+    return tokens.map(function (t) {
+      return String(t.key).replace(/[%,:]/g, encodeURIComponent) + ':' + String(t.value).replace(/[%,:]/g, encodeURIComponent);
+    }).join(',');
   }
 
   function liveRules(envs) {
@@ -278,13 +276,13 @@
 
     READS.forEach(function (r) {
       var env = get(r.id);
-      if (r.nc && env && readStatus(env) === 'not-configured') notConfigured(r.nc, r.ncLabel, env);
+      if (r.nc && env && readStatus(env) === 'notConfigured') notConfigured(r.nc, r.ncLabel, env);
     });
 
     var seal = data('seal');
     if (seal && seal.sandbox && seal.sandbox.verdict === true) {
-      add(finding('security', 'critical', 'seal-sandbox', seal.sandbox.title || 'OpenBao is sealed with a single share',
-        (seal.sandbox.basis ? seal.sandbox.basis + '. ' : '') + (seal.sandbox.message || 'One key on this machine opens every secret in the estate.'),
+      add(finding('security', 'critical', 'seal-sandbox', String(seal.sandbox.title || 'OpenBao is sealed with a single share').replace(/[.!?]+$/, ''),
+        'One unseal key on this machine opens every secret in the estate. The full explanation is on Services.',
         'openbao', 'stack'), get('seal'));
     }
 
@@ -386,7 +384,7 @@
     }
 
     var pgEnv = get('pg');
-    if (pgEnv && readStatus(pgEnv) === 'failed') {
+    if (pgEnv && FAILED_STATES[readStatus(pgEnv)]) {
       add(finding('resilience', 'high', 'pg-health', 'The PostgreSQL health check fails',
         (pgEnv.error && pgEnv.error.message) || 'The database did not answer.', 'postgres', 'data', ['databases']), pgEnv);
     }
@@ -445,7 +443,7 @@
     if (host) {
       if (host.memory && host.memory.usageRatio > 0.85) {
         add(finding('operations', 'medium', 'host-memory', 'Host memory is at ' + fmt.pct(host.memory.usageRatio * 100, 0),
-          bytes(host.memory.usedBytes) + ' of ' + bytes(host.memory.totalBytes) + ' in use on ' + host.hostname + '. Above 85 percent the next container restart swaps.',
+          fmt.bytes(host.memory.usedBytes) + ' of ' + fmt.bytes(host.memory.totalBytes) + ' in use on ' + host.hostname + '. Above 85 percent the next container restart swaps.',
           host.hostname, 'system'), get('host'));
       }
       (host.disks || []).forEach(function (d) {
@@ -453,7 +451,7 @@
         var ratio = d.usageRatio !== undefined ? d.usageRatio : (d.totalBytes - d.freeBytes) / d.totalBytes;
         if (ratio > 0.8) {
           add(finding('operations', 'medium', 'disk-' + d.mount, 'Volume ' + d.mount + ' is ' + fmt.pct(ratio * 100, 0) + ' used',
-            bytes(d.freeBytes) + ' free of ' + bytes(d.totalBytes) + '. Raft, WAL and needle volumes stop cleanly at full and not before.',
+            fmt.bytes(d.freeBytes) + ' free of ' + fmt.bytes(d.totalBytes) + '. Raft, WAL and needle volumes stop cleanly at full and not before.',
             d.mount, 'system'), get('host'));
         }
       });
@@ -462,7 +460,7 @@
     return out;
   }
 
-  var live = { findings: null, sources: null, at: 0, promise: null };
+  var live = { findings: null, sources: null, at: 0, promise: null, incompleteRuns: 0 };
   var LIVE_TTL_MS = 30000;
 
   function isLive() { return typeof A.storeMode === 'function' && A.storeMode() === A.MODE.LIVE; }
@@ -480,12 +478,17 @@
       });
     })).then(function (list) {
       var envs = {};
-      var cancelled = false;
+      var incomplete = false;
       list.forEach(function (env, i) {
         envs[READS[i].id] = env;
-        var reason = env.error && env.error.reason;
-        if (reason === 'cancelled' || reason === 'unauthenticated') cancelled = true;
+        if (incompleteRead(env)) incomplete = true;
       });
+      live.promise = null;
+      if (incomplete) {
+        live.at = 0;
+        live.incompleteRuns += 1;
+        return { incomplete: true };
+      }
       live.findings = liveRules(envs);
       live.sources = READS.map(function (r) {
         var env = envs[r.id];
@@ -494,12 +497,35 @@
           message: env.error && env.error.message ? env.error.message : (env.data && env.data.message) || null
         };
       });
-      live.at = cancelled ? 0 : Date.now();
-      live.promise = null;
+      live.at = Date.now();
       paintAdvisorBadge();
       return live;
+    }, function (err) {
+      live.promise = null;
+      live.at = 0;
+      throw err;
     });
     return live.promise;
+  }
+
+  function incompleteRead(env) {
+    if (!env) return true;
+    var reason = env.error && env.error.reason;
+    if (reason === 'cancelled' || reason === 'unauthenticated') return true;
+    return !env.ok && A.envelopeState(env) === 'signedOut';
+  }
+
+  var EVAL_ATTEMPTS = 3;
+
+  function evaluateUntilComplete(stillWanted, attempt) {
+    attempt = attempt || 1;
+    return evaluateLive().then(function (r) {
+      if (!r || !r.incomplete) return r;
+      if (!stillWanted() || signedOut() || attempt >= EVAL_ATTEMPTS) return r;
+      return new Promise(function (resolve) { window.setTimeout(resolve, 250 * attempt); }).then(function () {
+        return evaluateUntilComplete(stillWanted, attempt + 1);
+      });
+    });
   }
 
   function signedOut() {
@@ -597,15 +623,17 @@
 
   function sourcesCard(sources, at) {
     var rows = sources.map(function (s) {
-      var tone = s.status === 'ok' ? 'ok' : s.status === 'not-configured' ? 'idle' : 'warn';
-      return [s.label, el('div.col', [
+      var tone = s.status === 'ok' ? 'ok' : s.status === 'notConfigured' ? 'idle' : 'warn';
+      return [s.label, el('div.col', { 'data-source': s.id, 'data-state': s.status }, [
         el('div.row', [ui.pill(STATUS_WORD[s.status] || s.status, tone), el('span.mono', { text: 'GET ' + s.path }), s.at ? el('span.muted', { text: fmt.stamp(s.at) }) : null]),
         s.status !== 'ok' && s.message ? el('div.muted', { text: s.message }) : null
       ])];
     });
+    var read = sources.filter(function (s) { return s.status === 'ok'; }).length;
     return ui.card('What was read', [
-      el('p.hint', { text: 'Every finding above cites one of these reads. A read that is not configured or failed produced no finding, only this line, so nothing on this screen is a guess. Evaluated ' + fmt.stamp(new Date(at)) + '.' }),
-      ui.dl(rows)
+      el('p', { text: fmt.num(read) + ' of ' + fmt.num(sources.length) + ' reads answered, evaluated ' + fmt.stamp(new Date(at)) + '.' }),
+      ui.dl(rows),
+      ui.disclosure('Details', [el('p.hint', { text: 'Every finding above cites one of these reads. A read that is not configured or failed produced no finding, only its line here, so nothing on this screen is a guess.' })])
     ]);
   }
 
@@ -630,9 +658,17 @@
       (liveMode ? fmt.num(READS.length) + ' reads of the console API at ' + fmt.stamp(new Date(opts.at)) : 'the estate as it is right now') +
       (all.length - active.length ? ', ' + fmt.num(all.length - active.length) + ' accepted' : '') + '.', headActions));
 
-    mount.appendChild(el('div.callout.' + (worst ? SEV_TONE[worst.severity] : 'ok'), [
-      el('strong', { text: worst ? 'Worst finding: ' + worst.title + '.' : 'Nothing to report.' }),
-      el('p', { text: worst ? worst.detail : (liveMode ? 'Every rule passed against what the console API answered.' : 'Every check passed against the estate as it is now.') })
+    mount.appendChild(el('div.callout.' + (worst ? SEV_TONE[worst.severity] : 'ok'), { 'data-worst': worst ? worst.id : '' }, [
+      el('strong', { text: worst ? 'Worst finding: ' + String(worst.title).replace(/[.!?]+$/, '') + '.' : 'Nothing to report.' }),
+      worst && worst.id === 'seal-sandbox'
+        ? el('p', [A.link('Unseal posture on Services', 'stack')])
+        : null,
+      worst && worst.id !== 'seal-sandbox' && worst.route
+        ? el('p', [A.link('Open ' + worst.resource, worst.route, worst.rest, worst.params)])
+        : null,
+      worst
+        ? ui.disclosure('Details', [el('p', { text: worst.detail })])
+        : el('p', { text: liveMode ? 'Every rule passed against what the console API answered.' : 'Every check passed against the estate as it is now.' })
     ]));
 
     mount.appendChild(el('div.tiles', CATEGORIES.map(function (c) {
@@ -640,7 +676,7 @@
       var top = list.slice().sort(function (a, b) { return SEV_RANK[a.severity] - SEV_RANK[b.severity]; })[0];
       return ui.statTile(c.label, fmt.num(list.length), {
         note: top ? 'worst: ' + top.severity : 'clean',
-        href: A.href('advisor', [], { f: ui.encodeTokens([{ key: 'category', value: c.label }]) }),
+        href: A.href('advisor', [], { f: tokenParam([{ key: 'category', value: c.label }]) }),
         title: c.what
       });
     })));
@@ -732,7 +768,7 @@
 
     var filter = ui.propertyFilter(FIELDS, function (tokens) {
       paint(tokens);
-      A.replaceHash(A.href('advisor', [], { f: ui.encodeTokens(tokens) }));
+      A.replaceHash(A.href('advisor', [], { f: tokenParam(tokens) }));
     }, { initial: ui.decodeTokens(ctx && ctx.params && ctx.params.f) });
 
     var acceptedNote = el('p.hint', { role: 'status', hidden: true });
@@ -772,18 +808,18 @@
       ui.columnsButton(function () { return table; }, 'findings'),
       ui.exportButton(function () { return table; }, 'findings')
     ]));
-    mount.appendChild(el('p.hint', {
+    mount.appendChild(ui.disclosure('Details', [el('p.hint', {
       text: liveMode
         ? 'Every row is a rule evaluated against what the console API answered, and each cites the read and the time it was made, so a finding disappears when the next read differs. Accepting a risk stays in this browser: this console has no write path, so nothing is recorded on the server.'
         : 'Every row is a rule evaluated against the dataset this console holds, so a finding disappears the moment the data changes. Accepting a risk records who, why and until when, and the finding comes back when that passes.'
-    }));
+    })]));
     mount.appendChild(acceptedNote);
     mount.appendChild(tableHost);
     paint(filter.tokens());
     if (liveMode && opts.sources) mount.appendChild(sourcesCard(opts.sources, opts.at));
   }
 
-  registerScreen('advisor', {
+  A.screen('advisor', {
     title: 'Advisor',
     crumb: 'Advisor',
     render: function (mount, ctx) {
@@ -805,16 +841,34 @@
           live.findings = null;
           live.at = 0;
           host.appendChild(ui.pageHeader('Advisor', 'The rules run over what the console API answers, and it answers only to a signed-in operator.'));
-          host.appendChild(ui.emptyState('Sign in to read this', 'No rule has been evaluated, so this is not a clean bill of health.'));
+          host.appendChild(ui.stateBlock('signedOut', { detail: 'No rule has been evaluated, so this is not a clean bill of health.' }));
           return;
         }
         host.appendChild(ui.pageHeader('Advisor', 'Reading ' + fmt.num(READS.length) + ' sources from the console API and running every rule over them.'));
         host.appendChild(ui.skeleton(6));
         var fresh = live.at && (Date.now() - live.at) < LIVE_TTL_MS && live.findings;
-        (fresh ? Promise.resolve(live) : evaluateLive()).then(function () {
+        (fresh ? Promise.resolve(live) : evaluateUntilComplete(function () { return alive; })).then(function (r) {
           if (!alive) return;
           ui.clear(host);
+          if (r && r.incomplete) {
+            if (signedOut()) {
+              host.appendChild(ui.pageHeader('Advisor', 'The rules run over what the console API answers, and it answers only to a signed-in operator.'));
+              host.appendChild(ui.stateBlock('signedOut', { detail: 'No rule has been evaluated, so this is not a clean bill of health.' }));
+              return;
+            }
+            host.appendChild(ui.pageHeader('Advisor', 'The rules were not run to completion.'));
+            host.appendChild(el('div', { 'data-advisor-incomplete': 'true' }, [ui.stateBlock('failed', {
+              reason: 'incomplete',
+              detail: 'Some of the ' + fmt.num(READS.length) + ' reads were cancelled or refused for want of a session, so a verdict from the rest would be partial. Nothing has been evaluated.',
+              retry: function () { A.refresh(); }
+            })]));
+            return;
+          }
           paintScreen(host, ctx, A.advisorFindings(), { live: true, at: live.at || Date.now(), sources: live.sources || [] });
+        }, function () {
+          if (!alive) return;
+          ui.clear(host);
+          host.appendChild(ui.stateBlock('failed', { reason: 'render', detail: 'The rules could not be evaluated.', retry: function () { A.refresh(); } }));
         });
       });
     }

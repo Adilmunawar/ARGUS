@@ -31,8 +31,9 @@ module.exports = async (ctx) => {
   const apps = await readAs(page, '/api/gitops/apps');
   const envs = await readAs(page, '/api/gitops/environments');
   const containers = await readAs(page, '/api/containers');
-  rec('the API answers the three reads the screen makes, read through the signed-in store', !!(apps && apps.ok && envs && envs.ok && containers && containers.ok === false),
-    JSON.stringify({ apps: apps && apps.count, envs: envs && envs.count, containers: containers && containers.reason }));
+  rec('the API answers the three reads the screen makes, read through the signed-in store',
+    !!(apps && apps.ok && envs && envs.ok && containers && (ctx.external ? containers.ok === true && Array.isArray(containers.containers) : containers.ok === false)),
+    JSON.stringify({ apps: apps && apps.count, envs: envs && envs.count, containers: containers && (containers.ok ? containers.count : containers.reason) }));
 
   await ctx.goto(page, 'apps');
   await settled(ctx);
@@ -66,9 +67,10 @@ module.exports = async (ctx) => {
   rec('the problems list names the console directory, which has a README but no spec',
     !!consoleProblem && /console\s+has no app\.yaml/.test(listText.replace(/\s+/g, ' ')),
     consoleProblem ? consoleProblem.message : 'no console problem in the API answer');
+  const listStamps = await page.evaluate(() => document.querySelectorAll('#main .livepanel[data-state="ok"] p.readstamp[data-read-at]').length);
   rec('the list says when it was read and that no reconciler has applied the declarations',
-    /Read at \d{4}-\d{2}-\d{2}/.test(listText) && /No reconciler runs in this stack/.test(listText),
-    listText.match(/Read at [^.]+/) ? listText.match(/Read at [^.]+/)[0] : 'no stamp');
+    listStamps === 1 && /No reconciler runs in this stack/.test(listText),
+    listStamps + ' read stamps');
 
   const outsideList = await textOutsideNotices(page);
   const leakedList = FIXTURE_ONLY.filter((s) => outsideList.indexOf(s) !== -1);
@@ -76,7 +78,7 @@ module.exports = async (ctx) => {
   rec('the live list has no drift card, Promote button or Restart action from the fixture',
     await page.evaluate(() => ![...document.querySelectorAll('#main button')].some((b) => /^(Promote |Restart)/.test(b.textContent)) && !/Staging and production agree/.test(document.getElementById('main').textContent)));
   rec('the live list rendered without an error state',
-    await page.evaluate(() => document.querySelectorAll('#main .empty.is-error').length === 0));
+    await page.evaluate(() => document.querySelectorAll('#main [data-state="failed"], #main [data-state="unreachable"], #main [data-state="timeout"]').length === 0 && document.querySelectorAll('#main .livepanel[data-state="ok"]').length === 1));
 
   const filtered = await page.evaluate(async () => {
     const inp = document.querySelector('#main .pf-input');
@@ -103,8 +105,11 @@ module.exports = async (ctx) => {
     heads: [...document.querySelectorAll('#main h2')].map((h) => h.textContent),
     tabs: document.querySelectorAll('#main .tab').length,
     headActions: [...document.querySelectorAll('#main .pagehead-actions button')].map((b) => b.textContent.trim()),
-    notInStack: [...document.querySelectorAll('#main [data-not-in-stack]')].map((n) => n.getAttribute('data-not-in-stack')),
-    errors: document.querySelectorAll('#main .empty.is-error').length,
+    notInStack: [...document.querySelectorAll('#main [data-not-in-stack-item]')].map((n) => n.getAttribute('data-not-in-stack-item')),
+    strips: document.querySelectorAll('#main [data-state="notInStack"]').length,
+    stamps: document.querySelectorAll('#main p.readstamp[data-read-at]').length,
+    okPanels: document.querySelectorAll('#main .livepanel[data-state="ok"]').length,
+    errors: document.querySelectorAll('#main [data-state="failed"], #main [data-state="unreachable"], #main [data-state="timeout"]').length,
     captions: [...document.querySelectorAll('#main caption')].map((c) => c.textContent)
   }));
   rec('the deep link apps/orders resolves to the live detail of orders',
@@ -137,8 +142,8 @@ module.exports = async (ctx) => {
     !!ordersVersion && detailText.indexOf(ordersVersion.version) !== -1 && /production/.test(detailText) && detail.heads.indexOf('Declared versions') !== -1,
     ordersVersion ? ordersVersion.version : 'none');
 
-  rec('instances, metrics, deploy history and restart are not-in-stack callouts, not fixture tabs',
-    detail.tabs === 0 && detail.notInStack.length === 4 && detail.notInStack.every((w) => /orders/.test(w))
+  rec('instances, metrics, deploy history and restart are one not-in-stack strip, not fixture tabs',
+    detail.tabs === 0 && detail.strips === 1 && detail.notInStack.length === 4 && detail.notInStack.every((w) => /orders/.test(w))
       && /instances/i.test(detail.notInStack[0]) && /metrics/i.test(detail.notInStack[1]) && /Deployment history/i.test(detail.notInStack[2]) && /Restarting/i.test(detail.notInStack[3]),
     JSON.stringify(detail.notInStack));
   rec('the live detail offers no Deploy or Restart action, since nothing here could receive it',
@@ -148,31 +153,84 @@ module.exports = async (ctx) => {
     const card = [...document.querySelectorAll('#main .card')].find((c) => /^Running here/.test((c.querySelector('.card-title') || {}).textContent || ''));
     return card ? card.textContent : '';
   });
-  rec('the Running here panel says the container runtime is not configured and shows no container',
-    /Container runtime not configured/.test(running) && /not configured/.test(containers.message || '') && !/running/.test(running.replace('Running here', '')),
-    running.replace(/\s+/g, ' ').slice(0, 120));
+  const runningState = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('#main .card')].find((c) => /^Running here/.test((c.querySelector('.card-title') || {}).textContent || ''));
+    const body = card ? card.querySelector('.livepanel') : null;
+    return body ? { state: body.getAttribute('data-state'), reason: body.getAttribute('data-reason'), retry: !!body.querySelector('button') } : null;
+  });
+  if (containers && containers.ok) {
+    const want = (containers.containers || []).filter((c) => (c.names || []).some((n) => String(n).indexOf('orders') !== -1));
+    const runningRows = await page.evaluate(() => {
+      const card = [...document.querySelectorAll('#main .card')].find((c) => /^Running here/.test((c.querySelector('.card-title') || {}).textContent || ''));
+      return card ? { rows: card.querySelectorAll('tbody tr[data-key]').length, stamp: !!card.querySelector('p.readstamp[data-read-at]') } : null;
+    });
+    rec('the Running here panel reads the container runtime, is ok, and lists the containers named for the app',
+      !!runningState && runningState.state === 'ok' && !!runningRows && runningRows.stamp && runningRows.rows === want.length,
+      JSON.stringify(runningState) + ' rows=' + (runningRows && runningRows.rows) + ' want=' + want.length);
+  } else {
+    rec('the Running here panel is in the not-configured state, offers no retry and shows no container',
+      !!runningState && runningState.state === 'notConfigured' && runningState.reason === containers.reason && !runningState.retry
+        && /not configured/.test(containers.message || '') && !/running/.test(running.replace('Running here', '')),
+      JSON.stringify(runningState) + ' ' + running.replace(/\s+/g, ' ').slice(0, 100));
+  }
 
   const outsideDetail = await textOutsideNotices(page);
   const leakedDetail = FIXTURE_ONLY.filter((s) => outsideDetail.indexOf(s) !== -1);
   rec('no fixture-only value appears on the live detail', leakedDetail.length === 0 && !/p95|Error budget|SLO this month/.test(outsideDetail), leakedDetail.join(', '));
-  rec('every panel on the live detail carries the time it was read',
-    (detailText.match(/Read at \d{4}-\d{2}-\d{2}/g) || []).length >= 7 && detail.errors === 0,
-    (detailText.match(/Read at \d{4}-\d{2}-\d{2}/g) || []).length + ' stamps, ' + detail.errors + ' error states');
+  rec('every panel on the live detail that answered carries the time it was read',
+    detail.stamps >= 7 && detail.stamps === detail.okPanels && detail.errors === 0,
+    detail.stamps + ' stamps on ' + detail.okPanels + ' answered panels, ' + detail.errors + ' error states');
   rec('every table on the live detail has a caption naming orders', detail.captions.length >= 3 && detail.captions.every((c) => /orders/.test(c)), detail.captions.join(' | '));
 
-  await ctx.goto(page, 'apps/not-an-app');
+  await ctx.goto(page, 'apps/nope');
   await settled(ctx);
-  const missing = await page.evaluate(() => ({
-    text: document.getElementById('main').textContent,
-    panels: document.querySelectorAll('#main .card').length,
-    errors: document.querySelectorAll('#main .empty.is-error').length
-  }));
-  rec('an application the repository does not declare gets one plain empty state and no panels',
-    /No such application/.test(missing.text) && /not-an-app/.test(missing.text) && missing.panels === 0 && missing.errors === 0,
-    JSON.stringify({ panels: missing.panels, errors: missing.errors }));
+  const missing = await page.evaluate(() => {
+    const nf = document.querySelector('#main .notfound');
+    return {
+      state: nf ? nf.getAttribute('data-state') : null,
+      reason: nf ? nf.getAttribute('data-reason') : null,
+      h1: (document.querySelector('#main h1') || {}).textContent || '',
+      h1s: document.querySelectorAll('#main h1').length,
+      back: nf && nf.querySelector('a[href]') ? nf.querySelector('a[href]').getAttribute('href') : null,
+      text: document.getElementById('main').textContent,
+      panels: document.querySelectorAll('#main .card').length,
+      retry: [...document.querySelectorAll('#main button')].filter((b) => /Try again/.test(b.textContent)).length
+    };
+  });
+  rec('an application the repository does not declare gets the shared not-found state and no panels',
+    missing.state === 'notFound' && missing.reason === 'unknown-id' && missing.h1 === 'No such application' && missing.h1s === 1
+      && /nope/.test(missing.text) && missing.panels === 0 && missing.retry === 0 && /#\/apps$/.test(String(missing.back)),
+    JSON.stringify({ state: missing.state, h1: missing.h1, h1s: missing.h1s, panels: missing.panels, back: missing.back }));
 
   await ctx.goto(page, 'apps/orders/logs');
   await settled(ctx);
   rec('the fixture-era deep link apps/orders/logs still resolves to the live detail of orders',
-    await page.evaluate(() => window.ARGUS.state.route === 'apps' && window.ARGUS.state.rest[0] === 'orders' && document.querySelectorAll('#main .logview').length === 0 && document.querySelectorAll('#main [data-not-in-stack]').length === 4));
+    await page.evaluate(() => window.ARGUS.state.route === 'apps' && window.ARGUS.state.rest[0] === 'orders' && document.querySelectorAll('#main .logview').length === 0 && document.querySelectorAll('#main [data-not-in-stack-item]').length === 4));
+
+  const ENVS = '**/api/gitops/environments*';
+  await page.route(ENVS, (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ ok: false, reason: 'unreachable', message: 'The GitOps reader did not answer (injected by the live suite).' })
+  }));
+  await page.evaluate(() => { window.ARGUS.forget(); });
+  await ctx.goto(page, 'overview');
+  await ctx.goto(page, 'apps/orders');
+  await settled(ctx);
+  const fault = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('#main .card')].find((c) => ((c.querySelector('.card-title') || {}).textContent || '') === 'Declared versions');
+    const body = card ? card.querySelector('.livepanel') : null;
+    return {
+      state: body ? body.getAttribute('data-state') : null,
+      reason: body ? body.getAttribute('data-reason') : null,
+      retry: body ? [...body.querySelectorAll('button')].some((b) => /Try again/.test(b.textContent)) : false,
+      stamp: body ? !!body.querySelector('p.readstamp') : null,
+      others: [...document.querySelectorAll('#main .livepanel[data-state="ok"]')].length
+    };
+  });
+  await page.unroute(ENVS);
+  await page.evaluate(() => { window.ARGUS.forget(); });
+  rec('a reader that does not answer puts only its own panel in the unreachable state, with a retry and no read stamp',
+    fault.state === 'unreachable' && fault.reason === 'unreachable' && fault.retry && fault.stamp === false && fault.others >= 6,
+    JSON.stringify(fault));
 };

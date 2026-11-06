@@ -3,10 +3,7 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
 
-  function registerScreen(id, def) {
-    if (typeof A.screen === 'function') { A.screen(id, def); return; }
-    document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
-  }
+  var UNSEAL_ANCHOR = 'unseal-posture';
 
   var STATE = {
     working:      { tone: 'ok',   label: 'working' },
@@ -23,9 +20,9 @@
     return ui.pill(s.label, s.tone);
   }
 
-  function containerPill(up, why) {
-    if (up === null || up === undefined) return ui.pill('container: not probed', 'idle', { title: why || '' });
-    return ui.pill('container: ' + (up ? 'answers' : 'silent'), up ? 'idle' : 'warn', { title: why || '' });
+  function containerPill(up) {
+    if (up === null || up === undefined) return ui.pill('container: not probed', 'idle');
+    return ui.pill('container: ' + (up ? 'answers' : 'silent'), up ? 'idle' : 'warn');
   }
 
   function count(list, fn) {
@@ -53,11 +50,11 @@
       start: 'docker compose up -d',
       difference:
         'A SeaweedFS component answering /dir/status or /healthz proves a process is listening on a port. ' +
-        'Only a SIGNED S3 call proves the gateway has loaded its identities, accepted this console\'s ' +
-        'signature and agreed with it about the clock -- and that is the one an application needs.',
+        'Only a signed S3 call proves the gateway has loaded its identities, accepted this console\'s ' +
+        'signature and agreed with it about the clock, and that is the one an application needs.',
       containerProbe:
         'seaweed-s3 is healthchecked by fetching its /metrics port, and docker-compose.yml labels that ' +
-        'LIVENESS ONLY: with identities loaded there is no unauthenticated S3 path that means "ready", so ' +
+        'liveness only: with identities loaded there is no unauthenticated S3 path that means "ready", so ' +
         'the probe cannot go red for a gateway that refuses every credential.',
       read: readStorage
     },
@@ -74,7 +71,7 @@
         'healthy postmaster.',
       containerProbe:
         'postgres is healthchecked with `pg_isready -h 127.0.0.1`, which proves the postmaster accepts TCP ' +
-        'and nothing more -- it does not authenticate, so it stays green through a grants file that was ' +
+        'and nothing more. It does not authenticate, so it stays green through a grants file that was ' +
         'never applied.',
       read: readPg
     },
@@ -86,7 +83,7 @@
       start: 'docker compose --profile queues up -d',
       difference:
         'The broker being up and the queues working are different facts. Measured on NATS 2.11.4, a server ' +
-        'with JetStream disabled still answers /healthz with 200 ok -- so persistence has to be established ' +
+        'with JetStream disabled still answers /healthz with 200 ok, so persistence has to be established ' +
         'from JetStream itself and from the account the agents actually publish into.',
       containerProbe:
         'nats is healthchecked with /healthz?js-server-only=true: the process is up and JetStream is ' +
@@ -104,68 +101,38 @@
         'therefore close to worthless here on its own; the question is whether the master key is in memory.',
       containerProbe:
         'openbao is healthchecked with `bao status`, and docker-compose.yml counts its sealed exit code as ' +
-        'HEALTHY on purpose -- marking it unhealthy would stop everything gated on it and hand the operator ' +
+        'healthy on purpose: marking it unhealthy would stop everything gated on it and hand the operator ' +
         'a blank page instead of the words "OpenBao is sealed".',
       read: readSecrets
     }
   ];
 
   function envelopeVerdict(env, svc) {
-    var err = env.error || {};
-
-    if (!env.data) {
-      if (err.reason === 'http-404') {
-        return {
-          state: 'notDeployed',
-          headline: 'This console build has no reader for ' + svc.name + ': the API answered 404 for ' +
-            svc.path + '.',
-          action: 'The service itself is started with `' + svc.start + '` in platform/compose. The route ' +
-            'appears here when the console image is rebuilt with its reader mounted; until then nothing ' +
-            'about ' + svc.unit + ' has been measured by this screen.'
-        };
-      }
+    var st = A.envelopeState(env);
+    if (st === 'ok' || st === 'stale') return null;
+    var e = (env && env.error) || {};
+    var fromService = !!(env && env.data);
+    if (st === 'notFound') {
+      return { state: 'notDeployed', envelope: st, headline: 'This console build has no reader for ' + svc.name + '.' };
+    }
+    if (st === 'notConfigured') {
       return {
-        state: 'unknown',
-        headline: 'The console API did not answer for ' + svc.name + '.',
-        detail: err.message || 'No reason was given.',
-        action: 'This is a statement about the console API, not about ' + svc.unit + '. Nothing here has ' +
-          'been established about the service itself.'
+        state: 'notDeployed', envelope: st,
+        headline: e.reason === 'not-deployed'
+          ? svc.name + ' is not running on this stack.'
+          : 'The console is not configured to reach ' + svc.name + '.'
       };
     }
-
-    if (env.data.ok === false) {
-      var reason = env.data.reason || err.reason || 'error';
-      var message = env.data.message || err.message || 'No reason was given.';
-      if (reason === 'not-configured') {
-        return {
-          state: 'notDeployed',
-          headline: 'The console is not configured to reach ' + svc.name + '.',
-          detail: message,
-          action: 'Set the environment for it on the console service and restart it. ' +
-            'docker-compose.yml already sets these for the in-network stack.'
-        };
-      }
-      if (reason === 'not-deployed') {
-        return {
-          state: 'notDeployed',
-          headline: svc.name + ' is not running on this stack.',
-          detail: message,
-          action: 'Start it with `' + svc.start + '` in platform/compose.'
-        };
-      }
-      if (reason === 'unreachable' || reason === 'timeout') {
-        return {
-          state: 'unreachable',
-          headline: svc.name + ' did not answer.',
-          detail: message,
-          action: 'Check `docker compose ps ' + svc.unit.split(',')[0].trim() + '` and its logs in ' +
-            'platform/compose.'
-        };
-      }
-      return { state: 'unknown', headline: 'The ' + svc.name + ' reader could not answer.', detail: message };
+    if (st === 'unreachable' || st === 'timeout') {
+      return {
+        state: fromService ? 'unreachable' : 'unknown', envelope: st,
+        headline: fromService ? svc.name + ' did not answer.' : 'The console API did not answer for ' + svc.name + '.'
+      };
     }
-
-    return null;
+    if (st === 'signedOut') return { state: 'unknown', envelope: st, headline: 'Sign in to read ' + svc.name + '.' };
+    if (st === 'forbidden') return { state: 'unknown', envelope: st, headline: 'Your role cannot read ' + svc.name + '.' };
+    if (st === 'sample') return { state: 'unknown', envelope: st, headline: 'Not read on sample data.' };
+    return { state: 'unknown', envelope: st, headline: 'The ' + svc.name + ' reader could not answer.' };
   }
 
   function readStorage(d) {
@@ -178,15 +145,13 @@
     var state, headline;
     if (s3.signedCallOk) {
       state = 'working';
-      headline = 'A signed S3 call succeeded, so the gateway is up, it has loaded its identities and it ' +
-        'accepted this console\'s signature.';
+      headline = 'A signed S3 call succeeded.';
     } else if (reachable > 0) {
       state = 'broken';
-      headline = reachable + ' of ' + comps.length + ' components answer, but a signed S3 call does not. ' +
-        'This is the combination a liveness probe cannot see.';
+      headline = reachable + ' of ' + comps.length + ' components answer, but a signed S3 call does not.';
     } else if (comps.length) {
       state = 'unreachable';
-      headline = 'No SeaweedFS component answered, so the object store is not reachable from the console.';
+      headline = 'No SeaweedFS component answered the console.';
     } else {
       state = 'unknown';
       headline = 'The reader returned no components, so nothing was probed.';
@@ -206,7 +171,7 @@
       working: {
         ok: !!s3.signedCallOk,
         text: s3.signedCallOk
-          ? 'A signed ListObjectsV2 against a declared bucket returned.'
+          ? 'A signed ListObjectsV2 against a declared bucket returned, so the gateway has loaded its identities and accepted this console\'s signature.'
           : 'The signed call failed' + (s3.reason ? ' (' + s3.reason + ')' : '') + '. ' + (s3.message || '')
       },
       components: comps.map(function (c) {
@@ -221,7 +186,7 @@
       facts: [
         ['Free volume slots', topologyKnown ? fmt.num(d.freeVolumes) : notMeasured('the master did not answer')],
         ['A writable volume exists', topologyKnown
-          ? (d.writable ? 'yes, for some collection' : 'no -- the master has no writable volume')
+          ? (d.writable ? 'yes, for some collection' : 'no: the master has no writable volume')
           : notMeasured('this is read from the master\'s topology, and the master did not answer')],
         ['Every volume server reachable', topologyKnown
           ? (d.topologyReachable ? 'yes' : 'no')
@@ -239,14 +204,11 @@
     var failing = names(comps, function (c) { return c.ok === false; });
     var unmeasured = count(comps, function (c) { return c.ok === null || c.ok === undefined; });
 
-    var state = d.degraded ? 'degraded' : 'working';
-    var headline = d.degraded
-      ? 'PostgreSQL is answering, but these checks are failing: ' + failing + '.'
-      : 'The console opened a connection and the cluster answered its own statistics query.';
-
     return {
-      state: state,
-      headline: headline,
+      state: d.degraded ? 'degraded' : 'working',
+      headline: d.degraded
+        ? 'PostgreSQL answers, but these checks fail: ' + failing + '.'
+        : 'The cluster answered its own statistics query.',
       action: null,
       container: {
         up: true,
@@ -259,12 +221,10 @@
           : 'Every check this reader makes returned, and none of them is failing.'
       },
       components: comps.map(function (c) {
-        var tone = c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'idle';
-        var label = c.ok === true ? 'ok' : c.ok === false ? 'failing' : 'not a verdict';
         return {
           name: c.name,
-          tone: tone,
-          label: label,
+          tone: c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'idle',
+          label: c.ok === true ? 'ok' : c.ok === false ? 'failing' : 'not a verdict',
           latencyMs: c.latencyMs === undefined ? null : c.latencyMs,
           detail: c.detail || ''
         };
@@ -279,7 +239,7 @@
           ? notMeasured('pg_stat_database could not be read') : fmt.num(d.deadlocksSinceStatsReset)]
       ],
       notes: unmeasured
-        ? [unmeasured + ' of these checks returned no verdict. They are rendered as "not a verdict" rather ' +
+        ? [unmeasured + ' of these checks returned no verdict. They are shown as "not a verdict" rather ' +
            'than as passes: an unknown is not a fault, and it is not a pass either.']
         : []
     };
@@ -290,6 +250,7 @@
     var js = d.jetstream || {};
     var streams = d.streams || {};
     var healthz = d.healthz || null;
+    var account = js.account || 'agents';
 
     var map = {
       ok: 'working',
@@ -303,21 +264,18 @@
 
     var headline;
     if (d.verdict === 'ok') {
-      headline = 'JetStream is enabled server-wide and the ' + (js.account || 'agents') +
-        ' account can use it, so a message published here can be stored.';
+      headline = 'JetStream is enabled and the ' + account + ' account can store messages.';
     } else if (d.verdict === 'degraded') {
       headline = 'The account can store messages, but something under it is not right' +
         (streams.leaderless ? ': ' + fmt.num(streams.leaderless) + ' stream(s) have no leader' : '') + '.';
     } else if (d.verdict === 'jetstream-disabled') {
-      headline = 'The broker is running with JetStream disabled, so nothing published here is persisted.';
+      headline = 'JetStream is disabled, so nothing published here is persisted.';
     } else if (d.verdict === 'account-unusable') {
-      headline = 'The broker is up and JetStream is enabled, but the ' + (js.account || 'agents') +
-        ' account cannot use it. This is the failure that is invisible from every other signal.';
+      headline = 'JetStream is enabled, but the ' + account + ' account cannot use it.';
     } else if (d.verdict === 'unreachable') {
       headline = d.message || 'The broker did not answer its monitoring endpoint.';
     } else {
-      headline = 'The broker answered, but the JetStream account could not be read, so whether the queues ' +
-        'work was not established either way.';
+      headline = 'The broker answered, but the JetStream account could not be read.';
     }
 
     var workingOk = d.usable === null || d.usable === undefined ? null : !!d.usable;
@@ -329,7 +287,7 @@
       healthz.errors.forEach(function (e) {
         notes.push('/healthz names a broken asset: ' +
           [e.type, e.account, e.stream, e.consumer].filter(Boolean).join(' / ') +
-          (e.error ? ' -- ' + e.error : ''));
+          (e.error ? ': ' + e.error : ''));
       });
     }
 
@@ -349,7 +307,7 @@
           ? 'Not established. The broker answered but the account snapshot did not, and guessing from the ' +
             'half that answered would report a fault nobody observed.'
           : workingOk
-            ? 'The ' + (js.account || 'agents') + ' account reports JetStream enabled with its own limits.'
+            ? 'The ' + account + ' account reports JetStream enabled with its own limits.'
             : (js.accountMessage || 'The account cannot store messages.')
       },
       components: comps.map(function (c) {
@@ -377,7 +335,7 @@
         ['JetStream account', js.account ? js.account + ' (' + (js.accountState || 'unknown') + ')'
           : notMeasured('no account was reported')],
         ['Streams', streamsKnown ? fmt.num(streams.count)
-          : notMeasured('the account snapshot could not be read, so there is no count -- not a count of zero')],
+          : notMeasured('the account snapshot could not be read, so there is no count, not a count of zero')],
         ['Streams without a leader', streamsKnown ? fmt.num(streams.leaderless)
           : notMeasured('this is counted from the same unread snapshot')],
         ['Streams with no max_bytes', streamsKnown ? fmt.num(streams.withoutMaxBytes)
@@ -418,12 +376,11 @@
       unreachable: 'unreachable',
       unknown: 'unknown'
     };
-    var state = map[d.state] || 'unknown';
     var seal = d.seal || {};
     var ha = d.ha || {};
 
     return {
-      state: state,
+      state: map[d.state] || 'unknown',
       headline: d.summary || 'OpenBao returned no summary.',
       detail: d.detail || null,
       action: d.nextAction || null,
@@ -475,7 +432,7 @@
   }
 
   function notMeasured(why) {
-    return el('span.hint', { text: 'not measured -- ' + why });
+    return el('span.hint', { text: 'not measured: ' + why });
   }
 
   function tri(v, why) {
@@ -485,9 +442,10 @@
   }
 
   function unsealBanner(sandbox, reasonUnknown) {
+    var attrs = { id: UNSEAL_ANCHOR, 'data-unseal': sandbox ? (sandbox.banner === false ? 'measured' : 'banner') : 'unverified' };
     if (!sandbox) {
-      return el('div.callout.warn', [
-        el('strong', { text: 'The unseal posture of this estate has NOT been verified.' }),
+      return el('div.callout.warn', attrs, [
+        el('strong', { text: 'The unseal posture of this estate has not been verified.' }),
         el('p', {
           text: (reasonUnknown ? reasonUnknown + ' ' : '') +
             'Nothing here is a statement about safety. If this vault was initialised in sandbox mode, one ' +
@@ -502,18 +460,18 @@
     }
 
     if (sandbox.banner === false) {
-      return el('p.hint', {
-        text: 'Unseal posture: ' + String(sandbox.title || 'measured').replace(/\.$/, '') +
-          ' -- ' + (sandbox.basis || 'measured') + '. That rules out the 1-of-1 sandbox seal and nothing ' +
+      return el('p.hint', attrs, [
+        'Unseal posture: ' + String(sandbox.title || 'measured').replace(/\.$/, '') + ', ' +
+          (sandbox.basis || 'measured') + '. That rules out the 1-of-1 sandbox seal and nothing ' +
           'more: this console cannot see where those shares are held.'
-      });
+      ]);
     }
 
     var tone = sandbox.severity === 'critical' ? 'bad'
       : sandbox.severity === 'warning' ? 'warn'
         : sandbox.severity === 'info' ? 'info' : 'ok';
 
-    var box = el('div.callout.' + tone, [
+    return el('div.callout.' + tone, attrs, [
       el('strong', { text: sandbox.title || 'Unseal posture' }),
       sandbox.message ? el('p', { text: sandbox.message }) : null,
       sandbox.action ? el('p', { text: sandbox.action }) : null,
@@ -527,70 +485,42 @@
         ? el('p.hint', { text: sandbox.keyAtRestReason })
         : null
     ]);
-    return box;
   }
 
   function writesBanner(caps) {
     if (caps.writesAllowed === true) {
-      return el('div.callout.warn', [
-        el('strong', { text: 'This console is permitted to make changes (ARGUS_ALLOW_WRITES is set).' }),
-        el('p', {
-          text: 'Actions that alter the stack will reach it. The default for this deployment is read-only, ' +
-            'so this is a deliberate setting somebody made.'
-        })
+      return el('div.callout.warn', { 'data-writes': 'allowed' }, [
+        el('strong', { text: 'This console may make changes (ARGUS_ALLOW_WRITES is set).' }),
+        ui.disclosure('Details', [
+          el('p', {
+            text: 'Actions that alter the stack will reach it. The default for this deployment is read-only, ' +
+              'so this is a deliberate setting somebody made.'
+          })
+        ])
       ]);
     }
     if (caps.writesAllowed === false) {
-      return el('div.callout.info', [
-        el('strong', { text: 'This console is read-only, so nothing on this screen can change the stack.' }),
-        el('p', {
-          text: 'ARGUS_ALLOW_WRITES is not set. The API refuses every non-GET request with 405 before it ' +
-            'even looks up a route, so an action here cannot fail halfway -- it never starts. That is why ' +
-            'this screen offers diagnosis and commands to run rather than buttons.'
-        }),
-        el('p.hint', {
-          text: 'To change it: set ARGUS_ALLOW_WRITES=1 for the console service in platform/compose and ' +
-            'recreate the container. Read the runbook first; it is off by default on purpose.'
-        })
+      return el('div.hint', { 'data-writes': 'refused' }, [
+        'This console is read-only, so nothing on this screen can change the stack. ',
+        ui.disclosure('Details', [
+          el('p', {
+            text: 'ARGUS_ALLOW_WRITES is not set. The API refuses every non-GET request with 405 before it ' +
+              'even looks up a route, so an action here cannot fail halfway: it never starts. That is why ' +
+              'this screen offers diagnosis and commands to run rather than buttons.'
+          }),
+          el('p', {
+            text: 'To change it, set ARGUS_ALLOW_WRITES=1 for the console service in platform/compose and ' +
+              'recreate the container. Read the runbook first; it is off by default on purpose.'
+          })
+        ])
       ]);
     }
-    return el('div.callout.warn', [
+    return el('div.callout.warn', { 'data-writes': 'unknown' }, [
       el('strong', { text: 'Whether this console may make changes is not known.' }),
       el('p', {
-        text: '/api/capabilities did not report writesAllowed, so this screen cannot say whether an action ' +
-          'would be refused. Treat it as unknown rather than as permitted.'
+        text: '/api/capabilities did not report writesAllowed. Treat it as unknown rather than as permitted.'
       })
     ]);
-  }
-
-  function verdictBlock(v, svc) {
-    var rows = [
-      el('div.row', [statePill(v.state), el('strong', { text: v.headline })])
-    ];
-    if (v.detail) rows.push(el('p', { text: v.detail }));
-
-    if (v.container || v.working) {
-      rows.push(ui.dl([
-        v.container ? ['Reachable', el('div.row', [containerPill(v.container.up, svc.containerProbe),
-          el('span', { text: v.container.text })])] : null,
-        v.working ? ['Actually working', el('div.row', [
-          ui.pill(v.working.ok === null || v.working.ok === undefined ? 'not established'
-            : v.working.ok ? 'proved' : 'not working',
-          v.working.ok === null || v.working.ok === undefined ? 'idle' : v.working.ok ? 'ok' : 'bad'),
-          el('span', { text: v.working.text })
-        ])] : null
-      ]));
-      rows.push(el('p.hint', { text: 'Why these differ: ' + svc.difference }));
-      rows.push(el('p.hint', { text: 'Container probe: ' + svc.containerProbe }));
-    }
-
-    if (v.action) {
-      rows.push(el('div.callout.info', [
-        el('strong', { text: 'What to do' }),
-        el('p', { text: v.action })
-      ]));
-    }
-    return el('div.stack', rows);
   }
 
   function componentsTable(rows, svc) {
@@ -616,62 +546,59 @@
     });
   }
 
-  function renderService(body, svc, env) {
-    ui.clear(body);
-
-    var v = envelopeVerdict(env, svc);
-    if (v) {
-      body.appendChild(el('div.row', [statePill(v.state), el('strong', { text: v.headline })]));
-      if (v.detail) body.appendChild(el('p', { text: v.detail }));
-      if (v.action) {
-        body.appendChild(el('div.callout.info', [
-          el('strong', { text: 'What to run' }),
-          el('p', { text: v.action })
-        ]));
-      }
-      body.appendChild(el('p.hint', {
-        text: 'Nothing at all was measured for ' + svc.unit + '. This panel is short because there is ' +
-          'nothing to show, not because everything is fine.'
-      }));
-      return v;
-    }
-
-    var d = env.data;
-    var r = svc.read(d);
-
-    if (env.stale) {
-      body.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'Showing the last value that could be read.' }),
-        el('p', {
-          text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
-            ' Everything below was measured earlier and may no longer be true.'
-        })
-      ]));
-    }
-
-    body.appendChild(verdictBlock(r, svc));
-
-    body.appendChild(el('div.sectiontitle', { text: 'Components' }));
-    body.appendChild(componentsTable(r.components || [], svc));
-
-    if (r.facts && r.facts.length) {
-      body.appendChild(el('div.sectiontitle', { text: 'What was read' }));
-      body.appendChild(ui.dl(r.facts));
-    }
-
-    (r.notes || []).forEach(function (n) { body.appendChild(el('p.hint', { text: n })); });
-
-    body.appendChild(el('p.hint', {
-      text: 'Measured at ' + stamp(d.at) + (d.cachedAt && d.cachedAt !== d.at ? ', cached at ' + stamp(d.cachedAt) : '') +
-        '. Source: ' + svc.path + '.'
-    }));
-
-    return r;
-  }
-
   function stamp(iso) {
     if (!iso) return 'an unrecorded time';
     return String(iso).replace('T', ' ').slice(0, 19) + 'Z';
+  }
+
+  function renderService(svc) {
+    return function (body, d) {
+      var r = svc.read(d);
+      body.setAttribute('data-verdict', r.state);
+      body.appendChild(el('div.row', [statePill(r.state), el('strong', { text: r.headline })]));
+
+      if (r.action) {
+        body.appendChild(el('div.callout.info', [
+          el('strong', { text: 'What to do' }),
+          el('p', { text: r.action })
+        ]));
+      }
+
+      body.appendChild(componentsTable(r.components || [], svc));
+
+      var details = [];
+      if (r.detail) details.push(el('p', { text: r.detail }));
+      details.push(ui.dl([
+        r.container ? ['Reachable', el('div.row', [containerPill(r.container.up), el('span', { text: r.container.text })])] : null,
+        r.working ? ['Actually working', el('div.row', [
+          ui.pill(r.working.ok === null || r.working.ok === undefined ? 'not established'
+            : r.working.ok ? 'proved' : 'not working',
+          r.working.ok === null || r.working.ok === undefined ? 'idle' : r.working.ok ? 'ok' : 'bad'),
+          el('span', { text: r.working.text })
+        ])] : null
+      ].concat(r.facts || [])));
+      (r.notes || []).forEach(function (n) { details.push(el('p.hint', { text: n })); });
+      details.push(el('p.hint', { text: 'Why reachable and working differ: ' + svc.difference }));
+      details.push(el('p.hint', { text: 'Container probe: ' + svc.containerProbe }));
+      details.push(el('p.hint', {
+        text: 'Units: ' + svc.unit + '. Measured at ' + stamp(d.at) +
+          (d.cachedAt && d.cachedAt !== d.at ? ', cached at ' + stamp(d.cachedAt) : '') + '. Source: ' + svc.path + '.'
+      }));
+      body.appendChild(ui.disclosure('Details', details));
+    };
+  }
+
+  function notDeployedBlock(svc) {
+    return function (body, env) {
+      var v = envelopeVerdict(env, svc) || {};
+      var e = (env && env.error) || {};
+      var st = A.envelopeState(env);
+      body.appendChild(ui.stateBlock(st, {
+        reason: e.reason,
+        detail: v.headline + (e.message ? ' ' + e.message : ''),
+        action: el('p.hint', { text: 'Start it with `' + svc.start + '` in platform/compose.' })
+      }));
+    };
   }
 
   function summaryTable(results) {
@@ -683,7 +610,7 @@
       },
       {
         key: 'container', label: 'Container', status: true,
-        render: function (r) { return containerPill(r.containerUp, r.containerWhy); }
+        render: function (r) { return containerPill(r.containerUp); }
       },
       { key: 'headline', label: 'What was measured' }
     ], results, {
@@ -691,6 +618,29 @@
       rowKey: function (r) { return r.id; },
       empty: 'No service was read.'
     });
+  }
+
+  function summaryLine(ordered) {
+    var working = count(ordered, function (r) { return r.state === 'working'; });
+    var bad = count(ordered, function (r) { return r.state === 'broken' || r.state === 'unreachable'; });
+    var degraded = count(ordered, function (r) { return r.state === 'degraded'; });
+    var absent = count(ordered, function (r) { return r.state === 'notDeployed'; });
+    var unknown = count(ordered, function (r) { return r.state === 'unknown'; });
+    var total = fmt.num(ordered.length);
+
+    if (bad > 0) {
+      return { tone: 'bad', text: fmt.num(bad) + ' of ' + total + ' services ' + (bad === 1 ? 'is' : 'are') + ' not working.' +
+        (degraded ? ' ' + fmt.num(degraded) + ' degraded.' : '') + (unknown ? ' ' + fmt.num(unknown) + ' not measured.' : '') };
+    }
+    if (degraded > 0) {
+      return { tone: 'warn', text: fmt.num(degraded) + ' of ' + total + ' services ' + (degraded === 1 ? 'is' : 'are') + ' degraded; none is down.' +
+        (absent ? ' ' + fmt.num(absent) + ' not deployed.' : '') + (unknown ? ' ' + fmt.num(unknown) + ' not measured.' : '') };
+    }
+    if (unknown > 0 || absent > 0) {
+      return { tone: 'idle', text: fmt.num(working) + ' of ' + total + ' services measured working.' +
+        (absent ? ' ' + fmt.num(absent) + ' not deployed.' : '') + (unknown ? ' ' + fmt.num(unknown) + ' not measured.' : '') };
+    }
+    return { tone: 'ok', text: 'All ' + total + ' services were measured working.' };
   }
 
   var UPTIME_WINDOWS = [
@@ -740,93 +690,89 @@
   function renderMonitor(monitor) {
     var beats = monitor.beats || [];
     var last = beats.length ? beats[beats.length - 1] : null;
-    var incidents = ui.incidentsOf(beats);
-    var latest = incidents.length ? incidents[incidents.length - 1] : null;
 
-    return el('div.stack', [
-      el('div.hbrow', [
-        el('span.hbrow-name', { text: monitor.label || monitor.id }),
-        ui.heartbeatBar(beats, {
-          slots: 50,
-          label: ui.heartbeatSentence(beats, { name: monitor.label || monitor.id })
-        }),
-        ui.pill(monitorWord(last ? last.status : null), monitorTone(last ? last.status : null))
-      ]),
-      ui.dl(uptimeRows(monitor).concat([
-        ['Checks held', fmt.num(beats.length)],
-        ['Last transition', latest
-          ? 'went ' + latest.toWord + ' from ' + latest.fromWord +
-            (latest.at ? ' at ' + fmt.stamp(new Date(latest.at)) : '')
-          : 'none recorded since this console started']
-      ]))
+    return el('div.hbrow', { 'data-monitor': monitor.id || monitor.label || '' }, [
+      el('span.hbrow-name', { text: monitor.label || monitor.id }),
+      ui.heartbeatBar(beats, {
+        slots: 50,
+        label: ui.heartbeatSentence(beats, { name: monitor.label || monitor.id })
+      }),
+      ui.pill(monitorWord(last ? last.status : null), monitorTone(last ? last.status : null))
     ]);
   }
 
-  function heartbeatCard(stillMine) {
-    var body = el('div', [ui.skeleton(3)]);
-    A.read('/api/heartbeats', { ttlMs: 5000 }).then(function (env) {
-      if (!stillMine()) return;
-      ui.clear(body);
+  function lastStatus(monitor) {
+    var beats = monitor.beats || [];
+    return beats.length ? beats[beats.length - 1].status : null;
+  }
 
-      if (!env.ok) {
-        var e = env.error || {};
-        body.appendChild(el('div.callout.warn', [
-          el('strong', { text: 'No heartbeat history could be read.' }),
-          el('p', { text: e.message || 'The console API gave no reason.' }),
-          el('p', {
-            text: 'Nothing below has been substituted for it. Until this reader answers, "since when" ' +
-              'is a question this console cannot answer.'
-          })
-        ]));
-        return;
+  function historyTable(monitors) {
+    return ui.table([
+      { key: 'label', label: 'Monitor', render: function (m) { return m.label || m.id; } },
+      { key: 'h24', label: 'Last 24 h', align: 'right', render: function (m) { return uptimeRows(m)[0][1]; } },
+      { key: 'd7', label: 'Last 7 d', align: 'right', render: function (m) { return uptimeRows(m)[1][1]; } },
+      { key: 'd30', label: 'Last 30 d', align: 'right', render: function (m) { return uptimeRows(m)[2][1]; } },
+      { key: 'checks', label: 'Checks held', align: 'right', render: function (m) { return fmt.num((m.beats || []).length); } },
+      {
+        key: 'transition', label: 'Last transition',
+        render: function (m) {
+          var incidents = ui.incidentsOf(m.beats || []);
+          var latest = incidents.length ? incidents[incidents.length - 1] : null;
+          return latest
+            ? 'went ' + latest.toWord + ' from ' + latest.fromWord + (latest.at ? ' at ' + fmt.stamp(new Date(latest.at)) : '')
+            : 'none since this console started';
+        }
       }
+    ], monitors, {
+      caption: 'Uptime of each monitor over the windows its history covers, and its last transition',
+      rowKey: function (m) { return m.id || m.label; },
+      empty: 'No monitor is being recorded.'
+    });
+  }
 
-      var payload = env.data || {};
-      if (payload.ok === false) {
-        body.appendChild(el('div.callout.warn', [
-          el('strong', { text: 'The heartbeat recorder is not running.' }),
-          el('p', { text: payload.message || 'The reader answered without a reason.' })
-        ]));
-        return;
-      }
-
-      var monitors = payload.monitors || [];
-      if (!monitors.length) {
-        body.appendChild(ui.emptyState(
-          'No monitor is being recorded',
-          'The console API answered, and it is watching nothing. That is a real answer, not a failure to load.'));
-        return;
-      }
-
-      if (payload.persisted === false) {
-        body.appendChild(el('div.callout.info', [
-          el('strong', { text: 'This history is held in memory only.' }),
-          el('p', {
-            text: 'The console state volume is mounted read-only, so every heartbeat below is lost when ' +
-              'the console restarts. Windows longer than the history covers are withheld rather than ' +
-              'extrapolated.'
-          })
-        ]));
-      }
-
-      body.appendChild(el('div.stack', monitors.map(renderMonitor)));
-      body.appendChild(el('p.hint', {
+  function renderBeats(body, payload) {
+    var monitors = payload.monitors || [];
+    if (!monitors.length) {
+      body.appendChild(ui.emptyState('No monitor is being recorded', 'The console API answered, and it is watching nothing.'));
+      return;
+    }
+    var up = count(monitors, function (m) { return lastStatus(m) === 1; });
+    var down = count(monitors, function (m) { return lastStatus(m) === 0; });
+    var other = monitors.length - up - down;
+    body.appendChild(el('p', {
+      text: fmt.num(up) + ' of ' + fmt.num(monitors.length) + ' monitors up at their last check' +
+        (down ? ', ' + fmt.num(down) + ' down' : '') + (other ? ', ' + fmt.num(other) + ' pending or not yet checked' : '') + '.'
+    }));
+    body.appendChild(el('div.stack', monitors.map(renderMonitor)));
+    var details = [
+      historyTable(monitors),
+      el('p.hint', {
         text: 'One slot per check, oldest on the left. A full bar is up, a short bar is a retry that has ' +
           'not yet been counted as a failure, a notched bar is down and a lozenge is planned maintenance. ' +
           'A check only becomes a failure after the retry gate, so a single missed probe does not open an ' +
           'incident.'
+      })
+    ];
+    if (payload.persisted === false) {
+      details.unshift(el('p', {
+        text: 'This history is held in memory only: the console state volume is mounted read-only, so every ' +
+          'heartbeat is lost when the console restarts. Windows longer than the history covers are withheld ' +
+          'rather than extrapolated.'
       }));
-    });
-
-    return ui.card('Service heartbeats', body);
+    }
+    body.appendChild(ui.disclosure('Details', details));
   }
 
-  registerScreen('stack', {
-    title: 'Stack operations',
-    crumb: 'Operations',
+  A.screen('stack', {
+    title: 'Services',
+    crumb: 'Services',
     render: function (mount, ctx) {
-      var host = el('div');
+      if (ctx && ctx.rest && ctx.rest.length) {
+        mount.appendChild(ui.notFound('part of Services', ctx.rest.join('/'), 'stack', 'Back to Services'));
+        return;
+      }
 
+      var host = el('div');
       var refresh = ui.btn('Refresh', {
         onClick: function () {
           A.forget();
@@ -838,34 +784,24 @@
         }
       });
 
-      mount.appendChild(ui.pageHeader(
-        'Stack operations',
-        'Is the stack healthy, and if not, which part. Everything here is read live from the console API; ' +
-          'a service that is not deployed yet says so rather than showing an empty panel.',
-        [refresh]));
-
+      mount.appendChild(ui.pageHeader('Services', 'Is each service working, and if not, which part.', [refresh]));
       mount.appendChild(host);
-
-      if (ctx && ctx.rest && ctx.rest.length) {
-        mount.insertBefore(el('div.callout.info', [
-          el('strong', { text: 'That link points at a screen this one replaced.' }),
-          el('p', {
-            text: 'This screen now reads the live stack rather than the runbook fixtures, so "' +
-              ctx.rest.join('/') + '" no longer resolves to anything. The stack verdict is below.'
-          })
-        ]), host);
-      }
 
       var gen = 0;
       var live = true;
-      A.onLeave(function () { live = false; });
+      var dispose = null;
+      A.onLeave(function () { live = false; if (dispose) { dispose(); dispose = null; } });
 
       function paint() {
         gen += 1;
         var mine = gen;
+        if (dispose) { dispose(); dispose = null; }
         ui.clear(host);
         A.probe().then(function () {
-          if (live && mine === gen) build(host, refresh, function () { return live && mine === gen; });
+          if (!(live && mine === gen)) return;
+          dispose = A.scopeLeaveHooks(function () {
+            build(host, refresh, function () { return live && mine === gen; });
+          });
         });
       }
 
@@ -881,141 +817,86 @@
       : 'There is no console API to re-read. Nothing on this screen came from one.';
 
     if (mode !== A.MODE.LIVE) {
-      host.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'The console API is not running, so nothing on this screen has been measured.' }),
-        el('p', {
-          text: 'This screen has no fixtures and will not invent any. Start the API with `npm start` in ' +
-            'platform/console/server, or bring the stack up with `docker compose up -d` in ' +
-            'platform/compose, and reload.'
-        }),
-        el('p', {
-          text: 'That includes the two warnings this screen exists to carry: whether one unseal key on this ' +
-            'machine opens every secret in the estate, and whether this console may change anything, are ' +
-            'both unknown right now. Neither absence means no.'
-        })
-      ]));
+      host.appendChild(ui.stateBlock('sample', {
+        detail: 'This screen has no fixtures and will not invent any. Whether one unseal key on this machine ' +
+          'opens every secret, and whether this console may change anything, are both unknown until the ' +
+          'console API answers. Start it with `npm start` in platform/console/server, or bring the stack up ' +
+          'with `docker compose up -d` in platform/compose.'
+      }));
       return;
     }
 
     var caps = A.capabilities() || {};
+    host.appendChild(writesBanner(caps));
 
-    var banners = el('div');
-    host.appendChild(banners);
-    banners.appendChild(writesBanner(caps));
+    var unsealSlot = el('div', [ui.stateBlock('loading', { detail: 'Reading the unseal posture from /api/secrets/health.' })]);
+    host.appendChild(unsealSlot);
 
-    var unsealSlot = el('div', [
-      el('div.callout.info', [
-        el('strong', { text: 'Checking the unseal posture of this estate...' }),
-        el('p', { text: 'Reading /api/secrets/health. Until it answers, nothing about the seal is known.' })
-      ])
-    ]);
-    banners.appendChild(unsealSlot);
+    var summaryBody = el('div.livepanel', { 'data-state': 'loading', 'data-path': 'summary' }, [ui.skeleton(SERVICES.length + 1)]);
+    host.appendChild(ui.card('Verdict', summaryBody));
 
-    var summaryBody = el('div', [ui.skeleton(SERVICES.length + 1)]);
-    host.appendChild(ui.card('Stack verdict', summaryBody));
-    host.appendChild(heartbeatCard(stillMine));
-
-    var results = [];
-    var pending = SERVICES.length;
-
+    var cards = el('div');
+    host.appendChild(cards);
     SERVICES.forEach(function (svc) {
-      var body = el('div', [ui.skeleton(3)]);
-      host.appendChild(ui.card(svc.name + '  ·  ' + svc.unit, body));
-
-      A.read(svc.path, { ttlMs: 5000 }).then(function (env) {
-        if (!stillMine()) return;
-
-        var r;
-        try {
-          r = renderService(body, svc, env);
-        } catch (err) {
-          ui.clear(body);
-          body.appendChild(ui.errorState(
-            'This console could not read the ' + svc.name + ' health payload',
-            'The service may be perfectly healthy: this is a fault in the console screen, not a measurement ' +
-              'of ' + svc.unit + '. ' + String(err && err.message ? err.message : err),
-            null));
-          r = {
-            state: 'unknown',
-            headline: 'The payload from ' + svc.path + ' could not be rendered, so nothing was established.',
-            container: null
-          };
-        }
-
-        results.push({
-          id: svc.id,
-          name: svc.name,
-          state: r.state,
-          headline: r.headline,
-          containerUp: r.container ? r.container.up : null,
-          containerWhy: svc.containerProbe
-        });
-
-        if (svc.id === 'secrets') {
-          ui.clear(unsealSlot);
-          var sandbox = env.data && env.data.ok !== false ? env.data.sandbox : null;
-          unsealSlot.appendChild(unsealBanner(sandbox, sandbox ? null : reasonFor(env, svc)));
-        }
-
-        pending -= 1;
-        if (pending === 0) paintSummary();
-      });
+      var on = { notConfigured: notDeployedBlock(svc) };
+      cards.appendChild(A.livePanel(svc.name, svc.path, renderService(svc), { ttlMs: 5000, on: on }));
     });
 
-    function reasonFor(env, svc) {
-      var v = envelopeVerdict(env, svc);
-      if (!v) return null;
-      return v.headline + (v.detail ? ' ' + v.detail : '');
+    host.appendChild(A.livePanel('Service heartbeats', '/api/heartbeats', renderBeats, { ttlMs: 5000 }));
+
+    var pending = true;
+    A.state.pendingPanels += 1;
+    function release() {
+      if (!pending) return;
+      pending = false;
+      A.state.pendingPanels = Math.max(0, A.state.pendingPanels - 1);
+      A.state.renderedGen += 1;
     }
+    A.onLeave(release);
 
-    function paintSummary() {
-      if (!stillMine()) return;
-      ui.clear(summaryBody);
-
-      var ordered = [];
-      SERVICES.forEach(function (svc) {
-        results.forEach(function (r) { if (r.id === svc.id) ordered.push(r); });
+    Promise.all(SERVICES.map(function (svc) {
+      return A.read(svc.path, { ttlMs: 5000 }).then(null, function (err) {
+        return { ok: false, data: null, mode: A.MODE.LIVE, at: Date.now(), error: err || {} };
+      });
+    })).then(function (envs) {
+      if (!stillMine()) { release(); return; }
+      var results = SERVICES.map(function (svc, i) {
+        var env = envs[i];
+        var r;
+        try {
+          r = envelopeVerdict(env, svc) || svc.read(env.data);
+        } catch (err) {
+          r = { state: 'unknown', headline: 'The payload from ' + svc.path + ' could not be drawn, so nothing was established.' };
+        }
+        return { id: svc.id, name: svc.name, state: r.state, headline: r.headline, containerUp: r.container ? r.container.up : null, env: env };
       });
 
-      var working = count(ordered, function (r) { return r.state === 'working'; });
-      var bad = count(ordered, function (r) { return r.state === 'broken' || r.state === 'unreachable'; });
-      var degraded = count(ordered, function (r) { return r.state === 'degraded'; });
-      var absent = count(ordered, function (r) { return r.state === 'notDeployed'; });
-      var unknown = count(ordered, function (r) { return r.state === 'unknown'; });
+      var secretsEnv = envs[SERVICES.length - 1];
+      var sandbox = secretsEnv && secretsEnv.ok && secretsEnv.data ? secretsEnv.data.sandbox : null;
+      var secretsVerdict = envelopeVerdict(secretsEnv, SERVICES[SERVICES.length - 1]);
+      ui.clear(unsealSlot);
+      unsealSlot.appendChild(unsealBanner(sandbox, sandbox ? null : (secretsVerdict ? secretsVerdict.headline : null)));
 
-      var line;
-      if (bad > 0) {
-        line = fmt.num(bad) + ' of the ' + fmt.num(ordered.length) + ' services this screen reads ' +
-          (bad === 1 ? 'is' : 'are') + ' not working. Start there.' +
-          (degraded > 0 ? ' ' + fmt.num(degraded) + ' more ' + (degraded === 1 ? 'is' : 'are') +
-            ' degraded.' : '') +
-          (unknown > 0 ? ' ' + fmt.num(unknown) + ' could not be measured at all.' : '');
-      } else if (degraded > 0) {
-        line = 'Nothing this screen measured is down, but ' + fmt.num(degraded) + ' service' +
-          (degraded === 1 ? ' is' : 's are') + ' degraded.' +
-          (absent ? ' ' + fmt.num(absent) + ' not deployed in this console build.' : '') +
-          (unknown ? ' ' + fmt.num(unknown) + ' could not be measured.' : '');
-      } else if (unknown > 0 || absent > 0) {
-        line = fmt.num(working) + ' of ' + fmt.num(ordered.length) + ' measured working. ' +
-          (absent ? fmt.num(absent) + ' not deployed in this console build. ' : '') +
-          (unknown ? fmt.num(unknown) + ' could not be measured. ' : '') +
-          'That is not the same as healthy.';
-      } else {
-        line = 'All ' + fmt.num(ordered.length) + ' services this screen reads were measured, and all ' +
-          'of them are working.';
-      }
-
-      summaryBody.appendChild(el('p', { text: line }));
-      summaryBody.appendChild(summaryTable(ordered));
-      summaryBody.appendChild(el('p.hint', {
-        text: 'This screen reads ' + fmt.num(SERVICES.length) + ' services. It is not an inventory of the ' +
-          'stack: anything without a reader here -- the cache, the observability profile, the connect ' +
-          'profile -- is absent from this table and has not been checked by it.'
-      }));
-      summaryBody.appendChild(el('p.hint', {
-        text: 'The container column is the weakest evidence here and is never green. Each of these services ' +
-          'has a documented state in which its container probe passes and the service cannot do its job.'
-      }));
-    }
+      ui.clear(summaryBody);
+      var line = summaryLine(results);
+      summaryBody.setAttribute('data-state', 'ok');
+      summaryBody.setAttribute('data-verdict', line.tone);
+      summaryBody.appendChild(el('p', [statePill(line.tone === 'ok' ? 'working' : line.tone === 'bad' ? 'broken' : line.tone === 'warn' ? 'degraded' : 'unknown'), ' ', el('strong', { text: line.text })]));
+      summaryBody.appendChild(summaryTable(results));
+      summaryBody.appendChild(ui.disclosure('Details', [
+        el('p.hint', {
+          text: 'This screen reads ' + fmt.num(SERVICES.length) + ' services. It is not an inventory of the ' +
+            'stack: anything without a reader here (the cache, the observability profile, the connect ' +
+            'profile) is absent from this table and has not been checked by it.'
+        }),
+        el('p.hint', {
+          text: 'The container column is the weakest evidence here and is never green. Each of these services ' +
+            'has a documented state in which its container probe passes and the service cannot do its job.'
+        })
+      ]));
+      var readAt = new Date(Math.min.apply(null, envs.map(function (e) { return (e && e.at) || Date.now(); })));
+      summaryBody.appendChild(el('p.readstamp', { 'data-read-at': readAt.toISOString(), text: 'Read ' + fmt.clock(readAt) }));
+      release();
+    });
   }
 })();

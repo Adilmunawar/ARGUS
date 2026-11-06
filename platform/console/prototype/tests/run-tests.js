@@ -21,11 +21,25 @@ const DEEP = [
 const results = [];
 const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail: detail || '' });
 
+async function renderGen(page) {
+  return page.evaluate(() => (window.ARGUS && window.ARGUS.state.renderedGen) || 0);
+}
+
+async function whenRendered(page, before, route) {
+  await page.waitForFunction(a => {
+    const s = window.ARGUS && window.ARGUS.state;
+    return !!s && (a.g === null || s.renderedGen > a.g) && (!a.r || s.route === a.r.split('/')[0]) && s.pendingPanels === 0;
+  }, { g: before, r: route || null }, { timeout: 4000 });
+}
+
 async function goto(page, route) {
-  await page.evaluate(r => { window.location.hash = '#/' + r; }, route);
-  await page.waitForFunction(r => window.ARGUS && window.ARGUS.state.route === r.split('/')[0],
-    route, { timeout: 4000 });
-  await page.waitForTimeout(40);
+  const g = await renderGen(page);
+  const same = await page.evaluate(r => {
+    if (window.location.hash === '#/' + r) return true;
+    window.location.hash = '#/' + r;
+    return false;
+  }, route);
+  await whenRendered(page, same ? null : g, route);
 }
 
 const AXE_OPTIONS = {
@@ -90,10 +104,10 @@ async function axeOn(page, label, suite, opts) {
   }
 
   for (const t of navTargets) {
-    await page.evaluate(() => { window.location.hash = '#/overview'; });
-    await page.waitForTimeout(120);
+    await goto(page, 'overview');
+    const g = await renderGen(page);
     await page.click(`.nav[data-go="${t}"]`);
-    await page.waitForTimeout(180);
+    await whenRendered(page, t === 'overview' ? null : g, t);
     const st = await page.evaluate(() => ({
       route: window.ARGUS.state.route,
       painted: document.getElementById('main').textContent.trim().length,
@@ -104,8 +118,7 @@ async function axeOn(page, label, suite, opts) {
     rec('NAV', `the "${t}" sidebar button is marked current once open`,
       st.current && st.current.go === t, JSON.stringify(st.current || null));
   }
-  await page.evaluate(() => { window.location.hash = '#/overview'; });
-  await page.waitForTimeout(120);
+  await goto(page, 'overview');
   for (const r of ROUTES) {
     await goto(page, r);
     const st = await page.evaluate(() => ({
@@ -382,9 +395,9 @@ async function axeOn(page, label, suite, opts) {
       onUnavailable: w => { why = w; }
     });
     await new Promise(r => setTimeout(r, 120));
-    const during = window.ARGUS.streamSnapshot().length;
+    const during = window.ARGUS.__test.streamSnapshot().length;
     close();
-    return { why, during, after: window.ARGUS.streamSnapshot().length };
+    return { why, during, after: window.ARGUS.__test.streamSnapshot().length };
   });
   rec('LOGS', 'no live stream is opened on sample data, and the reason is given in words',
     !!streamed.why && streamed.why.reason === 'sample-mode' &&
@@ -643,7 +656,7 @@ async function axeOn(page, label, suite, opts) {
       if (!owner || !reason || !expiry || !go) return false;
       if (go.disabled) return false;
       if (go.getAttribute('aria-disabled') !== 'true') return false;
-      owner.value = 'adil'; owner.dispatchEvent(new Event('input', { bubbles: true }));
+      owner.value = 'alex'; owner.dispatchEvent(new Event('input', { bubbles: true }));
       reason.value = 'fix is queued'; reason.dispatchEvent(new Event('input', { bubbles: true }));
       expiry.value = '2026-12-01'; expiry.dispatchEvent(new Event('change', { bubbles: true }));
       return go.getAttribute('aria-disabled') === 'false';
@@ -1187,7 +1200,7 @@ async function axeOn(page, label, suite, opts) {
   await page.evaluate(() => window.ARGUS.setTheme('light'));
   await page.waitForTimeout(80);
 
-  const prefGuard = await page.evaluate(async () => {
+  await page.evaluate(async () => {
     localStorage.setItem('argus.prefs', JSON.stringify({
       density: '"><img src=x>', theme: 'neon', timezone: 42, rail: 'yes'
     }));
@@ -1539,16 +1552,16 @@ async function axeOn(page, label, suite, opts) {
 
   const backoff = await page.evaluate(() => {
     const A = window.ARGUS;
-    A.setJitter(false);
+    A.__test.setJitter(false);
     const flat = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => A.backoffFor(n));
     const repeat = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => A.backoffFor(n));
-    A.setJitter(true);
+    A.__test.setJitter(true);
     const spread = [];
     for (let i = 0; i < 300; i++) spread.push(A.backoffFor(9));
-    A.setJitter(false);
-    const off = A.jitterEnabled();
-    A.setJitter(true);
-    return { flat, repeat, min: Math.min(...spread), max: Math.max(...spread), off, on: A.jitterEnabled() };
+    A.__test.setJitter(false);
+    const off = A.__test.jitterEnabled();
+    A.__test.setJitter(true);
+    return { flat, repeat, min: Math.min(...spread), max: Math.max(...spread), off, on: A.__test.jitterEnabled() };
   });
   rec('BACKOFF', 'the retry ladder doubles from one second and stops at the thirty second ceiling',
     backoff.flat.join(',') === '1000,2000,4000,8000,16000,30000,30000,30000,30000', backoff.flat.join(','));
@@ -1637,8 +1650,8 @@ async function axeOn(page, label, suite, opts) {
     const out = {
       panels: main.querySelectorAll('.card').length,
       loading: main.querySelectorAll('.skel').length,
-      errors: main.querySelectorAll('.empty.is-error').length,
-      errorText: (main.querySelector('.empty.is-error') || {}).textContent || '',
+      errors: main.querySelectorAll('.empty.is-error, .livepanel[data-state="unreachable"], .livepanel[data-state="failed"], .livepanel[data-state="timeout"]').length,
+      errorText: (main.querySelector('.empty.is-error, .livepanel[data-state="unreachable"], .livepanel[data-state="failed"], .livepanel[data-state="timeout"]') || {}).textContent || '',
       stale: /Showing the last value that could be read/.test(text),
       needles: /Needles/.test(text),
       reclaimable: /Reclaimable/.test(text),
@@ -1657,7 +1670,7 @@ async function axeOn(page, label, suite, opts) {
   rec('LIVE', 'a panel that has not answered yet shows a loading skeleton rather than an empty box',
     liveStates.loading > 0, `${liveStates.loading} skeletons`);
   rec('LIVE', 'a failed panel names its reason instead of going blank',
-    liveStates.errors === 1 && /could not reach the object store/.test(liveStates.errorText),
+    liveStates.errors === 1 && liveStates.errorText.indexOf('answered 503 for /api/storage/capacity') !== -1 && /Try again/.test(liveStates.errorText),
     liveStates.errorText.slice(0, 160));
   rec('LIVE', 'a stale panel keeps its last reading on screen and says so',
     liveStates.stale, JSON.stringify({ stale: liveStates.stale }));
@@ -1671,7 +1684,7 @@ async function axeOn(page, label, suite, opts) {
   await goto(page, 'overview');
   const sse = await page.evaluate(async () => {
     const A = window.ARGUS;
-    const st = A.storeState();
+    const st = A.__test.storeState();
     const realES = window.EventSource;
     const opened = [];
 
@@ -1699,12 +1712,12 @@ async function axeOn(page, label, suite, opts) {
     const previousMode = st.mode;
     window.EventSource = Fake;
     st.mode = A.MODE.LIVE;
-    A.setJitter(false);
+    A.__test.setJitter(false);
 
-    const states = [];
+    const seen = [];
     const close = A.subscribe('/api/events', ['deploys'], {
       on: { line: () => {} },
-      onState: (s, info) => states.push({ state: s, byBrowser: !!info.byBrowser, inMs: info.inMs === undefined ? null : info.inMs })
+      onState: (s, info) => seen.push({ state: s, byBrowser: !!info.byBrowser, inMs: info.inMs === undefined ? null : info.inMs })
     });
     await new Promise(r => setTimeout(r, 40));
 
@@ -1717,26 +1730,26 @@ async function axeOn(page, label, suite, opts) {
     es.readyState = 0;
     es.emit('error');
     const browserManaged = {
-      lastState: states[states.length - 1],
+      lastState: seen[seen.length - 1],
       socketsOpened: opened.length,
       sameSocket: Fake.last === es,
-      lastEventId: (A.streamSnapshot()[0] || {}).lastEventId
+      lastEventId: (A.__test.streamSnapshot()[0] || {}).lastEventId
     };
 
     es.readyState = 2;
     es.emit('error');
     await new Promise(r => setTimeout(r, 40));
     const clientManaged = {
-      lastState: states[states.length - 1],
+      lastState: seen[seen.length - 1],
       socketsOpened: opened.length
     };
 
     close();
-    const afterClose = A.streamSnapshot().length;
+    const afterClose = A.__test.streamSnapshot().length;
     window.EventSource = realES;
     st.mode = previousMode;
-    A.setJitter(true);
-    return { first, browserManaged, clientManaged, afterClose, states };
+    A.__test.setJitter(true);
+    return { first, browserManaged, clientManaged, afterClose, states: seen };
   });
   rec('STREAM', 'a subscription opens one stream and asks for the topics it needs',
     sse.first.socket && /topics=deploys/.test(sse.first.url || ''), sse.first.url || 'no socket');
@@ -1754,6 +1767,48 @@ async function axeOn(page, label, suite, opts) {
     JSON.stringify(sse.clientManaged));
   rec('STREAM', 'closing the last subscriber tears the stream down',
     sse.afterClose === 0, `${sse.afterClose} streams still held`);
+
+  const ended = await page.evaluate(async () => {
+    const A = window.ARGUS;
+    const st = A.__test.storeState();
+    const realES = window.EventSource;
+    const opened = [];
+    function Fake(url) { this.url = url; this.readyState = 0; this.handlers = {}; opened.push(this); }
+    Fake.prototype.addEventListener = function (name, fn) { (this.handlers[name] = this.handlers[name] || []).push(fn); };
+    Fake.prototype.removeEventListener = function (name, fn) { const a = this.handlers[name] || []; const i = a.indexOf(fn); if (i !== -1) a.splice(i, 1); };
+    Fake.prototype.close = function () { this.readyState = 2; };
+    Fake.prototype.emit = function (name, ev) { (this.handlers[name] || []).slice().forEach(fn => fn(ev || {})); };
+    const saved = { mode: st.mode, auth: st.auth, probeError: st.probeError, signedOut: st.signedOut };
+    window.EventSource = Fake;
+    st.mode = A.MODE.LIVE;
+    st.auth = { mode: 'session', authenticated: true, principal: { subject: 'alex', displayName: 'Alex Rivera', roles: ['admin'] } };
+    const why = [];
+    const closers = ['a', 'b', 'c'].map(t => A.subscribe('/api/events', [t], { on: { line: () => {} }, onUnavailable: r => why.push(r.reason) }));
+    await new Promise(r => setTimeout(r, 40));
+    const held = A.__test.streamSnapshot().length;
+    const refusedThird = why.indexOf('too-many-streams') !== -1;
+    opened.forEach(es => { es.readyState = 1; es.emit('open'); });
+    opened[0].emit('session-ended', { data: '' });
+    await new Promise(r => setTimeout(r, 1300));
+    const out = {
+      max: A.__test.MAX_OPEN_STREAMS, held, refusedThird,
+      signedOut: st.signedOut, streamsAfter: A.__test.streamSnapshot().length,
+      socketsAfter: opened.length, why: why.slice()
+    };
+    closers.forEach(c => c());
+    window.EventSource = realES;
+    const browse = [...document.querySelectorAll('.dialog-foot button')].find(b => /Browse sample data instead/.test(b.textContent));
+    if (browse) browse.click();
+    st.mode = saved.mode; st.auth = saved.auth; st.probeError = saved.probeError; st.signedOut = saved.signedOut; st.sessionEnded = false;
+    out.dialogLeft = !!document.querySelector('.dialog');
+    return out;
+  });
+  rec('STREAM', 'the console holds at most two live streams, the per-principal limit, and refuses a third locally',
+    ended.max === 2 && ended.held === 2 && ended.refusedThird, JSON.stringify(ended));
+  rec('STREAM', 'a session-ended frame closes every stream, signs the console out and never reconnects',
+    ended.signedOut === true && ended.streamsAfter === 0 && ended.socketsAfter === 2 && ended.why.filter(w => w === 'unauthenticated').length === 2,
+    JSON.stringify(ended));
+  rec('STREAM', 'the sign-in dialog the session end raised can be left for sample data', !ended.dialogLeft);
 
   await goto(page, 'overview');
   const paletteLive = await page.evaluate(async () => {
@@ -1936,7 +1991,7 @@ async function axeOn(page, label, suite, opts) {
     };
   });
   rec('ACT', 'approving a deployment moves it into flight and off the queue badge',
-    approved.state === 'inflight' && approved.approvals.indexOf('adil') !== -1 && approved.progress
+    approved.state === 'inflight' && approved.approvals.indexOf('alex') !== -1 && approved.progress
       && approved.before === '1' && approved.hidden, JSON.stringify(approved));
 
   await goto(page, 'identity');
@@ -2383,7 +2438,6 @@ async function axeOn(page, label, suite, opts) {
 
   await goto(page, 'ops/maintenance');
   const freeze = await page.evaluate(async () => {
-    const d = window.ARGUS.data;
     [...document.querySelectorAll('#main button')].find(b => /Declare a change freeze/.test(b.textContent)).click();
     await new Promise(r => setTimeout(r, 120));
     const why = document.getElementById('freeze-why');
@@ -2463,7 +2517,7 @@ async function axeOn(page, label, suite, opts) {
     return out;
   });
   rec('ACT', 'what you type in the recorded terminal is answered, recorded, and playable from Sessions once you disconnect',
-    recorded.answered && recorded.added && recorded.keys.join(',') === 'uptime,nosuchthing' && recorded.target === 'siem-01' && recorded.user === 'adil'
+    recorded.answered && recorded.added && recorded.keys.join(',') === 'uptime,nosuchthing' && recorded.target === 'siem-01' && recorded.user === 'alex'
       && /^#\/security\/sessions\?id=s-\d+$/.test(recorded.hash) && recorded.player && recorded.lines === 2 && recorded.audit === 'yes',
     JSON.stringify(recorded));
 
@@ -2669,7 +2723,7 @@ async function axeOn(page, label, suite, opts) {
   await goto(page, 'ops/alarms');
   const alarms = await page.evaluate(async () => {
     const d = window.ARGUS.data;
-    const states = [...document.querySelectorAll('#main tbody tr[data-key]')].map(t => t.dataset.key + ':' + t.querySelector('.pill').textContent.replace(/^[^A-Za-z]+/, ''));
+    const rowStates = [...document.querySelectorAll('#main tbody tr[data-key]')].map(t => t.dataset.key + ':' + t.querySelector('.pill').textContent.replace(/^[^A-Za-z]+/, ''));
     const inboxBefore = window.ARGUS.needsYou().filter(i => i.kind === 'Alarm').length;
     [...document.querySelectorAll('#main button')].find(b => b.textContent.trim() === 'Create alarm').click();
     await new Promise(r => setTimeout(r, 120));
@@ -2684,7 +2738,7 @@ async function axeOn(page, label, suite, opts) {
     [...document.querySelectorAll('.dialog-foot button')].find(b => b.textContent.trim() === 'Create alarm').click();
     await new Promise(r => setTimeout(r, 300));
     const created = d.alarms[d.alarms.length - 1];
-    const out = { states, inboxBefore, preview, hash: location.hash, created: created.name + ' ' + created.op + ' ' + created.threshold, audit: d.audit[0].action, inboxAfter: window.ARGUS.needsYou().filter(i => i.kind === 'Alarm').length, rows: document.querySelectorAll('#main tbody tr[data-key]').length };
+    const out = { states: rowStates, inboxBefore, preview, hash: location.hash, created: created.name + ' ' + created.op + ' ' + created.threshold, audit: d.audit[0].action, inboxAfter: window.ARGUS.needsYou().filter(i => i.kind === 'Alarm').length, rows: document.querySelectorAll('#main tbody tr[data-key]').length };
     d.alarms = d.alarms.filter(a => a !== created);
     return out;
   });
@@ -2750,6 +2804,39 @@ async function axeOn(page, label, suite, opts) {
   rec('TXT', 'the page title is the largest type and every size comes from the scale',
     scale.h1 > scale.tile && scale.tile > scale.card && scale.sizes.every(s => [11, 12, 13, 15, 20, 22, 25].indexOf(s) !== -1), JSON.stringify(scale));
 
+  const codec = await page.evaluate(() => {
+    const ui = window.ARGUS.ui;
+    const tokens = [{ key: 'owner', value: 'a,b:c%d e/f' }, { key: 'tier', value: 'plain' }];
+    const enc = ui.encodeTokens(tokens);
+    const dec = ui.decodeTokens(enc);
+    return { enc, same: JSON.stringify(dec) === JSON.stringify(tokens) };
+  });
+  rec('FILTER', 'filter tokens escape only percent, comma and colon, and decode back exactly',
+    codec.same && codec.enc === 'owner:a%2Cb%3Ac%25d e/f,tier:plain', codec.enc);
+  for (const screen of ['apps', 'audit', 'advisor']) {
+    await goto(page, screen);
+    const special = 'x,y:z%1 q';
+    const added = await page.evaluate(v => {
+      const sel = document.querySelector('#main .pf-field');
+      const input = document.querySelector('#main .pf-input');
+      if (!sel || !input) return null;
+      input.value = v;
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      input.value = 'plainword';
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return { key: sel.value, label: sel.options[sel.selectedIndex].textContent, hash: window.location.hash };
+    }, special);
+    if (!added) { rec('FILTER', screen + ' has a property filter to round-trip', false, 'no .pf-input'); continue; }
+    await page.evaluate(() => window.ARGUS.refresh());
+    await whenRendered(page, null, screen);
+    const back = await page.evaluate(() => Array.from(document.querySelectorAll('#main .pf-token-text')).map(n => n.textContent));
+    const raw = (added.hash.split('f=')[1] || '').split('&')[0];
+    rec('FILTER', screen + ': a filter written into the address comes back exactly after a reload',
+      back.indexOf(added.label + ': ' + special) !== -1 && back.indexOf(added.label + ': plainword') !== -1, JSON.stringify({ back, hash: added.hash }));
+    rec('FILTER', screen + ': a plain token is encoded once in the address, not twice',
+      raw.indexOf('plainword') !== -1 && raw.indexOf('%253A' + 'plainword') === -1 && raw.indexOf(added.key + '%3Aplainword') !== -1, raw);
+  }
+
   rec('CONS', 'no console errors', consoleErrors.length === 0, consoleErrors.slice(0, 4).join(' | '));
   rec('CONS', 'no failed requests', realFails.length === 0, realFails.slice(0, 4).join(' | '));
 
@@ -2779,5 +2866,5 @@ async function axeOn(page, label, suite, opts) {
   console.log(`\n  ${results.length - fails.length}/${results.length} passed. Screenshots in ${SHOTS}\n`);
 
   fs.writeFileSync(path.join(__dirname, 'last-run.json'), JSON.stringify(results, null, 2) + '\n');
-  process.exit(fails.length);
+  process.exit(fails.length ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

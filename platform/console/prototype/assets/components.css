@@ -89,7 +89,15 @@
 .crumb-link { color: var(--muted); text-decoration: none; padding: 5px 6px; margin: -5px -6px; border-radius: 6px; }
 .crumb-link:hover { color: var(--brand); text-decoration: underline; }
 
-.tablewrap { overflow-x: auto; border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px; background: var(--paper); }
+.tablewrap { overflow-x: auto; border: 1px solid rgba(var(--ink-rgb),.1); border-radius: 14px; background: var(--paper);
+  background-image: linear-gradient(to right, var(--paper) 40%, rgba(var(--paper-rgb),0)),
+    linear-gradient(to left, var(--paper) 40%, rgba(var(--paper-rgb),0)),
+    linear-gradient(to right, rgba(var(--pine-rgb),.08), rgba(var(--pine-rgb),0)),
+    linear-gradient(to left, rgba(var(--pine-rgb),.08), rgba(var(--pine-rgb),0));
+  background-position: left center, right center, left center, right center;
+  background-size: 28px 100%, 28px 100%, 14px 100%, 14px 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll; }
 .tablewrap.is-virtual { overflow-y: auto; max-height: min(70vh, 640px); }
 .tablewrap.is-virtual thead th { position: sticky; top: 0; z-index: 2; }
 .tablewrap.is-virtual tr.vspacer td { border: none; }
@@ -137,6 +145,7 @@ th[aria-sort="ascending"] .th-arrow, th[aria-sort="descending"] .th-arrow { opac
 
 .tabs { min-width: 0; }
 .tablist { display: flex; gap: 4px; border-bottom: 1px solid rgba(var(--ink-rgb),.12); overflow-x: auto; }
+@media (max-width: 640px) { .tablist { flex-wrap: wrap; overflow-x: visible; row-gap: 2px; } }
 .tab { min-height: 30px; padding: 8px 14px; border: none; background: none; font: inherit; font-size: var(--fs-md);
   font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--ink); }
@@ -354,6 +363,7 @@ body.has-drawer .main { padding-bottom: calc(max(46vh, 260px) + 24px); }
 .logline .lvl-error { color: var(--bad-log); }
 .logline .lvl-warn { color: var(--warn-log); }
 .logline .lvl-info { color: var(--ok-soft); }
+:root[data-theme="dark"] .logline .lvl-info { color: var(--ok-cell-ink); }
 
 .logline .lvl-debug { color: var(--term-muted); }
 .logts { color: var(--term-muted); }

@@ -1,5 +1,6 @@
 module.exports = async function (ctx) {
   const { page, rec, goto, waitFor, origin, get } = ctx;
+  const SUBJECT = ctx.subject || 'alex';
 
   const fetchJson = async (p) => {
     try {
@@ -26,8 +27,15 @@ module.exports = async function (ctx) {
     const out = { cards: {} };
     Object.keys(cards).forEach((k) => {
       const t = cards[k].querySelector('table');
+      const block = cards[k].querySelector('.stateblock');
+      const panel = cards[k].querySelector('.livepanel');
       out.cards[k] = {
         text: cards[k].innerText,
+        panelState: panel ? panel.getAttribute('data-state') : null,
+        blockState: block ? block.getAttribute('data-state') : null,
+        blockReason: block ? block.getAttribute('data-reason') : null,
+        stamped: !!cards[k].querySelector('p.readstamp[data-read-at]'),
+        retry: Array.prototype.some.call(cards[k].querySelectorAll('button'), (b) => /Try again/.test(b.textContent)),
         rows: t ? Array.prototype.map.call(t.querySelectorAll('tbody tr'), (tr) => Array.prototype.map.call(tr.children, (c) => c.textContent.trim())) : []
       };
     });
@@ -36,7 +44,7 @@ module.exports = async function (ctx) {
     out.notInStack = Array.prototype.map.call(document.querySelectorAll('[data-not-in-stack]'), (n) => n.getAttribute('data-not-in-stack'));
     out.sample = document.querySelectorAll('[data-sample-notice]').length;
     out.buttons = Array.prototype.map.call(main.querySelectorAll('button'), (b) => b.textContent.trim());
-    out.errors = document.querySelectorAll('.empty.is-error').length;
+    out.errors = document.querySelectorAll('#main [data-state="failed"], #main [data-state="unreachable"], #main [data-state="timeout"]').length;
     return out;
   });
 
@@ -46,21 +54,37 @@ module.exports = async function (ctx) {
   await settle();
   const p = await snap();
   const ops = p.cards['Console operators'] || { text: '', rows: [] };
-  const pg = p.cards['PostgreSQL roles'] || { text: '' };
-  const os = p.cards['Object store identities'] || { text: '' };
+  const pg = p.cards['PostgreSQL roles'] || { text: '', rows: [] };
+  const os = p.cards['Object store identities'] || { text: '', rows: [] };
   const sa = p.cards['Declared service accounts'] || { text: '', rows: [] };
 
   rec('IDENTITY live: the first tab is named Principals', p.tabs[0] === 'Principals', p.tabs.join('|'));
   const apiOps = (apiPrincipals.console && apiPrincipals.console.operators) || [];
-  rec('IDENTITY live: console operators panel lists the harness operator adil with role operator',
-    apiOps.some((o) => o.subject === 'adil') && ops.rows.some((r) => r[0].indexOf('adil') === 0 && /operator/.test(r[2])), ops.rows.map((r) => r[0] + ':' + r[2]).join(';'));
-  rec('IDENTITY live: the signed-in operator is marked', ops.rows.some((r) => /adil/.test(r[0]) && /you/.test(r[0])), ops.rows.length + ' rows');
-  rec('IDENTITY live: the PostgreSQL panel says not configured', apiPrincipals.postgres && apiPrincipals.postgres.reason === 'not-configured' && /not configured/i.test(pg.text), pg.text.slice(0, 60).replace(/\s+/g, ' '));
-  rec('IDENTITY live: the object store panel says not configured', apiPrincipals.objectStore && apiPrincipals.objectStore.reason === 'not-configured' && /not configured/i.test(os.text), os.text.slice(0, 60).replace(/\s+/g, ' '));
+  rec('IDENTITY live: console operators panel lists the signed-in operator with role admin',
+    apiOps.some((o) => o.subject === SUBJECT) && ops.rows.some((r) => r[0].indexOf(SUBJECT) === 0 && /admin/.test(r[2])), ops.rows.map((r) => r[0] + ':' + r[2]).join(';'));
+  rec('IDENTITY live: console operators panel lists every operator the API returns',
+    apiOps.length > 0 && ops.rows.length === apiOps.length && apiOps.every((o) => ops.rows.some((r) => r[0].indexOf(o.subject) === 0)), ops.rows.length + ' of ' + apiOps.length);
+  rec('IDENTITY live: the signed-in operator is marked', ops.rows.some((r) => r[0].indexOf(SUBJECT) === 0 && /you/.test(r[0])), ops.rows.length + ' rows');
+  const pgPart = apiPrincipals.postgres || {};
+  if (pgPart.ok === false) {
+    rec('IDENTITY live: the PostgreSQL panel says not configured', pgPart.reason === 'not-configured' && pg.blockState === 'notConfigured' && pg.blockReason === 'not-configured' && !pg.retry, pg.blockState + '/' + pg.blockReason);
+  } else {
+    const pgRoles = (pgPart.roles || []).filter((r) => !r.predefined);
+    rec('IDENTITY live: the PostgreSQL panel lists every non-predefined role the API returns, with no state block',
+      pgRoles.length > 0 && !pg.blockState && pg.rows.length === pgRoles.length && pgRoles.every((r) => pg.rows.some((row) => row[0] === r.name)), pg.rows.length + ' of ' + pgRoles.length);
+  }
+  const osPart = apiPrincipals.objectStore || {};
+  if (osPart.ok === false) {
+    rec('IDENTITY live: the object store panel says not configured', osPart.reason === 'not-configured' && os.blockState === 'notConfigured' && os.blockReason === 'not-configured' && !os.retry, os.blockState + '/' + os.blockReason);
+  } else {
+    const ids = osPart.identities || [];
+    rec('IDENTITY live: the object store panel lists every identity the API returns, with no state block',
+      ids.length > 0 && !os.blockState && os.rows.length === ids.length && ids.every((i) => os.rows.some((row) => row[0] === i.name)), os.rows.length + ' of ' + ids.length);
+  }
   const accts = (apiPrincipals.serviceAccounts && apiPrincipals.serviceAccounts.accounts) || [];
   rec('IDENTITY live: the declared accounts panel lists every account from the API',
     accts.length > 0 && sa.rows.length === accts.length && accts.every((a) => sa.rows.some((r) => r[0] === a.name)), sa.rows.length + ' of ' + accts.length);
-  rec('IDENTITY live: every panel carries the time it was read', ['Console operators', 'PostgreSQL roles', 'Object store identities', 'Declared service accounts'].every((k) => /Read at/.test((p.cards[k] || {}).text || '')), 'read-at hints');
+  rec('IDENTITY live: every panel carries the time it was read', ['Console operators', 'PostgreSQL roles', 'Object store identities', 'Declared service accounts'].every((k) => (p.cards[k] || {}).panelState === 'ok' && (p.cards[k] || {}).stamped), 'read stamps');
   rec('IDENTITY live: no fixture person and no offboard control on the principals tab', !FIXTURE.test(p.text) && !p.buttons.some((b) => /offboard|request elevation/i.test(b)) && p.sample === 0, (p.text.match(FIXTURE) || [''])[0] + ' / ' + p.buttons.join('|'));
   rec('IDENTITY live: no error state on the principals tab', p.errors === 0, String(p.errors));
 
@@ -84,12 +108,20 @@ module.exports = async function (ctx) {
 
   await tab('secrets');
   await settle();
-  await waitFor(page, () => /OpenBao is not configured|seal/i.test(document.body.innerText), null, 6000).catch(() => {});
+  await waitFor(page, () => { const c = [...document.querySelectorAll('#main .card')].find((x) => /OpenBao seal status/.test(x.textContent)); return !!c && !c.querySelector('.skel'); }, null, 6000).catch(() => {});
   const s = await snap();
-  rec('IDENTITY live: the secrets tab says OpenBao is not configured', apiSeal.state === 'not-configured' && /OpenBao is not configured/.test(s.text), (apiSeal.state || '') + ' / ' + (/OpenBao is not configured/.test(s.text)));
+  const sealCard = s.cards['OpenBao seal status'] || {};
+  if (apiSeal.state === 'not-configured') {
+    rec('IDENTITY live: the secrets tab puts the seal panel in the not-configured state', sealCard.blockState === 'notConfigured' && sealCard.panelState === 'notConfigured', (apiSeal.state || '') + ' / ' + sealCard.panelState + '/' + sealCard.blockState);
+  } else {
+    const sealWord = apiSeal.sealed === true ? 'sealed' : apiSeal.sealed === false ? 'unsealed' : 'unknown';
+    rec('IDENTITY live: the secrets tab reads the seal: the panel is ok, stamped, and shows the seal state the API reports',
+      sealCard.panelState === 'ok' && sealCard.stamped && new RegExp('Sealed\\s+' + sealWord + '\\b', 'i').test(sealCard.text || ''),
+      (apiSeal.state || '') + '/' + sealWord + ' / ' + sealCard.panelState + ' stamped=' + sealCard.stamped);
+  }
   rec('IDENTITY live: lease counts and rotation ages are not-in-stack', s.notInStack.indexOf('Secret lease counts and rotation ages') !== -1, s.notInStack.join(','));
   rec('IDENTITY live: no rotate or revoke buttons and no fixture secret paths', !s.buttons.some((b) => /rotate|revoke|who read|request value/i.test(b)) && !/secret\/orders|reads, 24/i.test(s.text) && s.sample === 0, s.buttons.join('|'));
-  rec('IDENTITY live: the seal panel carries its read time', /Read at/.test(s.text), 'read-at hint');
+  rec('IDENTITY live: the seal panel offers no retry', sealCard.retry === false, String(sealCard.retry));
 
   await page.evaluate(() => { window.location.hash = '#/identity/people'; });
   await page.waitForTimeout(150);

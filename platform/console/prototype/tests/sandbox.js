@@ -34,18 +34,23 @@ const ENVS = [
 const results = [];
 const rec = (suite, id, pass, detail) => results.push({ suite, id, pass, detail: detail || '' });
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 async function settle(page, ms) { await page.waitForTimeout(ms || 140); }
 
 async function goRoute(page, route) {
-  await page.evaluate(r => { window.location.hash = '#/' + r; }, route);
+  const before = await page.evaluate(r => {
+    const g = (window.ARGUS && window.ARGUS.state.renderedGen) || 0;
+    if (window.location.hash === '#/' + r) return null;
+    window.location.hash = '#/' + r;
+    return g;
+  }, route);
   try {
     await page.waitForFunction(
-      r => window.ARGUS && window.ARGUS.state.route === r.split('/')[0],
-      route, { timeout: 4000 });
+      a => {
+        const s = window.ARGUS && window.ARGUS.state;
+        return !!s && s.route === a.r.split('/')[0] && (a.g === null || s.renderedGen > a.g) && s.pendingPanels === 0;
+      },
+      { r: route, g: before }, { timeout: 4000 });
   } catch (e) { return false; }
-  await settle(page, 90);
   return true;
 }
 
@@ -166,9 +171,9 @@ async function reset(page) {
         focus: document.activeElement ? (document.activeElement.className || document.activeElement.tagName) : ''
       }));
       const before = await snapshot();
-      const info = await page.evaluate(i => {
+      const info = await page.evaluate(at => {
         const list = document.querySelectorAll('#main button, #main a[href], .side .nav, .top button');
-        const n = list[i];
+        const n = list[at];
         if (!n) return null;
         const rect = n.getBoundingClientRect();
         return {
@@ -185,9 +190,9 @@ async function reset(page) {
 
       let caught = null;
       try {
-        await page.evaluate(i => {
+        await page.evaluate(at => {
           const list = document.querySelectorAll('#main button, #main a[href], .side .nav, .top button');
-          if (list[i]) list[i].click();
+          if (list[at]) list[at].click();
         }, i);
       } catch (e) { caught = e.message; }
       await settle(page, 120);
@@ -229,7 +234,7 @@ async function reset(page) {
       const opener = document.getElementById('helpbtn');
       opener.focus();
       eval(src);
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(done => setTimeout(done, 200));
       const dlg = document.querySelector('.dialog[role="dialog"]');
       if (!dlg) return { opened: false };
       const modal = dlg.getAttribute('aria-modal');
@@ -237,7 +242,7 @@ async function reset(page) {
         !!document.getElementById(dlg.getAttribute('aria-labelledby'));
       const inside = dlg.contains(document.activeElement);
       dlg.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await new Promise(r => setTimeout(r, 200));
+      await new Promise(done => setTimeout(done, 200));
       return {
         opened: true, modal, labelled, inside,
         closed: !document.querySelector('.dialog[role="dialog"]'),
@@ -261,20 +266,20 @@ async function reset(page) {
 
   let menuBad = [];
   for (let i = 0; i < menuCount; i++) {
-    const r = await page.evaluate(async i => {
+    const r = await page.evaluate(async at => {
       document.querySelectorAll('.menu[role="menu"]').forEach(n => n.remove());
-      const t = document.querySelectorAll('.menubtn')[i];
+      const t = document.querySelectorAll('.menubtn')[at];
       t.click();
-      await new Promise(r => setTimeout(r, 150));
+      await new Promise(done => setTimeout(done, 150));
       const pop = document.querySelector('.menu[role="menu"]');
-      if (!pop) return { i, opened: false };
+      if (!pop) return { i: at, opened: false };
       const rect = pop.getBoundingClientRect();
       const inView = rect.left >= 0 && rect.top >= 0 &&
         rect.right <= window.innerWidth + 0.5 && rect.bottom <= window.innerHeight + 0.5;
       const onBody = pop.parentElement === document.body;
       pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await new Promise(r => setTimeout(r, 120));
-      return { i, opened: true, inView, onBody, closed: !document.querySelector('.menu[role="menu"]') };
+      await new Promise(done => setTimeout(done, 120));
+      return { i: at, opened: true, inView, onBody, closed: !document.querySelector('.menu[role="menu"]') };
     }, i);
     if (!r.opened || !r.inView || !r.onBody || !r.closed) menuBad.push(JSON.stringify(r));
   }
@@ -403,11 +408,11 @@ async function reset(page) {
         const th = h.closest('th');
         const label = (h.textContent || '').trim();
         try {
-          h.click(); await new Promise(r => setTimeout(r, 40));
+          h.click(); await new Promise(done => setTimeout(done, 40));
           const a = th.getAttribute('aria-sort');
           const orderA = Array.prototype.map.call(th.closest('table').querySelectorAll('tbody tr'),
             n => n.dataset.key || n.textContent.slice(0, 12)).join('|');
-          h.click(); await new Promise(r => setTimeout(r, 40));
+          h.click(); await new Promise(done => setTimeout(done, 40));
           const b = th.getAttribute('aria-sort');
           const orderB = Array.prototype.map.call(th.closest('table').querySelectorAll('tbody tr'),
             n => n.dataset.key || n.textContent.slice(0, 12)).join('|');
@@ -645,5 +650,5 @@ async function reset(page) {
   console.log(`  Screenshots in ${SHOTS}\n`);
 
   fs.writeFileSync(path.join(__dirname, 'sandbox-last-run.json'), JSON.stringify(results, null, 2) + '\n');
-  process.exit(fails.length);
+  process.exit(fails.length ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

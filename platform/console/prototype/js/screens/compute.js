@@ -3,21 +3,6 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
-  function registerScreen(id, def) {
-    if (typeof A.screen === 'function') { A.screen(id, def); return; }
-    var q = (A._screenQueue = A._screenQueue || []);
-    q.push([id, def]);
-    if (q.length > 1) return;
-    Object.defineProperty(A, 'screen', {
-      configurable: true,
-      get: function () { return undefined; },
-      set: function (fn) {
-        Object.defineProperty(A, 'screen', { value: fn, writable: true, configurable: true, enumerable: true });
-        while (q.length) { var p = q.shift(); fn(p[0], p[1]); }
-      }
-    });
-  }
-
   function mono(text) { return el('code.mono', { text: String(text) }); }
 
   function named(label, suffix) { return [label, el('span.sr', { text: ' ' + suffix })]; }
@@ -379,10 +364,7 @@
     var name = ctx.rest[1];
     var host = d.hosts.filter(function (h) { return h.name === name; })[0];
     if (!host) {
-      mount.appendChild(ui.errorState(
-        'No such host',
-        'No host on this platform is called "' + name + '". It may have been decommissioned, or the link may come from an older runbook.',
-        function () { A.go('compute'); }));
+      mount.appendChild(ui.notFound('host', name, 'compute/hosts', 'All hosts'));
       return;
     }
 
@@ -594,10 +576,7 @@
     var name = ctx.rest[1];
     var vm = d.vmByName(name);
     if (!vm) {
-      mount.appendChild(ui.errorState(
-        'No such virtual machine',
-        'No machine on this platform is called "' + name + '". It may have been renamed or deleted, or the link may come from an older runbook.',
-        function () { A.go('compute'); }));
+      mount.appendChild(ui.notFound('virtual machine', name, 'compute/vms', 'All virtual machines'));
       return;
     }
 
@@ -628,33 +607,10 @@
     }));
   }
 
-  var HOST_WINDOW_MS = 21600000;
-  var HOST_POINTS = 120;
-  var CONCURRENCY = 4;
-
   function decide(fn) {
     var m = A.storeMode();
     if (m === A.MODE.LIVE || m === A.MODE.SAMPLE) { fn(m); return; }
     A.whenProbed(fn);
-  }
-
-  function bytesText(n) {
-    if (n === null || n === undefined) return '-';
-    var gb = n / 1073741824;
-    if (gb >= 1024) return fmt.num(gb / 1024, 2) + ' TB';
-    if (gb >= 1) return fmt.num(gb, 1) + ' GB';
-    return fmt.num(n / 1048576, 0) + ' MB';
-  }
-
-  function readStamp(env) {
-    return el('p.hint', { text: 'Read ' + fmt.stamp(new Date(env.at)) + '.' });
-  }
-
-  function ratioBar(label, ratio) {
-    return el('div.row', [
-      ui.bar(ratio, { label: label + ' ' + fmt.ratioPct(ratio, 0), tone: ratio >= 0.85 ? 'warn' : null }),
-      el('span.num', { text: fmt.ratioPct(ratio, 0) })
-    ]);
   }
 
   function containerTone(state) {
@@ -671,167 +627,80 @@
     return el('span.muted', { text: 'no health check' });
   }
 
-  function dockerMissing(body, e) {
-    body.appendChild(ui.emptyState(
-      'Containers are not configured',
-      'The Docker socket proxy is not reachable from this console, so no container can be listed or inspected. ' +
-        (e && e.message ? e.message + ' ' : '') + 'Set ARGUS_DOCKER_PROXY_URL to the proxy and reload.'));
+  function systemLink(text) {
+    return el('p.hint', [text + ' ', A.link('Open the System screen', 'system', null, null, 'rlink')]);
   }
 
-  function metricsMissing(body, e) {
-    body.appendChild(ui.emptyState(
-      'Prometheus is not configured',
-      'No metrics server is reachable from this console, so there is no history to draw. ' +
-        (e && e.message ? e.message + ' ' : '') + 'Set ARGUS_PROM_URL and reload.'));
-  }
-
-  function liveSeriesPanel(title, name, reading) {
-    return A.livePanel(title,
-      '/api/metrics/series?name=' + encodeURIComponent(name) + '&window=' + HOST_WINDOW_MS + '&points=' + HOST_POINTS,
-      function (body, payload, env) {
-        if (!payload || payload.ok === false) {
-          if (payload && payload.reason === 'not-configured') { metricsMissing(body, payload); return; }
-          body.appendChild(el('div.callout.warn', [
-            el('strong', { text: 'This series could not be read.' }),
-            el('p', { text: (payload && payload.message) || 'The metrics reader gave no reason.' })
-          ]));
-          return;
-        }
-        var values = A.seriesValues(payload);
-        var present = values.filter(function (v) { return v !== null; });
-        if (!present.length) {
-          body.appendChild(ui.emptyState('No sample in this window',
-            'Prometheus answered and had nothing to return for the last 6 hours.'));
-          body.appendChild(readStamp(env));
-          return;
-        }
-        var latest = present[present.length - 1];
-        body.appendChild(el('div.row', [
-          el('span.num', { text: fmt.ratioPct(latest, 1) }),
-          el('span.muted', { text: reading }),
-          el('span.spacer'),
-          ui.sparkline(values, {
-            min: 0, max: 1, width: 220, height: 34,
-            label: title + ' over the last 6 hours, on a fixed zero to one hundred per cent scale, now ' + fmt.ratioPct(latest, 1)
-          })
-        ]));
-        body.appendChild(readStamp(env));
-      },
-      { ttlMs: 15000, errorTitle: title + ' could not be read', notConfigured: metricsMissing });
-  }
-
-  function seriesPair() {
-    return el('div.grid.grid-2', [
-      liveSeriesPanel('Host CPU busy', 'hostCpuBusyRatio', 'busy now'),
-      liveSeriesPanel('Host memory used', 'hostMemoryUsedRatio', 'used now')
-    ]);
-  }
-
-  function volumesText(h) {
-    return (h.disks || []).filter(function (x) { return !x.error; }).map(function (x) {
-      return x.mount + ' ' + bytesText(x.freeBytes) + ' free';
-    }).join(', ') || 'none readable';
+  function hostRows(h) {
+    return [{ hostname: h.hostname, platform: h.platform + ' ' + h.release + ' (' + h.arch + ')', cores: h.cpu ? h.cpu.cores : null, uptimeSeconds: h.uptimeSeconds }];
   }
 
   function liveHostsTab() {
     return el('div.stack', [
-      A.livePanel('This host', '/api/host', function (body, h, env) {
-        var cols = [
+      A.livePanel('Hosts', '/api/host', function (body, h) {
+        body.appendChild(ui.table([
           { key: 'hostname', label: 'Name', render: function (r) { return A.link(r.hostname, 'compute', ['host', r.hostname]); } },
-          { key: 'platform', label: 'Platform', render: function (r) { return r.platform + ' ' + r.release + ' (' + r.arch + ')'; } },
-          { key: 'cores', label: 'Cores', align: 'right', sort: function (r) { return r.cpu.cores; }, render: function (r) { return fmt.num(r.cpu.cores); } },
-          { key: 'cpu', label: 'CPU busy', sort: function (r) { return r.cpu.usageRatio; }, render: function (r) { return ratioBar(r.hostname + ' CPU', r.cpu.usageRatio); } },
-          { key: 'mem', label: 'Memory used', sort: function (r) { return r.memory.usageRatio; }, render: function (r) { return ratioBar(r.hostname + ' memory', r.memory.usageRatio); } },
-          { key: 'uptime', label: 'Uptime', align: 'right', sort: function (r) { return r.uptimeSeconds; }, render: function (r) { return fmt.dur(r.uptimeSeconds); } },
-          { key: 'volumes', label: 'Volumes', sortable: false, render: function (r) { return volumesText(r); } }
-        ];
-        body.appendChild(ui.table(cols, [h], {
-          caption: 'The host this stack runs on, with cores, utilisation, uptime and volume free space',
+          { key: 'platform', label: 'Platform' },
+          { key: 'cores', label: 'Cores', align: 'right', render: function (r) { return r.cores === null ? '-' : fmt.num(r.cores); } },
+          { key: 'uptimeSeconds', label: 'Up since boot', align: 'right', render: function (r) { return fmt.dur(r.uptimeSeconds); } }
+        ], hostRows(h), {
+          caption: 'The hosts this stack runs on',
           sortKey: 'hostname',
           rowKey: function (r) { return r.hostname; },
           onRow: function (r) { A.go('compute', ['host', r.hostname]); }
         }));
-        body.appendChild(readStamp(env));
-      }, { ttlMs: 2000, errorTitle: 'Host telemetry could not be read' }),
-      seriesPair(),
+        body.appendChild(systemLink('One host. Its CPU, memory, volumes and history are on the System screen.'));
+      }, { ttlMs: 10000 }),
       A.notInStack('Per-host patch age, WDAC mode and Storage Spaces Direct health, and the other hosts of a cluster,',
         'have no source here. This stack is one host running containers: no Hyper-V, no Storage Spaces Direct and no patching service.')
     ]);
   }
 
-  function inspectPath(name) { return '/api/containers/inspect?id=' + encodeURIComponent(name); }
-
-  function uptimeOf(state) {
-    if (!state || !state.running || !state.startedAt) return null;
-    var t = Date.parse(state.startedAt);
+  function uptimeOf(startedAt, running) {
+    if (!running || !startedAt) return null;
+    var t = Date.parse(startedAt);
     return isFinite(t) ? Math.max(0, Math.round((Date.now() - t) / 1000)) : null;
   }
 
-  function renderContainers(alive) {
-    return function (body, d, env) {
-      if (!d || d.ok === false) {
-        if (d && d.reason === 'not-configured') { dockerMissing(body, d); return; }
-        body.appendChild(ui.errorState('Containers could not be read', (d && d.message) || 'The request failed.', function () { A.forget('/api/containers'); A.refresh(); }));
-        return;
-      }
-      var rows = d.containers || [];
-      var cells = Object.create(null);
-      function nameOf(c) { return c.names[0] || c.id; }
-      var cols = [
-        { key: 'name', label: 'Name', sort: nameOf, render: function (c) { return A.link(nameOf(c), 'compute', ['vm', nameOf(c)]); } },
-        { key: 'image', label: 'Image', render: function (c) { return mono(c.image || '-'); } },
-        { key: 'state', label: 'State', status: true, render: function (c) { return ui.pill(c.state, containerTone(c.state)); } },
-        { key: 'health', label: 'Health', status: true, render: function (c) { return healthPill(c.health); } },
-        {
-          key: 'restarts', label: 'Restarts', align: 'right', sortable: false,
-          render: function (c) { var s = el('span.num', { text: '...' }); (cells[nameOf(c)] = cells[nameOf(c)] || {}).restarts = s; return s; }
-        },
-        {
-          key: 'uptime', label: 'Uptime', align: 'right', sortable: false,
-          render: function (c) { var s = el('span', { text: c.state === 'running' ? '...' : '-' }); (cells[nameOf(c)] = cells[nameOf(c)] || {}).uptime = s; return s; }
-        }
-      ];
-      body.appendChild(el('p.hint', { text: fmt.num(d.count) + ' containers, ' + fmt.num(d.running) + ' running.' }));
-      body.appendChild(ui.table(cols, rows, {
-        caption: 'Containers on this host, with image, state, health, restart count and uptime',
-        sortKey: 'name',
-        empty: 'The Docker proxy answered and lists no container.',
-        rowKey: nameOf,
-        onRow: function (c) { A.go('compute', ['vm', nameOf(c)]); }
-      }));
-      body.appendChild(readStamp(env));
+  function nameOf(c) { return (c.names && c.names[0]) || c.id; }
 
-      var queue = rows.slice();
-      function next() {
-        if (!alive() || !queue.length) return;
-        var c = queue.shift(), name = nameOf(c);
-        A.read(inspectPath(name), { ttlMs: 15000 }).then(function (r) {
-          if (!alive()) return;
-          var slot = cells[name];
-          if (slot) {
-            if (r.ok && r.data && r.data.ok !== false) {
-              var st = r.data.state || {};
-              if (slot.restarts) slot.restarts.textContent = st.restartCount === null || st.restartCount === undefined ? '-' : fmt.num(st.restartCount);
-              var up = uptimeOf(st);
-              if (slot.uptime) slot.uptime.textContent = up === null ? '-' : fmt.dur(up);
-            } else {
-              if (slot.restarts) slot.restarts.textContent = '-';
-              if (slot.uptime) slot.uptime.textContent = '-';
-            }
+  function renderContainers(body, data) {
+    var rows = data.containers || [];
+    var cols = [
+      { key: 'name', label: 'Name', sort: nameOf, render: function (c) { return A.link(nameOf(c), 'compute', ['vm', nameOf(c)]); } },
+      { key: 'image', label: 'Image', render: function (c) { return mono(c.image || '-'); } },
+      { key: 'state', label: 'State', status: true, render: function (c) { return ui.pill(c.state, containerTone(c.state)); } },
+      { key: 'health', label: 'Health', status: true, render: function (c) { return healthPill(c.health); } },
+      {
+        key: 'restartCount', label: 'Restarts', align: 'right',
+        sort: function (c) { return c.restartCount === null || c.restartCount === undefined ? null : c.restartCount; },
+        render: function (c) {
+          if (c.restartCount === null || c.restartCount === undefined) {
+            return el('span.muted', { text: 'unknown', title: c.detailUnavailable ? c.detailUnavailable.message : null });
           }
-          next();
-        });
+          return el('span.num', { text: fmt.num(c.restartCount) });
+        }
+      },
+      {
+        key: 'uptime', label: 'Up for', align: 'right',
+        sort: function (c) { return uptimeOf(c.startedAt, c.state === 'running'); },
+        render: function (c) { var up = uptimeOf(c.startedAt, c.state === 'running'); return up === null ? '-' : fmt.dur(up); }
       }
-      for (var i = 0; i < CONCURRENCY; i++) next();
-    };
+    ];
+    body.appendChild(el('p.hint', {
+      text: fmt.num(data.count) + ' containers, ' + fmt.num(data.running) + ' running. Restarts count since each container was created.'
+    }));
+    body.appendChild(ui.table(cols, rows, {
+      caption: 'Containers on this host, with image, state, health, restart count and time up',
+      sortKey: 'name',
+      empty: 'The Docker proxy answered and lists no container.',
+      rowKey: nameOf,
+      onRow: function (c) { A.go('compute', ['vm', nameOf(c)]); }
+    }));
   }
 
   function liveInstancesTab() {
-    var live = true;
-    A.onLeave(function () { live = false; });
-    return A.livePanel('Containers', '/api/containers', renderContainers(function () { return live; }), {
-      ttlMs: 10000, errorTitle: 'Containers could not be read', notConfigured: dockerMissing
-    });
+    return A.livePanel('Containers', '/api/containers/summary', renderContainers, { ttlMs: 10000, skeletonRows: 5 });
   }
 
   function liveFabricTab() {
@@ -845,7 +714,7 @@
   }
 
   function renderListLive(box, ctx) {
-    box.appendChild(ui.pageHeader('Compute', 'This host and the containers running on it, read live.'));
+    box.appendChild(ui.pageHeader('Compute', 'The hosts and the containers running on them, read live.'));
     box.appendChild(ui.tabs([
       { id: 'hosts', label: 'Hosts', render: liveHostsTab },
       { id: 'vms', label: 'Instances', render: liveInstancesTab },
@@ -860,73 +729,43 @@
 
   function liveHostDetail(mount, ctx) {
     var name = ctx.rest[1];
-    var head = ui.pageHeader(name, 'Looking this host up in the stack.');
-    var extras = el('div.stack');
-    mount.appendChild(head);
-    var panel = A.livePanel('Host', '/api/host', function (body, h, env) {
-      var h1 = head.querySelector('h1');
+    mount.appendChild(ui.pageHeader(name, 'A host this stack runs on.'));
+    var panel = A.livePanel('Host', '/api/host', function (body, h) {
       if (String(h.hostname).toLowerCase() !== String(name).toLowerCase()) {
-        if (h1) h1.textContent = 'No such host';
-        if (extras.parentNode) extras.parentNode.removeChild(extras);
-        body.appendChild(ui.errorState('No such host in this stack',
-          'This stack has one host, "' + h.hostname + '", and no host is called "' + name + '". The link may come from an older runbook or from the sample data.',
-          function () { A.go('compute'); }));
+        ui.clear(mount);
+        mount.appendChild(ui.notFound('host', name, 'compute/hosts', 'All hosts'));
         return;
       }
-      if (h1) h1.textContent = h.hostname;
-      var desc = head.querySelector('.pagehead-desc');
-      if (desc) desc.textContent = h.platform + ' ' + h.release + ' (' + h.arch + '), the host this stack runs on.';
-      body.appendChild(el('div.tiles', [
-        ui.statTile('CPU busy', fmt.ratioPct(h.cpu.usageRatio, 0), { note: fmt.num(h.cpu.cores) + ' cores' }),
-        ui.statTile('Memory used', fmt.ratioPct(h.memory.usageRatio, 0), { note: bytesText(h.memory.usedBytes) + ' of ' + bytesText(h.memory.totalBytes) }),
-        ui.statTile('Uptime', fmt.dur(h.uptimeSeconds), { note: 'booted ' + h.bootedAt.slice(0, 16).replace('T', ' ') + 'Z' })
-      ]));
       body.appendChild(ui.dl([
         ['Name', mono(h.hostname)],
         ['Platform', h.platform + ' ' + h.release + ' (' + h.arch + ')'],
-        ['CPU', h.cpu.model + ', ' + fmt.num(h.cpu.cores) + ' cores']
+        ['CPU', (h.cpu ? h.cpu.model + ', ' + fmt.num(h.cpu.cores) + ' cores' : '-')],
+        ['Booted', h.bootedAt ? fmt.stamp(new Date(h.bootedAt)) : '-']
       ]));
-      body.appendChild(readStamp(env));
-      extras.insertBefore(ui.card('Volumes', ui.table([
-        { key: 'mount', label: 'Mount', render: function (x) { return mono(x.mount); } },
-        { key: 'usageRatio', label: 'Used', render: function (x) { return x.error ? ui.pill(x.error, 'idle') : ratioBar(x.mount, x.usageRatio); } },
-        { key: 'freeBytes', label: 'Free', align: 'right', render: function (x) { return x.error ? '-' : bytesText(x.freeBytes); } },
-        { key: 'totalBytes', label: 'Size', align: 'right', render: function (x) { return x.error ? '-' : bytesText(x.totalBytes); } }
-      ], h.disks || [], {
-        caption: 'Volumes on ' + h.hostname + ', with used, free and total capacity',
-        sortKey: 'mount', rowKey: function (x) { return x.mount; }, empty: 'No volume could be read on this host.'
-      }), { flush: true }), extras.firstChild);
-      extras.insertBefore(ui.card('Network interfaces', ui.table([
-        { key: 'interface', label: 'Interface' },
-        { key: 'family', label: 'Family' },
-        { key: 'address', label: 'Address', render: function (x) { return mono(x.address); } }
-      ], h.network || [], {
-        caption: 'Non-loopback network interfaces on ' + h.hostname,
-        sortKey: 'interface', empty: 'This host has no non-loopback interface.'
-      }), { flush: true }), extras.children[1]);
-    }, { ttlMs: 2000, errorTitle: 'Host telemetry could not be read' });
-    extras.appendChild(seriesPair());
-    extras.appendChild(A.notInStack('Drain, patch now, quarantine and Storage Spaces Direct health for this host',
-      'have no source or action here. This stack has no Hyper-V cluster to drain, no patching service and no network quarantine.'));
-    mount.appendChild(el('div.stack', [panel, extras]));
+      body.appendChild(systemLink('CPU, memory, volumes, network interfaces and their history for this host are on the System screen.'));
+    }, { ttlMs: 10000 });
+    mount.appendChild(el('div.stack', [
+      panel,
+      A.notInStack('Drain, patch now, quarantine and Storage Spaces Direct health for this host',
+        'have no source or action here. This stack has no Hyper-V cluster to drain, no patching service and no network quarantine.')
+    ]));
   }
 
   function liveVm(mount, ctx) {
     var name = ctx.rest[1];
     mount.appendChild(ui.pageHeader(name, 'A container on this stack, read from the Docker socket proxy.'));
-    var inspect = A.livePanel('Container', inspectPath(name), function (body, c, env) {
-      if (!c || c.ok === false) {
-        if (c && c.reason === 'not-configured') { dockerMissing(body, c); return; }
-        body.appendChild(ui.errorState('No such container, or it could not be read', (c && c.message) || 'The request failed.', function () { A.go('compute', ['vms']); }));
-        return;
-      }
+    function gone() {
+      ui.clear(mount);
+      mount.appendChild(ui.notFound('container', name, 'compute/vms', 'All instances'));
+    }
+    var inspect = A.livePanel('Container', '/api/containers/inspect?id=' + encodeURIComponent(name), function (body, c) {
       var st = c.state || {};
-      var up = uptimeOf(st);
+      var up = uptimeOf(st.startedAt, st.running);
       body.appendChild(el('div.tiles', [
         ui.statTile('State', st.status || 'unknown'),
         ui.statTile('Health', st.health || 'none'),
-        ui.statTile('Restarts', st.restartCount === null || st.restartCount === undefined ? '-' : fmt.num(st.restartCount)),
-        ui.statTile('Uptime', up === null ? '-' : fmt.dur(up))
+        ui.statTile('Restarts', st.restartCount === null || st.restartCount === undefined ? '-' : fmt.num(st.restartCount), { note: 'since it was created' }),
+        ui.statTile('Up for', up === null ? '-' : fmt.dur(up), { note: up === null ? 'not running' : 'since it last started' })
       ]));
       body.appendChild(ui.dl([
         ['Name', mono(c.name || name)],
@@ -936,40 +775,36 @@
         ['Finished', st.finishedAt || '-'],
         ['Exit code', st.exitCode === null || st.exitCode === undefined ? '-' : String(st.exitCode)],
         ['Restart policy', c.restartPolicy || '-'],
-        ['Memory limit', c.memoryLimitBytes ? bytesText(c.memoryLimitBytes) : 'none set'],
+        ['Memory limit', c.memoryLimitBytes ? fmt.bytes(c.memoryLimitBytes) : 'none set'],
         ['Environment', fmt.num(c.environmentWithheld) + ' variables, withheld by the console']
       ]));
-      body.appendChild(readStamp(env));
-    }, { ttlMs: 10000, errorTitle: 'The container could not be read', notConfigured: dockerMissing });
-    var stats = A.livePanel('Resource use', '/api/containers/stats?id=' + encodeURIComponent(name), function (body, s, env) {
-      if (!s || s.ok === false) {
-        if (s && s.reason === 'not-configured') { dockerMissing(body, s); return; }
-        body.appendChild(ui.emptyState('No resource figures', (s && s.message) || 'The proxy returned none.'));
-        return;
-      }
+    }, { ttlMs: 10000, on: { notFound: gone } });
+    var usage = A.livePanel('Resource use, now', '/api/containers/stats?id=' + encodeURIComponent(name), function (body, s) {
       var memRatio = s.memoryUsedBytes !== null && s.memoryLimitBytes ? s.memoryUsedBytes / s.memoryLimitBytes : null;
       body.appendChild(el('div.tiles', [
-        ui.statTile('CPU', s.cpuRatio === null || s.cpuRatio === undefined ? '-' : fmt.ratioPct(s.cpuRatio, 1), { note: 'of one core, per Docker' }),
-        ui.statTile('Memory', bytesText(s.memoryUsedBytes), { note: memRatio === null ? null : fmt.ratioPct(memRatio, 0) + ' of ' + bytesText(s.memoryLimitBytes) }),
-        ui.statTile('Processes', s.pids === null || s.pids === undefined ? '-' : fmt.num(s.pids))
+        ui.statTile('CPU', s.cpuRatio === null || s.cpuRatio === undefined ? '-' : fmt.ratioPct(s.cpuRatio, 1), { note: 'now, one Docker stats read, of one core' }),
+        ui.statTile('Memory', fmt.bytes(s.memoryUsedBytes), { note: 'now' + (memRatio === null ? '' : ', ' + fmt.ratioPct(memRatio, 0) + ' of ' + fmt.bytes(s.memoryLimitBytes)) }),
+        ui.statTile('Processes', s.pids === null || s.pids === undefined ? '-' : fmt.num(s.pids), { note: 'now' })
       ]));
-      body.appendChild(readStamp(env));
-    }, { ttlMs: 5000, errorTitle: 'Resource use could not be read', notConfigured: dockerMissing });
+    }, { ttlMs: 5000, on: { notFound: function () {} } });
     mount.appendChild(el('div.stack', [
-      inspect, stats,
+      inspect, usage,
       A.notInStack('Recorded connect sessions, replication and checkpoints for this instance',
         'have no source here. A container has no RDP, SSH or VNC console in this stack, and nothing replicates or checkpoints it.')
     ]));
   }
 
-  registerScreen('compute', {
+  function computeCrumbs(rest) {
+    if (rest[0] === 'vm' && rest[1]) return ['Virtual machines', rest[1]].concat(rest[2] ? [rest[2].charAt(0).toUpperCase() + rest[2].slice(1)] : []);
+    if (rest[0] === 'host' && rest[1]) return ['Hosts', rest[1]];
+    return rest.map(function (s) { return s.charAt(0).toUpperCase() + s.slice(1); });
+  }
+
+  A.screen('compute', {
     title: 'Compute',
     crumb: 'Compute',
-    crumbs: function (rest) {
-      if (rest[0] === 'vm' && rest[1]) return ['Virtual machines', rest[1]].concat(rest[2] ? [rest[2].charAt(0).toUpperCase() + rest[2].slice(1)] : []);
-      if (rest[0] === 'host' && rest[1]) return ['Hosts', rest[1]];
-      return rest.map(function (s) { return s.charAt(0).toUpperCase() + s.slice(1); });
-    },
+    crumbs: computeCrumbs,
+    liveCrumbs: computeCrumbs,
     render: function (mount, ctx) {
       var rest = ctx.rest || [];
       var box = el('div');
@@ -978,10 +813,7 @@
       if (rest[0] === 'vm' && rest[1]) { decide(function (m) { (m === A.MODE.LIVE ? liveVm : renderVm)(box, ctx); }); return; }
       var TABS = ['hosts', 'vms', 'fabric', 'gpu'];
       if (rest.length && TABS.indexOf(rest[0]) === -1) {
-        mount.appendChild(ui.errorState(
-          'That compute link is not valid',
-          'A compute link is either /compute/host/<name> or /compute/vm/<name>.',
-          function () { A.go('compute'); }));
+        box.appendChild(ui.notFound('compute section', rest.join('/'), 'compute', 'Compute'));
         return;
       }
       decide(function (m) { (m === A.MODE.LIVE ? renderListLive : renderList)(box, ctx); });

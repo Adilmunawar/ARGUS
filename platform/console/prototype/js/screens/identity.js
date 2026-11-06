@@ -596,33 +596,13 @@
     };
   }
 
-  function whenRead(data, env) {
-    var t = (data && data.at) || (env && env.at);
-    if (!t) return null;
-    var date = new Date(t);
-    if (isNaN(date.getTime())) return null;
-    return el('p.hint', { text: 'Read at ' + fmt.stamp(date) + '.' });
+  function partBlock(part) {
+    var p = part || {};
+    var state = A.envelopeState({ ok: false, mode: 'live', error: { reason: p.reason || 'error', message: p.message } });
+    return ui.stateBlock(state, { reason: p.reason || null, detail: p.message || '' });
   }
 
-  function notConfiguredBlock(part, what) {
-    return el('div.stack', [
-      el('div.row', [
-        ui.pill('not configured', 'idle'),
-        el('span.muted', { text: what + ' are not configured in this stack' })
-      ]),
-      el('p', { text: (part && part.message) || 'No source is configured for this.' })
-    ]);
-  }
-
-  function partBlock(part, what) {
-    if (part && part.reason === 'not-configured') return notConfiguredBlock(part, what);
-    return el('div.callout.warn', [
-      el('strong', { text: 'This source could not be read.' }),
-      el('p', { text: (part && part.message) || 'The reader gave no reason.' })
-    ]);
-  }
-
-  function operatorsPanel(body, data, env) {
+  function operatorsPanel(body, data) {
     var part = data.console || {};
     var me = (A.capabilities() || {}).auth || {};
     var ops = part.operators || [];
@@ -650,16 +630,12 @@
     (part.problems || []).forEach(function (p) {
       body.appendChild(el('div.callout.warn', [el('strong', { text: 'Operators file problem' }), el('p', { text: String(p.message || p) })]));
     });
-    var w = whenRead(data, env);
-    if (w) body.appendChild(w);
   }
 
-  function pgPanel(body, data, env) {
+  function pgPanel(body, data) {
     var part = data.postgres || {};
     if (part.ok === false) {
-      body.appendChild(partBlock(part, 'PostgreSQL roles'));
-      var w0 = whenRead(part.at ? part : data, env);
-      if (w0) body.appendChild(w0);
+      body.appendChild(partBlock(part));
       return;
     }
     var roles = (part.roles || []).filter(function (r) { return !r.predefined; });
@@ -670,14 +646,12 @@
       { key: 'memberOf', label: 'Member of', sortable: false, render: function (r) { return chips(r.memberOf, 'none'); } },
       { key: 'sessions', label: 'Sessions', align: 'right', render: function (r) { return fmt.num(r.sessions); } }
     ], roles, { caption: 'PostgreSQL roles', sortKey: 'name', rowKey: function (r) { return r.name; }, empty: 'No roles.' }));
-    var w = whenRead(part.at ? part : data, env);
-    if (w) body.appendChild(w);
   }
 
-  function objectStorePanel(body, data, env) {
+  function objectStorePanel(body, data) {
     var part = data.objectStore || {};
     if (part.ok === false) {
-      body.appendChild(partBlock(part, 'Object store identities'));
+      body.appendChild(partBlock(part));
     } else {
       body.appendChild(ui.table([
         { key: 'name', label: 'Identity', render: function (r) { return mono(r.name); } },
@@ -685,8 +659,6 @@
         { key: 'actions', label: 'Actions', sortable: false, render: function (r) { return chips(r.actions, 'none'); } }
       ], part.identities || [], { caption: 'Object store identities', sortKey: 'name', rowKey: function (r) { return r.name; }, empty: 'No identities.' }));
     }
-    var w = whenRead(data, env);
-    if (w) body.appendChild(w);
   }
 
   function accountsTable(accounts) {
@@ -706,12 +678,10 @@
     });
   }
 
-  function declaredAccountsPanel(body, data, env) {
+  function declaredAccountsPanel(body, data) {
     var part = data.serviceAccounts || {};
-    if (part.ok === false) body.appendChild(partBlock(part, 'Declared service accounts'));
+    if (part.ok === false) body.appendChild(partBlock(part));
     else body.appendChild(accountsTable(part.accounts || []));
-    var w = whenRead(data, env);
-    if (w) body.appendChild(w);
   }
 
   function principalsLive() {
@@ -719,7 +689,7 @@
     return el('div.stack', [
       el('div.callout.info', [
         el('strong', { text: 'Principals this stack can actually name.' }),
-        el('p', { text: 'There is no Active Directory here. Identity is console operators, PostgreSQL roles, object store identities and the service accounts the GitOps tree declares. Each panel says when it was read and what it could not reach.' })
+        ui.disclosure('Details', [el('p', { text: 'There is no Active Directory here. Identity is console operators, PostgreSQL roles, object store identities and the service accounts the GitOps tree declares. Each panel says when it was read and what it could not reach.' })])
       ]),
       A.livePanel('Console operators', path, operatorsPanel, { skeletonRows: 2 }),
       A.livePanel('PostgreSQL roles', path, pgPanel, { skeletonRows: 2 }),
@@ -732,15 +702,14 @@
     return el('div.stack', [
       el('div.callout.info', [
         el('strong', { text: 'Rotation age is not known.' }),
-        el('p', { text: 'There is no directory to ask when a service account password was last rotated, so no age is shown. What is shown is what the GitOps tree declares each account may reach.' })
+        el('p.state-detail', { text: 'There is no directory to ask when a service account password was last rotated, so no age is shown. What is shown is what the GitOps tree declares each account may reach.' })
       ]),
-      A.livePanel('Service accounts', '/api/gitops/service-accounts', function (body, data, env) {
+      A.livePanel('Service accounts', '/api/gitops/service-accounts', function (body, data) {
         body.appendChild(accountsTable(data.accounts || []));
         var t = data.declaredAt ? new Date(data.declaredAt) : null;
         body.appendChild(el('p.hint', {
           text: (t && !isNaN(t.getTime()) ? 'Declared at ' + fmt.stamp(t) + '. ' : 'Declaration time unknown. ') +
-            (data.source ? 'Source: ' + data.source + '. ' : '') +
-            (env && env.at ? 'Read at ' + fmt.stamp(new Date(env.at)) + '.' : '')
+            (data.source ? 'Source: ' + data.source + '.' : '')
         }));
       }, { skeletonRows: 3 })
     ]);
@@ -753,16 +722,11 @@
     ]);
   }
 
-  function sealRender(body, data, env) {
+  function sealRender(body, data) {
     var seal = data.seal || {};
     if (data.configured === false || data.state === 'not-configured') {
-      body.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'OpenBao is not configured.' }),
-        el('p', { text: data.summary || 'This console has no OpenBao address.' }),
-        data.detail ? el('p', { text: data.detail }) : null
-      ]));
-      var w0 = whenRead(data, env);
-      if (w0) body.appendChild(w0);
+      body.setAttribute('data-state', 'notConfigured');
+      body.appendChild(ui.stateBlock('notConfigured', { reason: 'not-configured', detail: data.summary || 'This console has no OpenBao address.' }));
       return;
     }
     body.appendChild(el('div.tiles', [
@@ -771,17 +735,15 @@
       ui.statTile('Version', data.version || 'unknown', { note: data.clusterName || '' })
     ]));
     if (data.sandbox && data.sandbox.verdict === true) {
-      body.appendChild(el('div.callout.bad', [
-        el('strong', { text: data.sandbox.title || 'Sandbox unseal: this seal is 1-of-1.' }),
-        el('p', { text: data.sandbox.message || '' })
+      body.appendChild(el('div.callout.bad', { 'data-sandbox-seal': 'true' }, [
+        el('strong', { text: 'This seal is 1-of-1: one key on this machine opens every secret.' }),
+        el('p', [A.link('Unseal posture on Services', 'stack')])
       ]));
     }
     if (data.detail) body.appendChild(el('p', { text: data.detail }));
     if (data.reachable === false) {
-      body.appendChild(el('div.callout.warn', [el('strong', { text: 'OpenBao could not be reached.' }), el('p', { text: data.message || '' })]));
+      body.appendChild(ui.stateBlock('unreachable', { reason: 'unreachable', detail: data.message || '' }));
     }
-    var w = whenRead(data, env);
-    if (w) body.appendChild(w);
   }
 
   function secretsLive() {

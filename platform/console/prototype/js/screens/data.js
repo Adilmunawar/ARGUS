@@ -3,11 +3,6 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt;
 
-  function registerScreen(id, def) {
-    if (typeof A.screen === 'function') { A.screen(id, def); return; }
-    document.addEventListener('DOMContentLoaded', function () { A.screen(id, def); });
-  }
-
   var API = {
     pgDatabases: '/api/pg/databases',
     pgRoles: '/api/pg/roles',
@@ -22,28 +17,10 @@
     cacheHealth: '/api/cache/health',
 
     storageBuckets: '/api/storage/buckets',
-    storageCapacity: '/api/storage/capacity',
-    storageHealth: '/api/storage/health',
-    storageLock: '/api/storage/lock-status',
-    storageObjects: '/api/storage/objects',
 
     queueStreams: '/api/queues/streams',
     queueConsumers: '/api/queues/consumers'
   };
-
-  var MODULE_FOR = [
-    ['/api/pg/', 'platform/console/server/src/pg.js'],
-    ['/api/cache/', 'platform/console/server/src/garnet.js'],
-    ['/api/storage/', 'platform/console/server/src/storage.js'],
-    ['/api/queues/', 'platform/console/server/src/queues.js']
-  ];
-
-  function moduleFor(path) {
-    for (var i = 0; i < MODULE_FOR.length; i++) {
-      if (path.indexOf(MODULE_FOR[i][0]) === 0) return MODULE_FOR[i][1];
-    }
-    return null;
-  }
 
   function unknown(reason) {
     return el('span.muted', {
@@ -57,15 +34,7 @@
   function isNum(v) { return typeof v === 'number' && isFinite(v); }
 
   function bytesText(n) {
-    if (!isNum(n)) return null;
-    if (n < 1024) return fmt.num(n) + ' B';
-    var kb = n / 1024;
-    if (kb < 1024) return fmt.num(kb, 1) + ' KB';
-    var mb = kb / 1024;
-    if (mb < 1024) return fmt.num(mb, 1) + ' MB';
-    var gb = mb / 1024;
-    if (gb < 1024) return fmt.num(gb, 2) + ' GB';
-    return fmt.num(gb / 1024, 2) + ' TB';
+    return isNum(n) ? fmt.bytes(n) : null;
   }
 
   function bytesNode(n, reason) {
@@ -151,6 +120,13 @@
 
   function hint(text) { return el('p.hint', { text: text }); }
 
+  function details(list) {
+    var nodes = (list || []).filter(Boolean).map(function (t) {
+      return typeof t === 'string' ? el('p', { text: t }) : t;
+    });
+    return nodes.length ? ui.disclosure('Details', nodes) : document.createDocumentFragment();
+  }
+
   function calloutOf(tone, title, text) {
     return el('div.callout.' + tone, [
       el('strong', { text: title }),
@@ -160,100 +136,9 @@
 
   function livePanel(title, path, render, opts) {
     opts = opts || {};
-    var body = el('div');
-    var card = ui.card(title, body, { flush: opts.flush, actions: opts.actions });
-    var alive = true;
-    A.onLeave(function () { alive = false; });
-
-    body.appendChild(ui.skeleton(opts.skeletonRows || 3));
-
-    A.read(path, opts).then(function (env) {
-      if (!alive) return;
-      ui.clear(body);
-      try {
-        paintPanel(body, env, path, render, opts);
-      } catch (err) {
-        body.appendChild(ui.errorState(
-          'This panel could not be drawn',
-          'The data arrived but the console failed to render it: ' + (err && err.message ? err.message : String(err)) +
-            '. That is a defect in the console, not in the service it read.',
-          null));
-      }
+    return A.livePanel(title, path, render, {
+      ttlMs: opts.ttlMs, flush: opts.flush, actions: opts.actions, skeletonRows: opts.skeletonRows
     });
-
-    return card;
-  }
-
-  function paintPanel(body, env, path, render, opts) {
-    if (env.mode === A.MODE.SAMPLE) {
-      body.appendChild(ui.emptyState(
-        'Not available on bundled sample data',
-        'This panel reads ' + path + ' through the console API. Start it with `npm start` in ' +
-          'platform/console/server (or open the console it serves) and this fills in.'));
-      return;
-    }
-
-    var e = env.error || {};
-    var readerAnswered = !!(env.data && env.data.ok === false);
-
-    if (!env.ok && !readerAnswered) {
-      if (e.reason === 'http-404') { body.appendChild(notWired(path)); return; }
-      body.appendChild(ui.errorState(
-        opts.errorTitle || 'This could not be read',
-        e.message || 'The request failed and gave no reason.',
-        function () { A.forget(path); A.go(A.state.route, A.state.rest); }));
-      return;
-    }
-
-    if (readerAnswered) {
-      body.appendChild(readerRefusal(env.data));
-      return;
-    }
-
-    if (env.stale) {
-      body.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'Showing the last value that could be read.' }),
-        el('p', {
-          text: 'A fresh read failed' + (env.error && env.error.message ? ': ' + env.error.message : '.') +
-            ' Everything below was measured at ' + (stampOf(env.data && (env.data.cachedAt || env.data.at)) || 'an unrecorded time') + '.'
-        })
-      ]));
-    }
-
-    render(body, env.data, env);
-
-    var when = env.data && (env.data.at || env.data.cachedAt);
-    if (when) {
-      body.appendChild(hint('Measured at ' + stampOf(when) + ' (' + sinceText(when) + ').' +
-        (env.data.cachedAt && env.data.cachedAt !== env.data.at
-          ? ' Served from a value cached at ' + stampOf(env.data.cachedAt) + '.'
-          : '')));
-    }
-  }
-
-  function notWired(path) {
-    var mod = moduleFor(path);
-    return ui.emptyState(
-      'This part of the console API is not wired yet',
-      'The console API answered 404 for ' + path + '. ' +
-        (mod ? 'The reader for it lives in ' + mod + '; ' : '') +
-        'the route has to be added to platform/console/server/src/index.js before there is anything to read. ' +
-        'Nothing here has failed -- there is simply no answer yet.');
-  }
-
-  function readerRefusal(d) {
-    var reason = d.reason || 'error';
-    var tone = reason === 'not-configured' ? 'idle' : reason === 'denied' ? 'warn' : 'bad';
-    return el('div.stack', [
-      el('div.row', [
-        ui.pill(reason, tone),
-        el('span.muted', { text: 'reported by the console API, not guessed at by this screen' })
-      ]),
-      el('div.callout.warn', [
-        el('strong', { text: 'This service could not be read.' }),
-        el('p', { text: d.message || 'The reader gave no reason, which is itself a defect worth reporting.' })
-      ])
-    ]);
   }
 
   function refreshButton(rest) {
@@ -263,8 +148,7 @@
       onClick: function () {
         if (!live) {
           A.flash('info', 'There is nothing to refresh',
-            'No console API answered, so this screen is showing no readings to take again. Start it with ' +
-            '`npm start` in platform/console/server and open the console it serves.', { timeout: 6000 });
+            'No console API answered, so nothing here was read from one.', { timeout: 6000 });
           return;
         }
         A.forget();
@@ -319,10 +203,11 @@
       empty: 'The health reader returned no components, which should not happen.'
     }));
 
-    body.appendChild(hint(
-      (d.degraded ? 'At least one check needs attention. ' : 'No check is failing. ') +
-      'Deadlocks since the statistics were last reset: ' +
-      (isNum(d.deadlocksSinceStatsReset) ? fmt.num(d.deadlocksSinceStatsReset) : 'not reported') + '.'));
+    body.insertBefore(el('p', {
+      text: (d.degraded ? 'At least one check needs attention.' : 'No check is failing.') +
+        ' Deadlocks since the statistics were last reset: ' +
+        (isNum(d.deadlocksSinceStatsReset) ? fmt.num(d.deadlocksSinceStatsReset) : 'not reported') + '.'
+    }), body.firstChild);
   }
 
   function renderPgReplication(body, d) {
@@ -349,8 +234,8 @@
         ['synchronous_commit', c.synchronousCommit ? mono(c.synchronousCommit) : unknown('synchronous_commit was not reported.')]
       ]));
 
-      body.appendChild(hint(c.note ||
-        'These are settings, not observations: they say this server could accept a standby, not that one exists.'));
+      body.appendChild(details([c.note ||
+        'These are settings, not observations: they say this server could accept a standby, not that one exists.']));
       return;
     }
 
@@ -390,7 +275,7 @@
         rowKey: function (r) { return r.name; },
         empty: 'No replication slot exists.'
       }));
-      body.appendChild(hint('An inactive slot retains WAL indefinitely for a consumer that is gone, which is the classic way a PostgreSQL volume fills.'));
+      body.appendChild(details(['An inactive slot retains WAL indefinitely for a consumer that is gone, which is the classic way a PostgreSQL volume fills.']));
     }
   }
 
@@ -418,7 +303,7 @@
       { key: 'owner', label: 'Owner', render: function (r) { return mono(r.owner || 'unknown'); } },
       {
         key: 'sizeBytes', label: 'Size', align: 'right',
-        render: function (r) { return bytesNode(r.diskBytes, r.sizeUnknownReason); }
+        render: function (r) { return bytesNode(r.sizeBytes, r.sizeUnknownReason); }
       },
       {
         key: 'connections', label: 'Sessions', align: 'right',
@@ -479,8 +364,7 @@
       empty: 'This cluster reported no databases, which should not happen.'
     }));
 
-    if (d.ioTimingNote) body.appendChild(hint(d.ioTimingNote));
-    if (d.sizeError) body.appendChild(hint('Sizes: ' + d.sizeError));
+    body.appendChild(details([d.ioTimingNote || null, d.sizeError ? 'Sizes: ' + d.sizeError : null]));
   }
 
   function renderPgActivity(body, d) {
@@ -488,12 +372,7 @@
 
     if (d.countsCoverWholeCluster === false) {
       body.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'These counts cover only this console\'s own sessions.' }),
-        el('p', {
-          text: 'The console role does not hold pg_read_all_stats, so pg_stat_activity hides other roles\' ' +
-            'sessions and blanks their query text. A cluster running two hundred backends would still read as a ' +
-            'handful here. Run platform/compose/sql/20-grants.sql to fix it.'
-        })
+        el('strong', { text: 'These counts cover only this console\'s own sessions.' })
       ]));
     }
 
@@ -574,14 +453,17 @@
       empty: 'No session is open other than this console\'s own read.'
     }));
 
-    if (d.listTruncated) {
-      body.appendChild(hint('The list is capped at ' + fmt.num(d.listLimit) +
-        ' sessions; the counts above are not capped and cover every backend.'));
-    }
-    if (isNum(d.redactedSessions) && d.redactedSessions > 0) {
-      body.appendChild(hint(fmt.num(d.redactedSessions) +
-        ' sessions had their query text withheld from this role. They are listed, but their statements are not readable here.'));
-    }
+    body.appendChild(details([
+      d.countsCoverWholeCluster === false
+        ? 'The console role does not hold pg_read_all_stats, so pg_stat_activity hides other roles\' sessions and ' +
+          'blanks their query text. A cluster running two hundred backends would still read as a handful here. ' +
+          'Run platform/compose/sql/20-grants.sql to fix it.'
+        : null,
+      d.listTruncated ? 'The list is capped at ' + fmt.num(d.listLimit) + ' sessions; the counts above are not capped and cover every backend.' : null,
+      isNum(d.redactedSessions) && d.redactedSessions > 0
+        ? fmt.num(d.redactedSessions) + ' sessions had their query text withheld from this role. They are listed, but their statements are not readable here.'
+        : null
+    ]));
   }
 
   function renderPgStatements(body, d) {
@@ -641,7 +523,7 @@
         'so this list is not the whole truth about the workload.');
     }
     if (d.extensionVersion) notes.push('pg_stat_statements ' + d.extensionVersion + ' in schema ' + d.schema + '.');
-    if (notes.length) body.appendChild(hint(notes.join(' ')));
+    body.appendChild(details(notes));
   }
 
   function renderPgRoles(body, d) {
@@ -697,228 +579,54 @@
       empty: 'This cluster reported no roles, which should not happen.'
     }));
 
-    body.appendChild(hint(d.passwordsNotReported ||
-      'Whether a role has a password is in pg_authid, which only a superuser may read, so it is not reported here.'));
+    body.appendChild(details([d.passwordsNotReported ||
+      'Whether a role has a password is in pg_authid, which only a superuser may read, so it is not reported here.']));
   }
 
   function databasesTab() {
     return el('div.stack', [
       el('div.grid.grid-2', [
         livePanel('Cluster health', API.pgHealth, renderPgHealth, {
-          ttlMs: 10000, errorTitle: 'The cluster health could not be read'
+          ttlMs: 10000
         }),
         livePanel('Replication', API.pgReplication, renderPgReplication, {
-          ttlMs: 10000, errorTitle: 'The replication state could not be read'
+          ttlMs: 10000
         })
       ]),
       livePanel('Databases', API.pgDatabases, renderPgDatabases, {
-        ttlMs: 10000, errorTitle: 'The database list could not be read'
+        ttlMs: 10000
       }),
-      livePanel('Sessions', API.pgActivity, renderPgActivity, {
-        ttlMs: 2000, errorTitle: 'Session activity could not be read'
+      livePanel('Sessions now', API.pgActivity, renderPgActivity, {
+        ttlMs: 2000
       }),
-      livePanel('Slowest statements', API.pgStatements, renderPgStatements, {
-        ttlMs: 15000, errorTitle: 'Statement statistics could not be read'
+      livePanel('Slowest statements since the counters were reset', API.pgStatements, renderPgStatements, {
+        ttlMs: 15000
       }),
       livePanel('Roles', API.pgRoles, renderPgRoles, {
-        ttlMs: 30000, errorTitle: 'The role list could not be read'
+        ttlMs: 30000
       })
     ]);
   }
 
-  function renderStorageCapacity(body, d) {
-    var t = d.totals || {}, slots = d.slots || {};
-    var usedRatio = isNum(t.usedBytes) && isNum(t.allBytes) && t.allBytes > 0 ? t.usedBytes / t.allBytes : null;
-
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Used', tileText(bytesText(t.usedBytes)), { note: isNum(t.allBytes) ? 'of ' + bytesText(t.allBytes) : 'total not reported' }),
-      ui.statTile('Free', tileText(bytesText(t.freeBytes)), { note: d.scope || 'Disk free on the volume servers' }),
-      ui.statTile('Writable now', tileText(bytesText(d.available)), {
-        note: 'Bound by ' + (d.binding || 'unknown') + ': ' + fmt.num(slots.free) + ' of ' + fmt.num(slots.max) + ' volume slots free'
-      }),
-      ui.statTile('Volume slots free', tileText(isNum(slots.free) ? fmt.num(slots.free) : null), {
-        note: isNum(slots.volumeSizeMB) ? fmt.num(slots.volumeSizeMB) + ' MB per volume' : 'Volume size not reported'
-      })
-    ]));
-
-    if (isNum(usedRatio)) {
-      body.appendChild(ui.bar(usedRatio, {
-        tone: usedRatio >= 0.9 ? 'bad' : usedRatio >= 0.75 ? 'warn' : null,
-        label: 'Object store disk: ' + fmt.ratioPct(usedRatio, 0) + ' used'
-      }));
-    }
-
-    body.appendChild(ui.table([
-      { key: 'url', label: 'Volume server', render: function (r) { return mono(r.url); } },
-      {
-        key: 'ok', label: 'Reachable', status: true,
-        render: function (r) { return r.ok ? ui.pill('reachable', 'ok') : ui.pill('unreachable', 'bad', { title: r.error || 'No reason given.' }); }
-      },
-      { key: 'dataCenter', label: 'Site', render: function (r) { return el('span', { text: (r.dataCenter || '?') + ' / ' + (r.rack || '?') }); } },
-      { key: 'usedBytes', label: 'Used', align: 'right', render: function (r) { return bytesNode(r.usedBytes, 'This volume server did not answer.'); } },
-      { key: 'freeBytes', label: 'Free', align: 'right', render: function (r) { return bytesNode(r.freeBytes, 'This volume server did not answer.'); } },
-      {
-        key: 'volumes', label: 'Volumes', align: 'right',
-        render: function (r) { return el('span.num', { text: fmt.num(r.volumes) + ' of ' + fmt.num(r.maxVolumes) }); }
-      }
-    ], d.nodes || [], {
-      caption: 'Volume servers, with reachability, site, used and free capacity and volume slots in use',
-      rowKey: function (r) { return r.url; },
-      empty: 'The master reported no volume servers.'
-    }));
-
-    if (d.partial) {
-      body.appendChild(hint('At least one volume server did not answer, so these totals are a partial sum and not the capacity of the cluster.'));
-    }
-    if (d.scope) body.appendChild(hint('Scope: ' + d.scope + '.'));
-  }
-
-  function renderStorageBuckets(body, d) {
-    var enumerated = !d.inventoryError && !d.declaredError;
-
-    if (d.inventoryError) {
-      body.appendChild(calloutOf('warn', 'The bucket inventory could not be read.', d.inventoryError));
-    }
-    if (d.declaredError) {
-      body.appendChild(calloutOf('warn', 'The declared bucket list could not be read.', d.declaredError));
-    }
-    if (d.topologyOk === false) {
-      body.appendChild(calloutOf('warn', 'The volume topology could not be read, so no size or object count below was measured.',
-        d.topologyError || 'No reason was given.'));
-    }
-
-    body.appendChild(ui.table([
-      {
-        key: 'name', label: 'Bucket', width: '20%',
-        render: function (r) { return A.link(r.name, 'data', ['bucket', r.name]); }
-      },
-      {
-        key: 'sizeBytes', label: 'Size', align: 'right',
-        render: function (r) { return bytesNode(r.diskBytes, r.unknownSizeReason); }
-      },
-      {
-        key: 'objects', label: 'Objects', align: 'right',
-        render: function (r) {
-          if (!isNum(r.objects)) return unknown(r.unknownSizeReason || 'The topology reported no object count for this bucket.');
-          return el('span.num', {
-            text: fmt.num(r.objects),
-            title: r.objectsApprox
-              ? 'Approximate: counted from the volume servers, which include deleted-but-not-compacted entries. Listing every object to get an exact count is an O(objects) operation and is not done on page load.'
-              : 'Exact count.'
-          });
-        }
-      },
-      {
-        key: 'lock', label: 'Object lock', status: true,
-        sort: function (r) { return r.lock ? 1 : 0; },
-        render: function (r) {
-          if (!r.lock) return ui.pill('none', 'idle', { title: 'Objects in this bucket can be deleted or overwritten.' });
-          return el('span.lockbadge', {
-            text: r.lock + ' \u00b7 ' + fmt.num(r.lockDays) + ' days',
-            title: 'Declared ' + (r.lockDeclared || 'nothing') + '. Retention cannot be shortened or removed before it expires, by anybody.'
-          });
-        }
-      },
-      {
-        key: 'lockEnforced', label: 'Lock proven', status: true,
-        render: function (r) {
-          if (!r.lock) return el('span.muted', { text: 'n/a' });
-          if (r.lockEnforced === 'enforced') return ui.pill('proven', 'ok', { title: 'A versioned delete was attempted and refused.' });
-          if (!r.lockEnforced) return unknown('No delete probe result was recorded for this bucket.');
-          return ui.pill(r.lockEnforced, 'warn');
-        }
-      },
-      { key: 'owner', label: 'Owner', render: function (r) { return r.owner ? mono(r.owner) : unknown('No owning identity is declared for this bucket.'); } },
-      {
-        key: 'replication', label: 'Replication',
-        render: function (r) {
-          if (!r.replication || r.replication === 'not configured') {
-            return el('span.muted', { text: 'not configured', title: 'Nothing is copying this bucket off this node.' });
-          }
-          return el('span', { text: r.replication });
-        }
-      },
-      {
-        key: 'backup', label: 'Backup', sortable: false,
-        render: function (r) {
-          if (!r.backup) return el('span.muted', { text: 'none declared' });
-          return el('span', { text: r.backup.tool + ' ' + r.backup.schedule, title: 'Target: ' + r.backup.target });
-        }
-      }
-    ], d.buckets || [], {
-      caption: 'Buckets in the object store, with size, object count, object lock mode and whether it is proven, owner, replication and backup',
-      sortKey: 'name',
-      rowKey: function (r) { return r.name; },
-      empty: enumerated
-        ? 'No bucket exists in this object store.'
-        : 'The bucket inventory could not be read, so nothing could be enumerated. This is not evidence that the object store is empty.'
-    }));
-
+  function renderStorageSummary(body, d) {
+    var list = d.buckets || [];
+    var known = list.filter(function (b) { return !b.unknownSize && isNum(b.diskBytes); });
+    var total = known.reduce(function (n, b) { return n + b.diskBytes; }, 0);
+    var locked = list.filter(function (b) { return b.lock; }).length;
     var drift = d.drift || {};
-    if ((drift.declaredButMissing && drift.declaredButMissing.length) ||
-        (drift.existsButUndeclared && drift.existsButUndeclared.length)) {
-      body.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'The object store and the declaration disagree.' }),
-        el('p', {
-          text: (drift.declaredButMissing || []).length
-            ? 'Declared but missing: ' + drift.declaredButMissing.join(', ') + '. '
-            : ''
-        }),
-        el('p', {
-          text: (drift.existsButUndeclared || []).length
-            ? 'Exists but undeclared: ' + drift.existsButUndeclared.join(', ') + '.'
-            : ''
-        })
-      ]));
-    }
-
-    body.appendChild(hint('Inventory from ' + (d.inventorySource || 'the object store') +
-      '. Object lock across the estate: ' +
-      (!d.wormVerdict || d.wormVerdict === 'unknown' ? 'not established by a delete probe' : d.wormVerdict) + '.'));
-  }
-
-  function renderStorageHealth(body, d) {
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Writable', d.writable ? 'yes' : 'no', {
-        note: d.writable ? 'The master has a volume slot for a new write' : 'No free volume slot: writes will fail'
-      }),
-      ui.statTile('Signed S3 call', d.s3 && d.s3.signedCallOk ? 'ok' : 'failed', {
-        note: 'The console\'s own credential against the S3 gateway'
-      }),
-      ui.statTile('Free volumes', tileText(isNum(d.freeVolumes) ? fmt.num(d.freeVolumes) : null), {
-        note: 'Slots the master can still place'
-      })
-    ]));
-
-    body.appendChild(ui.table([
-      { key: 'name', label: 'Component', render: function (r) { return mono(r.name); } },
-      {
-        key: 'reachable', label: 'Reachable', status: true,
-        render: function (r) { return r.reachable ? ui.pill('reachable', 'ok') : ui.pill('unreachable', 'bad', { title: r.error || 'No reason given.' }); }
-      },
-      { key: 'version', label: 'Version', render: function (r) { return r.version ? mono(r.version) : unknown('This component did not report a version.'); } },
-      {
-        key: 'latencyMs', label: 'Latency', align: 'right',
-        render: function (r) { return isNum(r.latencyMs) ? el('span.num', { text: fmt.ms(r.latencyMs) }) : unknown('Latency was not measured for this component.'); }
-      }
-    ], d.components || [], {
-      caption: 'Object store components, with reachability, version and probe latency',
-      rowKey: function (r) { return r.name; },
-      empty: 'The health reader returned no components.'
+    var off = (drift.declaredButMissing || []).length + (drift.existsButUndeclared || []).length;
+    body.appendChild(el('p', {
+      text: fmt.num(list.length) + ' bucket' + (list.length === 1 ? '' : 's') +
+        (known.length ? ', about ' + fmt.bytes(total) + ' on disk across ' + fmt.num(known.length) + ' measured' : ', none measured') +
+        ', ' + fmt.num(locked) + ' with object lock' +
+        (off ? ', ' + fmt.num(off) + ' out of step with buckets.yaml' : '') + '.'
     }));
+    body.appendChild(A.link('Open Object storage for buckets, capacity, immutability and browsing', 'storage'));
   }
 
   function bucketsTab() {
     return el('div.stack', [
-      livePanel('Capacity', API.storageCapacity, renderStorageCapacity, {
-        ttlMs: 15000, errorTitle: 'Object store capacity could not be read'
-      }),
-      livePanel('Buckets', API.storageBuckets, renderStorageBuckets, {
-        ttlMs: 15000, errorTitle: 'The bucket list could not be read'
-      }),
-      livePanel('Object store health', API.storageHealth, renderStorageHealth, {
-        ttlMs: 15000, errorTitle: 'Object store health could not be read'
-      })
+      livePanel('Object storage', API.storageBuckets, renderStorageSummary, { ttlMs: 15000, skeletonRows: 1 })
     ]);
   }
 
@@ -1001,9 +709,9 @@
         tone: spillTone(d.spillRatio),
         label: 'Spill ratio: ' + fmt.ratioPct(d.spillRatio, 0) + ' of the live log is on disk (' + (d.spillRatioLog || 'worst log') + ')'
       }));
-      body.appendChild(hint('Spilled records are still live and still served; reading one is a disk read rather than a miss. ' +
+      body.appendChild(details(['Spilled records are still live and still served; reading one is a disk read rather than a miss. ' +
         'Nothing has been lost. What eventually does lose keys is the segment cap, which deletes the oldest segment whole ' +
-        'when the spill area is full -- a disk ceiling, by age of write, not memory pressure.'));
+        'when the spill area is full. That is a disk ceiling, by age of write, not memory pressure.']));
     } else if (d.spillUnavailable) {
       body.appendChild(calloutOf('warn', 'The spill ratio could not be computed.', d.spillUnavailable));
     }
@@ -1050,9 +758,7 @@
     }
 
     var mm = d.maxmemory || {};
-    body.appendChild(hint('maxmemory: ' + (mm.configured ? String(mm.value) : 'not configured') + '. ' + (mm.evidence || '')));
-
-    if (c.note) body.appendChild(hint(c.note));
+    body.appendChild(details(['maxmemory: ' + (mm.configured ? String(mm.value) : 'not configured') + '. ' + (mm.evidence || ''), c.note || null]));
   }
 
   function renderCacheKeyspace(body, d) {
@@ -1064,14 +770,15 @@
 
     if (!isNum(d.keys) && d.keysUnavailable) {
       body.appendChild(calloutOf('warn', 'The key count could not be read.', d.keysUnavailable));
-    } else if (d.keysNote) {
-      body.appendChild(hint(d.keysNote));
     }
 
-    if (d.byPrefix && d.byPrefix.available === false) {
-      body.appendChild(calloutOf('info', 'There is no per-prefix breakdown, and there is not supposed to be.', d.byPrefix.message));
-    }
-    if (d.keyIsolationNote) body.appendChild(hint(d.keyIsolationNote));
+    body.appendChild(details([
+      isNum(d.keys) || !d.keysUnavailable ? d.keysNote || null : null,
+      d.byPrefix && d.byPrefix.available === false
+        ? 'There is no per-prefix breakdown, and there is not supposed to be. ' + (d.byPrefix.message || '')
+        : null,
+      d.keyIsolationNote || null
+    ]));
   }
 
   function renderCacheHealth(body, d) {
@@ -1107,29 +814,22 @@
         : unknown((d.spill && d.spill.unavailable) || 'The spill ratio was not available to this check.')]
     ]));
 
-    if (d.notes && d.notes.length) {
-      body.appendChild(el('div.sectiontitle', { text: 'Notes' }));
-      body.appendChild(el('ul.treelist', d.notes.map(function (n) {
-        return el('li.treelist-item', el('span', { text: n }));
-      })));
-    }
-
-    if (d.scope) body.appendChild(hint(d.scope));
+    body.appendChild(details((d.notes || []).concat([d.scope || null])));
   }
 
   function cacheTab() {
     return el('div.stack', [
       livePanel('Cache health', API.cacheHealth, renderCacheHealth, {
-        ttlMs: 10000, errorTitle: 'The cache health could not be read'
+        ttlMs: 10000
       }),
       livePanel('Memory and spill', API.cacheMemory, renderCacheMemory, {
-        ttlMs: 10000, errorTitle: 'Cache memory could not be read'
+        ttlMs: 10000
       }),
       livePanel('Server', API.cacheServer, renderCacheServer, {
-        ttlMs: 10000, errorTitle: 'The cache server state could not be read'
+        ttlMs: 10000
       }),
       livePanel('Keyspace', API.cacheKeyspace, renderCacheKeyspace, {
-        ttlMs: 120000, errorTitle: 'The key count could not be read'
+        ttlMs: 120000
       })
     ]);
   }
@@ -1206,7 +906,7 @@
       body.appendChild(hint('State could not be established for: ' + d.unreadable.join(', ') +
         '. Those rows show unknown rather than zero.'));
     }
-    body.appendChild(hint('Inventory from ' + (d.inventorySource || 'the NATS server') + '.'));
+    body.appendChild(details(['Inventory from ' + (d.inventorySource || 'the NATS server') + '.']));
   }
 
   function renderQueueConsumers(body, d) {
@@ -1253,39 +953,52 @@
       empty: 'No consumer is registered on any stream.'
     }));
 
-    if (d.lagNote) body.appendChild(hint(d.lagNote));
-    if (d.streamsWithoutConsumers && d.streamsWithoutConsumers.length) {
-      body.appendChild(hint('Streams with no consumer: ' + d.streamsWithoutConsumers.join(', ') +
-        '. Some are deliberately consumer-less, so this is a fact and not a verdict.'));
-    }
+    body.appendChild(details([
+      d.lagNote || null,
+      d.streamsWithoutConsumers && d.streamsWithoutConsumers.length
+        ? 'Streams with no consumer: ' + d.streamsWithoutConsumers.join(', ') + '. Some are deliberately consumer-less, so this is a fact and not a verdict.'
+        : null
+    ]));
   }
 
   function queuesTab() {
     return el('div.stack', [
       livePanel('Streams', API.queueStreams, renderQueueStreams, {
-        ttlMs: 5000, errorTitle: 'The stream list could not be read'
+        ttlMs: 5000
       }),
       livePanel('Consumers', API.queueConsumers, renderQueueConsumers, {
-        ttlMs: 5000, errorTitle: 'The consumer list could not be read'
+        ttlMs: 5000
       })
     ]);
   }
 
-  function notFound(kind, name, detail) {
-    return ui.emptyState(
-      'No ' + kind + ' called ' + name,
-      detail || ('The link may be from an older version of the console, or the ' + kind + ' has been removed.'),
-      ui.btn('Back to Data', { variant: 'primary', onClick: function () { A.go('data'); } }));
+  function goneSince(kind, name) {
+    return ui.stateBlock('notFound', {
+      reason: 'unknown-id',
+      detail: 'No ' + kind + ' called ' + name + ' is in this answer. It may have been removed since the page opened.'
+    });
+  }
+
+  function whenItExists(mount, path, listKey, kind, name, paint) {
+    if (A.storeMode() === A.MODE.SAMPLE) { paint(); return; }
+    var holder = el('div', [ui.skeleton(3)]);
+    mount.appendChild(holder);
+    var alive = true;
+    A.onLeave(function () { alive = false; });
+    A.read(path, { ttlMs: 15000 }).then(function (env) {
+      if (!alive) return;
+      if (holder.parentNode) holder.parentNode.removeChild(holder);
+      if (A.envelopeState(env) === 'ok' && env.data && !findByName(env.data[listKey], name)) {
+        mount.appendChild(ui.notFound(kind, name, 'data', 'Back to Data'));
+        return;
+      }
+      paint();
+    });
   }
 
   function renderOneDatabase(body, d, name) {
     var db = findByName(d.databases, name);
-    if (!db) {
-      body.appendChild(notFound('database', name,
-        'This cluster reports ' + fmt.num(d.count) + ' databases and none of them is called ' + name + '. ' +
-        'The ones that exist: ' + (d.databases || []).map(function (x) { return x.name; }).join(', ') + '.'));
-      return;
-    }
+    if (!db) { body.appendChild(goneSince('database', name)); return; }
 
     var conns = db.connections || {};
     body.appendChild(el('div.tiles', [
@@ -1493,204 +1206,52 @@
   }
 
   function databaseDetail(mount, name) {
-    mount.appendChild(ui.pageHeader(
-      name,
-      'One database on the PostgreSQL cluster this console reads. Everything below is live.',
-      [refreshButton(['database', name])]));
+    whenItExists(mount, API.pgDatabases, 'databases', 'database', name, function () {
+      mount.appendChild(ui.pageHeader(
+        name,
+        'One database on the PostgreSQL cluster this console reads.',
+        [refreshButton(['database', name])]));
 
-    mount.appendChild(livePanel('Database', API.pgDatabases, function (body, d) {
-      renderOneDatabase(body, d, name);
-    }, { ttlMs: 10000, errorTitle: 'This database could not be read' }));
+      mount.appendChild(livePanel('Database', API.pgDatabases, function (body, d) {
+        renderOneDatabase(body, d, name);
+      }, { ttlMs: 15000 }));
 
-    mount.appendChild(livePanel('Sessions on ' + name, API.pgActivity, function (body, d) {
-      renderDatabaseSessions(body, d, name);
-    }, { ttlMs: 2000, errorTitle: 'Sessions could not be read' }));
+      mount.appendChild(livePanel('Sessions on ' + name + ' now', API.pgActivity, function (body, d) {
+        renderDatabaseSessions(body, d, name);
+      }, { ttlMs: 2000 }));
 
-    mount.appendChild(livePanel('Slowest statements on ' + name, API.pgStatements, function (body, d) {
-      renderDatabaseStatements(body, d, name);
-    }, { ttlMs: 15000, errorTitle: 'Statement statistics could not be read' }));
+      mount.appendChild(livePanel('Slowest statements on ' + name + ' since the counters were reset', API.pgStatements, function (body, d) {
+        renderDatabaseStatements(body, d, name);
+      }, { ttlMs: 15000 }));
 
-    mount.appendChild(queryEditor(name));
+      mount.appendChild(queryEditor(name));
+    });
   }
 
   function renderOneBucket(body, d, name) {
     var b = findByName(d.buckets, name);
-    if (!b) {
-      body.appendChild(notFound('bucket', name,
-        'This object store holds ' + fmt.num(d.count) + ' buckets and none of them is called ' + name + '.'));
-      return;
-    }
-
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Size', tileText(bytesText(b.diskBytes)), {
-        note: isNum(b.diskBytes) ? 'From the volume servers' : 'Not measured'
-      }),
-      ui.statTile('Objects', tileText(isNum(b.objects) ? fmt.num(b.objects) : null), {
-        note: isNum(b.objects) ? (b.objectsApprox ? 'Approximate: includes uncompacted deletes' : 'Exact') : 'Not counted'
-      }),
-      ui.statTile('Object lock', b.lock ? b.lock : 'none', {
-        note: b.lock ? fmt.num(b.lockDays) + ' days retention' : 'Objects can be deleted or overwritten'
-      }),
-      ui.statTile('Volumes', tileText(isNum(b.volumes) ? fmt.num(b.volumes) : null), {
-        note: b.volumes === 0 ? 'Nothing has been written here yet' : 'Holding this bucket\'s collection'
-      })
-    ]));
-
-    if (b.unknownSize && b.unknownSizeReason) {
-      body.appendChild(calloutOf('info', 'The size of this bucket is unknown, not zero.', b.unknownSizeReason));
-    }
-
-    body.appendChild(ui.dl([
-      ['Bucket', mono(b.name)],
-      ['Created', timeNode(b.createdAt, 'The creation time was not reported.')],
-      ['Owner', b.owner ? mono(b.owner) : unknown('No owning identity is declared for this bucket.')],
-      ['Versioning', b.versioning ? ui.pill('on', 'ok') : ui.pill('off', 'idle', { title: 'Without versioning an overwrite is unrecoverable, and object lock has nothing to hold.' })],
-      ['Object lock declared', b.lockDeclared ? mono(b.lockDeclared) : el('span.muted', { text: 'none' })],
-      ['Object lock in effect', b.lock ? el('span.lockbadge', { text: b.lock + ' \u00b7 ' + fmt.num(b.lockDays) + ' days' }) : el('span.muted', { text: 'none' })],
-      ['Replication', b.replication ? el('span', { text: b.replication }) : el('span.muted', { text: 'not configured' })],
-      ['Backup', b.backup ? el('span', { text: b.backup.tool + ' ' + b.backup.schedule + ' to ' + b.backup.target }) : el('span.muted', { text: 'none declared' })],
-      ['Lifecycle', isNum(b.lifecycleDays) ? el('span', { text: fmt.num(b.lifecycleDays) + ' days' }) : el('span.muted', { text: 'none' })]
-    ]));
-  }
-
-  function renderBucketLock(body, d, name) {
-    var row = findByName(d.buckets, name);
-
-    body.appendChild(el('div.row', [
-      ui.pill(d.verdict || 'undetermined', d.verdict === 'enforced' ? 'ok' : 'warn'),
-      el('span.muted', { text: d.determined ? 'proven by a real delete attempt' : 'not proven' })
-    ]));
-
-    body.appendChild(el('div.callout.' + (d.verdict === 'enforced' ? 'ok' : 'warn'), [
-      el('strong', { text: 'Object lock across this object store: ' + (d.verdict || 'undetermined') + '.' }),
-      el('p', { text: d.detail || 'No detail was given.' })
-    ]));
-
-    if (!row) {
-      body.appendChild(ui.emptyState('No lock record for ' + name,
-        'The lock probe did not cover this bucket, which normally means object lock was never enabled on it.'));
-    } else {
-      body.appendChild(ui.dl([
-        ['Lock enabled', row.lockEnabled ? ui.pill('yes', 'ok') : ui.pill('no', 'idle')],
-        ['Mode in effect', row.mode ? mono(row.mode) : unknown('No mode was reported for this bucket.')],
-        ['Retention in effect', isNum(row.days) ? el('span', { text: fmt.num(row.days) + ' days' }) : unknown('No retention period was reported.')],
-        ['Declared', row.declared ? mono(row.declared) : el('span.muted', { text: 'nothing declared' })],
-        ['Delete probe', row.enforced === 'enforced'
-          ? ui.pill('refused the delete', 'ok')
-          : ui.pill(row.enforced || 'not probed', 'warn', { title: row.probeError || '' })]
-      ]));
-    }
-
-    var notes = [];
-    if (d.probedAt) notes.push('Probed at ' + stampOf(d.probedAt) + '.');
-    if (d.scope) notes.push('Scope: ' + d.scope + '.');
-    if (d.profile) notes.push('Profile: ' + d.profile + '.');
-    if (d.devOverrides) {
-      notes.push('Development overrides are in force: ' + d.devOverrides.mode + ' for ' + d.devOverrides.days +
-        ' days, which is not what the declaration asks for and is why a mode below reads GOVERNANCE.');
-    }
-    if (notes.length) body.appendChild(hint(notes.join(' ')));
-  }
-
-  function objectBrowser(name) {
-    var body = el('div');
-    var alive = true;
-    A.onLeave(function () { alive = false; });
-
-    function idle() {
-      ui.clear(body);
-      body.appendChild(ui.emptyState('Objects are not listed until you ask',
-        'Listing walks the bucket, so it happens on a button press rather than on every page load.',
-        ui.btn('List the top level of ' + name, { variant: 'primary', onClick: function () { load(''); } })));
-    }
-
-    function load(prefix) {
-      ui.clear(body);
-      body.appendChild(ui.skeleton(4));
-      var path = API.storageObjects + '?bucket=' + encodeURIComponent(name) +
-        '&prefix=' + encodeURIComponent(prefix || '');
-
-      A.read(path, { ttlMs: 0 }).then(function (env) {
-        if (!alive) return;
-        ui.clear(body);
-
-        if (env.mode === A.MODE.SAMPLE) {
-          body.appendChild(ui.emptyState('Not available on bundled sample data',
-            'Listing objects needs the console API. Start it with `npm start` in platform/console/server.'));
-          return;
-        }
-        if (!env.ok) {
-          var e = env.error || {};
-          if (e.reason === 'http-404') { body.appendChild(notWired(API.storageObjects)); return; }
-          body.appendChild(ui.errorState('The listing failed', e.message || 'No reason was given.',
-            function () { load(prefix); }));
-          return;
-        }
-
-        var d = env.data || {};
-        body.appendChild(el('div.row', [
-          ui.btn('Back to the top level of ' + name, {
-            variant: 'ghost', disabled: !prefix, onClick: function () { load(''); }
-          }),
-          el('span.muted', { text: prefix ? name + '/' + prefix : name + '/' })
-        ]));
-
-        if (d.folders && d.folders.length) {
-          body.appendChild(el('ul.treelist', { 'aria-label': 'Prefixes under ' + (prefix || 'the top level') },
-            d.folders.map(function (f) {
-              return el('li.treelist-item', [
-                ui.btn(f, { variant: 'ghost', onClick: function () { load(f); } })
-              ]);
-            })));
-        }
-
-        body.appendChild(ui.table([
-          { key: 'key', label: 'Key', width: '46%', render: function (r) { return clipped(r.key, 90); } },
-          { key: 'sizeBytes', label: 'Size', align: 'right', render: function (r) { return bytesNode(r.diskBytes, 'The listing returned no size for this object.'); } },
-          { key: 'modifiedAt', label: 'Modified', render: function (r) { return timeNode(r.modifiedAt, 'The listing returned no modification time.'); } },
-          { key: 'storageClass', label: 'Class', render: function (r) { return r.storageClass ? mono(r.storageClass) : el('span.muted', { text: 'default' }); } }
-        ], d.objects || [], {
-          caption: 'Objects directly under ' + (prefix || 'the top level') + ' of ' + name + ', with size, last modification and storage class',
-          sortKey: 'key',
-          rowKey: function (r) { return r.key; },
-          empty: (d.folders && d.folders.length)
-            ? 'No object sits directly at this level; the prefixes above hold them.'
-            : 'This level holds no objects.'
-        }));
-
-        if (d.truncated) {
-          body.appendChild(hint('The listing was cut at ' + fmt.num(d.pageSize) +
-            ' entries. Narrow it with a prefix rather than paging through a bucket from a browser.'));
-        }
-        if (d.keyRepair && d.keyRepair.applied) {
-          body.appendChild(hint('Key names on this listing were corrected before display: ' + d.keyRepair.reason));
-        }
-        body.appendChild(hint('Listed at ' + (stampOf(d.at) || 'an unrecorded time') + '.'));
-      });
-    }
-
-    idle();
-    return ui.card('Objects', body);
+    if (!b) { body.appendChild(goneSince('bucket', name)); return; }
+    body.appendChild(el('p', {
+      text: (b.unknownSize || !isNum(b.diskBytes) ? 'Size not measured' : 'About ' + fmt.bytes(b.diskBytes) + ' on disk') +
+        ', object lock ' + (b.lock ? b.lock + ' for ' + fmt.num(b.lockDays) + ' days' : 'none') +
+        ', versioning ' + (b.versioning ? 'on' : 'off') + '.'
+    }));
   }
 
   function bucketDetail(mount, name) {
-    mount.appendChild(ui.pageHeader(
-      name,
-      'One bucket in the object store this platform runs. Everything below is live.',
-      [refreshButton(['bucket', name])]));
-
-    mount.appendChild(livePanel('Bucket', API.storageBuckets, function (body, d) {
-      renderOneBucket(body, d, name);
-    }, { ttlMs: 15000, errorTitle: 'This bucket could not be read' }));
-
-    mount.appendChild(livePanel('Object lock', API.storageLock, function (body, d) {
-      renderBucketLock(body, d, name);
-    }, { ttlMs: 60000, errorTitle: 'The object lock state could not be read' }));
-
-    mount.appendChild(objectBrowser(name));
+    whenItExists(mount, API.storageBuckets, 'buckets', 'bucket', name, function () {
+      mount.appendChild(ui.pageHeader(
+        name,
+        'One bucket in the object store. The Object storage screen owns buckets.',
+        [refreshButton(['bucket', name])]));
+      mount.appendChild(livePanel('Bucket', API.storageBuckets, function (body, d) {
+        renderOneBucket(body, d, name);
+        body.appendChild(A.link('Browse ' + name + ' on the Object storage screen', 'storage', null, { bucket: name }));
+      }, { ttlMs: 15000, skeletonRows: 1 }));
+    });
   }
 
-  registerScreen('data', {
+  A.screen('data', {
     title: 'Data',
     crumb: 'Data',
     render: function (mount, ctx) {
@@ -1704,12 +1265,6 @@
         'The databases, object store, cache and queues this platform runs, read live through the console API.',
         [refreshButton(rest)]));
 
-      var banner = el('div');
-      mount.appendChild(banner);
-      var alive = true;
-      A.onLeave(function () { alive = false; });
-      A.probe().then(function () { if (alive) renderBanner(banner); });
-
       mount.appendChild(ui.tabs([
         { id: 'databases', label: 'Databases', render: databasesTab },
         { id: 'buckets', label: 'Object storage', render: bucketsTab },
@@ -1722,32 +1277,4 @@
       }));
     }
   });
-
-  function renderBanner(mount) {
-    ui.clear(mount);
-
-    if (A.storeMode() !== A.MODE.LIVE) {
-      mount.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'The console API is not running, so this screen has nothing to read.' }),
-        el('p', {
-          text: 'This screen reads PostgreSQL, the object store, Garnet and NATS through the console API. Start it ' +
-            'with `npm start` in platform/console/server and open the console it serves. The panels below say ' +
-            'which endpoint each one needs.'
-        })
-      ]));
-      return;
-    }
-
-    var caps = A.capabilities() || {};
-    mount.appendChild(el('div.callout.info', [
-      el('strong', { text: 'Live data.' }),
-      el('p', {
-        text: 'Every figure below was read from a running service and carries the time it was measured. ' +
-          (caps.writesAllowed
-            ? 'This console is permitted to make changes.'
-            : 'This console is read-only: it refuses every request that would change anything, before the route is ' +
-              'even looked up.')
-      })
-    ]));
-  }
 })();
