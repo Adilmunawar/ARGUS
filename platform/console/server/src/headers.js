@@ -5,21 +5,31 @@ const authConfig = require('./auth/config');
 const CSP = [
   "default-src 'none'",
   "script-src 'self'",
+  "script-src-attr 'none'",
   "style-src 'self'",
-  "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  "style-src-attr 'none'",
+  "img-src 'self' data:",
   "font-src 'self'",
+  "connect-src 'self'",
   "form-action 'none'",
   "base-uri 'none'",
+  "object-src 'none'",
+  "frame-src 'none'",
+  "worker-src 'none'",
+  "manifest-src 'none'",
+  "media-src 'none'",
   "frame-ancestors 'none'",
-  'sandbox allow-scripts allow-same-origin'
+  "require-trusted-types-for 'script'",
+  "trusted-types 'none'"
 ].join('; ');
+
+const PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
 const PERMISSIONS_POLICY = [
   'accelerometer=()', 'autoplay=()', 'camera=()', 'cross-origin-isolated=()', 'display-capture=()',
   'encrypted-media=()', 'fullscreen=()', 'geolocation=()', 'gyroscope=()', 'keyboard-map=()',
   'magnetometer=()', 'microphone=()', 'midi=()', 'payment=()', 'picture-in-picture=()',
-  'publickey-credentials-get=()', 'screen-wake-lock=()', 'sync-xhr=(self)', 'usb=()', 'web-share=()',
+  'publickey-credentials-get=()', 'screen-wake-lock=()', 'sync-xhr=(self)', 'usb=()',
   'xr-spatial-tracking=()', 'clipboard-read=()', 'clipboard-write=()', 'gamepad=()', 'hid=()',
   'idle-detection=()', 'interest-cohort=()', 'serial=()', 'unload=()'
 ].join(', ');
@@ -48,4 +58,4 @@ function apply(res) {
   res.removeHeader('x-powered-by');
 }
 
-module.exports = { apply, BASELINE, CSP, PERMISSIONS_POLICY };
+module.exports = { apply, BASELINE, CSP, PREVIEW_CSP, PERMISSIONS_POLICY };

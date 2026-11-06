@@ -484,8 +484,8 @@ async function probeFilerBypass(bucket, key) {
       return { filerBypass: 'open',
         filerBypassDetail: `DELETE ${attempt.url} succeeded (${attempt.status}). Object Lock lives entirely in the ` +
           `S3 gateway, so the filer, the master and the volume servers all delete locked data without consulting it. ` +
-          `The only thing standing between this object and deletion is that the filer port is published on 127.0.0.1 ` +
-          `alone. Configure filer WORM on the bucket prefix to close it.` };
+          `The only thing standing between this object and deletion is that the filer port is reachable only inside ` +
+          `the stack network. Configure filer WORM on the bucket prefix to close it.` };
     }
     if (attempt.status === 403) {
       return { filerBypass: 'blocked',
@@ -652,8 +652,8 @@ async function run() {
   log(`filer bypass: ${String(worm.filerBypass).toUpperCase()} -- ${worm.filerBypassDetail || 'not probed'}`);
   if (worm.filerBypass === 'open') {
     warn('object lock is enforced by the S3 gateway only. The filer, the master and the volume servers delete ' +
-         'locked data without consulting it, and the only barrier is that those ports are published on 127.0.0.1 ' +
-         'alone. The console reports this beside the WORM verdict rather than implying more.');
+         'locked data without consulting it, and the only barrier is that those ports are reachable only inside the stack ' +
+         'network. The console reports this beside the WORM verdict rather than implying more.');
   }
   if (worm.defaultRetentionStamped === 'not-stamped') {
     warn('a bucket default retention rule reads back healthy but is not applied to objects written into it. ' +

@@ -1,5 +1,7 @@
 'use strict';
 
+const reader = require('./reader');
+const { baseClassify } = reader;
 const net = require('node:net');
 
 const cache = require('./cache');
@@ -251,25 +253,18 @@ function classify(err) {
         'start at all, and one that is restarting drops connections mid-command.'
     };
   }
-  return { reason: 'error', message: msg };
+  return baseClassify(err);
 }
 
 function guarded(key, ttlMs, producer) {
-  return async function () {
-    try {
-      const r = await cache.through(key, ttlMs, producer);
-      return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
-    } catch (err) {
-      return { ok: false, ...classify(err) };
-    }
-  };
+  return reader.guarded(key, ttlMs, producer, { noArgs: true, classify });
 }
 
-function parseInfo(text) {
+function parseInfo(payload) {
   const sections = new Map();
   const flat = new Map();
   let current = '(unsectioned)';
-  for (const rawLine of String(text).split(/\r?\n/)) {
+  for (const rawLine of String(payload).split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) continue;
     if (line.startsWith('#')) {

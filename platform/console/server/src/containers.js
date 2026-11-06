@@ -1,7 +1,7 @@
 'use strict';
 
 const config = require('./config');
-const cache = require('./cache');
+const reader = require('./reader');
 const upstream = require('./upstream');
 const { positiveInt } = require('./env');
 
@@ -48,17 +48,12 @@ function url(suffix, params) {
   return upstream.join(config.dockerProxyUrl, apiPath(suffix), params);
 }
 
+function classify(err) {
+  return upstream.classify(err, LABEL, TIMEOUT_MS);
+}
+
 function guarded(key, ttlMs, producer) {
-  return async function (...args) {
-    try {
-      requireConfigured();
-      const cacheKey = key + (args.length ? ':' + JSON.stringify(args) : '');
-      const r = await cache.through(cacheKey, ttlMs, () => producer(...args));
-      return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
-    } catch (err) {
-      return { ok: false, ...upstream.classify(err, LABEL, TIMEOUT_MS) };
-    }
-  };
+  return reader.guarded(key, ttlMs, producer, { precheck: requireConfigured, classify });
 }
 
 function summarise(raw) {
@@ -116,6 +111,54 @@ const inspect = guarded('docker:inspect', LIST_TTL_MS, async (id) => {
     restartPolicy: (hostConfig.RestartPolicy && hostConfig.RestartPolicy.Name) || null,
     memoryLimitBytes: hostConfig.Memory || null,
     environmentWithheld: Array.isArray(containerConfig.Env) ? containerConfig.Env.length : 0
+  };
+});
+
+const SUMMARY_CONCURRENCY = 4;
+const SUMMARY_DETAIL_MAX = 200;
+
+async function mapLimited(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      out[index] = await fn(items[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+const summary = guarded('docker:summary', LIST_TTL_MS, async () => {
+  const answer = await upstream.getJson(url('containers/json', { all: '1' }), { timeoutMs: TIMEOUT_MS });
+  const rows = (Array.isArray(answer) ? answer : []).map(summarise);
+  const detailed = rows.slice(0, SUMMARY_DETAIL_MAX);
+  const details = await mapLimited(detailed, SUMMARY_CONCURRENCY, async (row) => {
+    if (!row.id) return { ok: false, reason: 'invalid-request', message: 'The proxy listed a container with no id.' };
+    return inspect(row.id);
+  });
+  const containers = rows.map((row, index) => {
+    const d = index < details.length ? details[index] : null;
+    const ok = !!(d && d.ok);
+    return {
+      ...row,
+      restartCount: ok ? d.state.restartCount : null,
+      startedAt: ok ? d.state.startedAt : null,
+      finishedAt: ok ? d.state.finishedAt : null,
+      exitCode: ok ? d.state.exitCode : null,
+      restartPolicy: ok ? d.restartPolicy : null,
+      detailUnavailable: ok ? null : (d ? { reason: d.reason, message: d.message }
+        : { reason: 'too-many', message: `Only the first ${SUMMARY_DETAIL_MAX} containers are inspected in one summary.` })
+    };
+  });
+  return {
+    containers,
+    count: containers.length,
+    running: containers.filter((c) => c.state === 'running').length,
+    inspected: details.filter((d) => d && d.ok).length,
+    concurrency: SUMMARY_CONCURRENCY
   };
 });
 
@@ -296,6 +339,7 @@ async function openEvents(handlers) {
 module.exports = {
   configured,
   list,
+  summary,
   inspect,
   stats,
   health,

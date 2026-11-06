@@ -95,7 +95,8 @@ function rotate(key) {
   sessions.set(key, {
     ...session,
     renewAfter: Infinity,
-    absoluteExpiresAt: Math.min(session.absoluteExpiresAt, now + grace)
+    absoluteExpiresAt: Math.min(session.absoluteExpiresAt, now + grace),
+    successor: nextKey
   });
   audit('auth.session.renewed', {
     subject: session.subject,
@@ -107,7 +108,33 @@ function rotate(key) {
 }
 
 function destroy(key) {
-  return sessions.delete(key);
+  const removed = sessions.delete(key);
+  for (const [other, session] of sessions) {
+    if (session.successor === key) sessions.delete(other);
+  }
+  return removed;
+}
+
+const SUCCESSOR_HOPS_MAX = 8;
+
+function peek(key) {
+  let current = key;
+  for (let hop = 0; hop <= SUCCESSOR_HOPS_MAX; hop += 1) {
+    const session = typeof current === 'string' ? sessions.get(current) : null;
+    if (!session) return { ok: false, reason: 'gone' };
+    if (session.successor) { current = session.successor; continue; }
+    const now = Date.now();
+    if (now >= session.absoluteExpiresAt) return { ok: false, reason: 'absolute-timeout' };
+    if (now - session.lastSeenAt >= authConfig.idleTimeoutMs) return { ok: false, reason: 'idle-timeout' };
+    return {
+      ok: true,
+      key: current,
+      subject: session.subject,
+      absoluteExpiresAt: session.absoluteExpiresAt,
+      idleExpiresAt: session.lastSeenAt + authConfig.idleTimeoutMs
+    };
+  }
+  return { ok: false, reason: 'gone' };
 }
 
 function destroySubject(subject) {
@@ -145,4 +172,4 @@ function clear() {
   sessions.clear();
 }
 
-module.exports = { create, resolve, rotate, destroy, destroySubject, sweep, size, clear, ref, digest, keyFor };
+module.exports = { create, resolve, peek, rotate, destroy, destroySubject, sweep, size, clear, ref, digest, keyFor };

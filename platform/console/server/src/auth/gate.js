@@ -76,13 +76,15 @@ function resolvePrincipal(req, res, context) {
   const cookie = readCookie(req, authConfig.cookie.name);
   if (cookie.duplicated) {
     audit('auth.session.anomaly', {
-      outcome: 'defer',
+      outcome: 'failure',
       reason: 'duplicate-session-cookie',
       sourceAddress: context.sourceAddress,
       method: req.method,
       path: context.pathname,
       requestId: context.requestId
     });
+    clearSessionCookie(res);
+    return { principal: null, reason: 'duplicate-session-cookie' };
   }
 
   const resolved = sessions.resolve(cookie.value);

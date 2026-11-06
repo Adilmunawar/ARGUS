@@ -1,8 +1,8 @@
 'use strict';
 
+const reader = require('./reader');
 const fs = require('node:fs');
 
-const cache = require('./cache');
 const { positiveInt } = require('./env');
 
 const HOST = process.env.ARGUS_PG_HOST || '';
@@ -232,17 +232,14 @@ function configurationProblem() {
 }
 
 function guarded(key, ttlMs, producer, keyFor) {
-  return async function (...args) {
-    const problem = configurationProblem();
-    if (problem) return { ok: false, ...problem, at: new Date().toISOString() };
-    const suffix = keyFor ? ':' + keyFor(...args) : (args.length ? ':' + JSON.stringify(args) : '');
-    try {
-      const r = await cache.through(key + suffix, ttlMs, () => producer(...args));
-      return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
-    } catch (err) {
-      return { ok: false, ...classify(err) };
+  return reader.guarded(key, ttlMs, producer, {
+    classify,
+    keyFor,
+    precheck: () => {
+      const problem = configurationProblem();
+      return problem ? { ...problem, at: new Date().toISOString() } : null;
     }
-  };
+  });
 }
 
 function num(v) {

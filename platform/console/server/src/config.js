@@ -23,6 +23,8 @@ const config = {
 
   allowWrites: bool('ARGUS_ALLOW_WRITES', false),
 
+  environment: /^[a-z0-9][a-z0-9-]{0,31}$/.test(process.env.ARGUS_ENVIRONMENT || '') ? process.env.ARGUS_ENVIRONMENT : '',
+
   webRoot: process.env.ARGUS_WEB_ROOT || '../../prototype',
 
   logLevel: process.env.ARGUS_LOG_LEVEL || 'info',

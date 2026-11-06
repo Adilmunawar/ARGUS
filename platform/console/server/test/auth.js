@@ -2,6 +2,7 @@
 
 const http = require('http');
 const assert = require('assert');
+const { report, freePort } = require('./helpers');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -32,16 +33,11 @@ const check = (name, fn) => {
   catch (err) { results.push({ name, ok: false, detail: err.message }); }
 };
 
-let nextPort = Number(process.env.AUTH_TEST_PORT || 8910);
-function takePort() {
-  nextPort += 1;
-  return nextPort;
-}
-
 const spawned = [];
 
-function launch(env) {
-  const port = takePort();
+async function launch(envOrFn) {
+  const port = await freePort();
+  const env = typeof envOrFn === 'function' ? envOrFn(port) : envOrFn;
   const child = spawn(process.execPath, [SERVER], {
     env: {
       ...process.env,
@@ -121,6 +117,58 @@ function call(server, options) {
   });
 }
 
+function rawRequest(server, text) {
+  return new Promise((resolve, reject) => {
+    const socket = require('net').createConnection({ host: '127.0.0.1', port: server.port }, () => socket.write(text));
+    let received = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (d) => { received += d; });
+    socket.on('end', () => {
+      const m = /^HTTP\/1\.[01] (\d{3})/.exec(received);
+      resolve({ status: m ? Number(m[1]) : 0, headers: {}, body: received.split('\r\n\r\n').slice(1).join('\r\n\r\n') });
+    });
+    socket.on('error', reject);
+  });
+}
+
+function openStream(server, requestPath, headers) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1',
+      port: server.port,
+      path: requestPath,
+      method: 'GET',
+      headers: { accept: 'text/event-stream', 'sec-fetch-site': 'same-origin', ...(headers || {}) }
+    }, (res) => {
+      let markEnded;
+      const stream = {
+        status: res.statusCode,
+        headers: res.headers,
+        text: '',
+        ended: new Promise((r) => { markEnded = r; }),
+        close() { req.destroy(); },
+        until(predicate, timeoutMs) {
+          return new Promise((done, fail) => {
+            const timer = setTimeout(() => fail(new Error('the stream never matched')), timeoutMs || 4000);
+            const tick = () => {
+              if (predicate(stream.text)) { clearTimeout(timer); res.removeListener('data', tick); done(stream.text); }
+            };
+            res.on('data', tick);
+            tick();
+          });
+        }
+      };
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { stream.text += chunk; });
+      res.on('end', () => markEnded());
+      res.on('close', () => markEnded());
+      resolve(stream);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 function login(server, subject, password, extraHeaders) {
   return call(server, {
     method: 'POST',
@@ -178,12 +226,16 @@ function writeOperatorsFile(dir, record, extra) {
   const record = await hash.hash(PASSWORD, {
     cost: 16384, blockSize: 8, parallelism: 1, maxmem: 64 * 1024 * 1024
   });
-  const operatorsFile = writeOperatorsFile(dir, record);
+  const operatorsFile = writeOperatorsFile(dir, record, [
+    { subject: 'viewer-op', displayName: 'Viewer', roles: [], password: record, credentials: [] },
+    { subject: 'operator-op', displayName: 'Operator', roles: ['operator', 'tier-1'], password: record, credentials: [] },
+    { subject: 'security-op', displayName: 'Security', roles: ['security'], password: record, credentials: [] }
+  ]);
 
   const emptyFile = path.join(dir, 'empty.json');
   fs.writeFileSync(emptyFile, JSON.stringify({ operators: [] }));
 
-  const refuseOpen = launch({ ARGUS_AUTH: 'off', ARGUS_HOST: '0.0.0.0' });
+  const refuseOpen = await launch({ ARGUS_AUTH: 'off', ARGUS_HOST: '0.0.0.0' });
   const refuseOpenCode = await waitForExit(refuseOpen);
   check('auth off on a non-loopback bind refuses to start', () => {
     assert.strictEqual(refuseOpenCode, 1, `exit code ${refuseOpenCode}`);
@@ -200,14 +252,14 @@ function writeOperatorsFile(dir, record, extra) {
       auditEvents(refuseOpen).join(', ') || 'no audit lines');
   });
 
-  const refuseNoOperators = launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: emptyFile });
+  const refuseNoOperators = await launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: emptyFile });
   const refuseNoOperatorsCode = await waitForExit(refuseNoOperators);
   check('session mode with no operators refuses to start', () => {
     assert.strictEqual(refuseNoOperatorsCode, 1, `exit code ${refuseNoOperatorsCode}`);
     assert.match(refuseNoOperators.err, /at least one enabled operator/);
   });
 
-  const refuseProxy = launch({ ARGUS_AUTH: 'proxy' });
+  const refuseProxy = await launch({ ARGUS_AUTH: 'proxy' });
   const refuseProxyCode = await waitForExit(refuseProxy);
   check('proxy mode without a trusted peer list and secret refuses to start', () => {
     assert.strictEqual(refuseProxyCode, 1, `exit code ${refuseProxyCode}`);
@@ -215,13 +267,13 @@ function writeOperatorsFile(dir, record, extra) {
     assert.match(refuseProxy.err, /ARGUS_AUTH_PROXY_SHARED_SECRET/);
   });
 
-  const refuseBadMode = launch({ ARGUS_AUTH: 'yes-please' });
+  const refuseBadMode = await launch({ ARGUS_AUTH: 'yes-please' });
   const refuseBadModeCode = await waitForExit(refuseBadMode);
   check('an unrecognised auth mode refuses to start rather than guessing', () => {
     assert.strictEqual(refuseBadModeCode, 1, `exit code ${refuseBadModeCode}`);
   });
 
-  const allowLoopbackOff = launch({ ARGUS_AUTH: 'off' });
+  const allowLoopbackOff = await launch({ ARGUS_AUTH: 'off' });
   const loopbackOffUp = await waitForListening(allowLoopbackOff);
   check('auth off on loopback still starts, so local development is not blocked', () => {
     assert.strictEqual(loopbackOffUp, true, allowLoopbackOff.err.slice(0, 300));
@@ -235,7 +287,7 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(body.auth.subject, 'local-development');
   });
 
-  const main = launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile });
+  const main = await launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile });
   const mainUp = await waitForListening(main);
   check('session mode starts once it has an operator', () => {
     assert.strictEqual(mainUp, true, main.err.slice(0, 400));
@@ -250,12 +302,12 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(body.error, 'unauthenticated');
   });
 
-  for (const path of ['/api/host', '/api/storage/buckets', '/api/secrets/seal-status', '/api/pg/roles',
+  for (const route of ['/api/host', '/api/storage/buckets', '/api/secrets/seal-status', '/api/pg/roles',
     '/api/cache/clients', '/api/queues/streams', '/api/overview', '/api/storage/preview?bucket=a&key=b',
     '/api/logs/stream?query=%7B%7D', '/api/metrics/series?name=hostCpuBusyRatio', '/api/alerts/active',
     '/api/containers', '/api/heartbeats', '/api/search/index']) {
-    const r = await call(main, { path });
-    check(`${path} is refused without a session`, () => {
+    const r = await call(main, { path: route });
+    check(`${route} is refused without a session`, () => {
       assert.strictEqual(r.status, 401, `status ${r.status}`);
     });
   }
@@ -452,7 +504,7 @@ function writeOperatorsFile(dir, record, extra) {
     'cross-origin-resource-policy', 'cross-origin-opener-policy', 'x-frame-options',
     'x-permitted-cross-domain-policies', 'permissions-policy', 'vary'];
 
-  const matrix = launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile });
+  const matrix = await launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile });
   await waitForListening(matrix);
   const matrixCookie = cookieFrom(await login(matrix, SUBJECT, PASSWORD));
 
@@ -519,7 +571,7 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(main.err.includes(PASSWORD), false);
   });
 
-  const secure = launch({
+  const secure = await launch({
     ARGUS_AUTH: 'session',
     ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
     ARGUS_AUTH_SECURE_COOKIES: '1'
@@ -532,7 +584,7 @@ function writeOperatorsFile(dir, record, extra) {
     assert.match(raw, /^__Host-argus_sid=[A-Za-z0-9_-]{43}; Path=\/; Secure; HttpOnly; SameSite=Strict$/, raw);
   });
 
-  const shortLived = launch({
+  const shortLived = await launch({
     ARGUS_AUTH: 'session',
     ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
     ARGUS_AUTH_IDLE_TIMEOUT_MS: '900',
@@ -553,7 +605,7 @@ function writeOperatorsFile(dir, record, extra) {
     assert.ok(auditEvents(shortLived).includes('auth.session.expired.idle'), auditEvents(shortLived).join(', '));
   });
 
-  const renewing = launch({
+  const renewing = await launch({
     ARGUS_AUTH: 'session',
     ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
     ARGUS_AUTH_RENEW_MS: '1'
@@ -580,7 +632,7 @@ function writeOperatorsFile(dir, record, extra) {
     assert.ok(auditEvents(renewing).includes('auth.session.renewed'), auditEvents(renewing).join(', '));
   });
 
-  const proxied = launch({
+  const proxied = await launch({
     ARGUS_AUTH: 'proxy',
     ARGUS_AUTH_TRUSTED_PROXY_CIDRS: '127.0.0.0/8,::1/128',
     ARGUS_AUTH_PROXY_SHARED_SECRET: PROXY_SECRET
@@ -672,19 +724,345 @@ function writeOperatorsFile(dir, record, extra) {
     assert.strictEqual(refused, false);
   });
 
+  const tiers = await launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile });
+  await waitForListening(tiers);
+
+  const forgedHost = await call(tiers, {
+    path: '/api/identity/principals',
+    headers: { cookie: cookieFrom(await login(tiers, SUBJECT, PASSWORD)), host: `rebound.example.test:${tiers.port}` }
+  });
+  check('a forged Host with Sec-Fetch-Site same-origin is misdirected, not answered', () => {
+    assert.strictEqual(forgedHost.status, 421, `status ${forgedHost.status}`);
+    const body = JSON.parse(forgedHost.body);
+    assert.strictEqual(body.reason, 'misdirected');
+    assert.ok(!forgedHost.body.includes('operators'), 'principal data reached a rebound origin');
+  });
+  await waitForAudit(tiers, (r) => r.event === 'auth.host.rejected');
+  check('the misdirected request is audited', () => {
+    assert.ok(auditEvents(tiers).includes('auth.host.rejected'));
+  });
+
+  const allowedHosts = await launch((port) => ({
+    ARGUS_AUTH: 'session',
+    ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
+    ARGUS_ALLOWED_HOSTS: `console.example.test:${port}, plain.example.test`,
+    ARGUS_AUTH_PUBLIC_ORIGIN: 'https://argus.example.test'
+  }));
+  await waitForListening(allowedHosts);
+  const hostAnswers = {
+    listed: await call(allowedHosts, { headers: { host: `console.example.test:${allowedHosts.port}` } }),
+    listedWrongPort: await call(allowedHosts, { headers: { host: 'console.example.test:1' } }),
+    anyPort: await call(allowedHosts, { headers: { host: 'plain.example.test:4443' } }),
+    publicOrigin: await call(allowedHosts, { headers: { host: 'argus.example.test' } }),
+    unlisted: await call(allowedHosts, { headers: { host: 'elsewhere.example.test' } }),
+    noHost: await rawRequest(allowedHosts, 'GET /api/health HTTP/1.0\r\n\r\n')
+  };
+  check('ARGUS_ALLOWED_HOSTS and the public origin host are answered', () => {
+    assert.strictEqual(hostAnswers.listed.status, 200, `listed ${hostAnswers.listed.status}`);
+    assert.strictEqual(hostAnswers.anyPort.status, 200, `any port ${hostAnswers.anyPort.status}`);
+    assert.strictEqual(hostAnswers.publicOrigin.status, 200, `public origin ${hostAnswers.publicOrigin.status}`);
+  });
+  check('a host outside the allow list, or a listed host on another port, is misdirected', () => {
+    assert.strictEqual(hostAnswers.listedWrongPort.status, 421, `wrong port ${hostAnswers.listedWrongPort.status}`);
+    assert.strictEqual(hostAnswers.unlisted.status, 421, `unlisted ${hostAnswers.unlisted.status}`);
+    assert.strictEqual(hostAnswers.noHost.status, 421, `no host ${hostAnswers.noHost.status}`);
+  });
+
+  const offWithHosts = await launch({ ARGUS_AUTH: 'off', ARGUS_ALLOWED_HOSTS: 'console.example.test' });
+  await waitForListening(offWithHosts);
+  const offForeign = await call(offWithHosts, { path: '/api/host', headers: { host: 'console.example.test' } });
+  const offLoopback = await call(offWithHosts, { path: '/api/host', headers: { host: `localhost:${offWithHosts.port}` } });
+  check('with authentication off only loopback host names are answered, whatever the allow list says', () => {
+    assert.strictEqual(offForeign.status, 421, `foreign ${offForeign.status}`);
+    assert.strictEqual(offLoopback.status, 200, `loopback ${offLoopback.status}`);
+  });
+
+  const tierCookies = {};
+  for (const subject of ['viewer-op', 'operator-op', 'security-op', SUBJECT]) {
+    const signedIn = await login(tiers, subject, PASSWORD);
+    tierCookies[subject] = cookieFrom(signedIn);
+  }
+  const TIER_ROUTES = [
+    ['/api/host', 'viewer'],
+    ['/api/heartbeats', 'viewer'],
+    ['/api/pg/activity', 'operator'],
+    ['/api/logs/labels', 'operator'],
+    ['/api/audit/recent', 'security'],
+    ['/api/identity/principals', 'security'],
+    ['/api/aws/identity', 'admin'],
+    ['/api/overview', 'admin']
+  ];
+  const RANKS = { viewer: 1, operator: 2, security: 3, admin: 4 };
+  const HOLDS = { 'viewer-op': 'viewer', 'operator-op': 'operator', 'security-op': 'security', [SUBJECT]: 'admin' };
+  for (const [subject, held] of Object.entries(HOLDS)) {
+    for (const [route, needed] of TIER_ROUTES) {
+      const answer = await call(tiers, { path: route, headers: { cookie: tierCookies[subject] } });
+      const expectAllowed = RANKS[held] >= RANKS[needed];
+      check(`${held} ${expectAllowed ? 'reads' : 'is refused'} ${route}`, () => {
+        if (expectAllowed) {
+          assert.strictEqual(answer.status, 200, `status ${answer.status} ${answer.body.slice(0, 120)}`);
+        } else {
+          assert.strictEqual(answer.status, 403, `status ${answer.status}`);
+          const body = JSON.parse(answer.body);
+          assert.strictEqual(body.ok, false);
+          assert.strictEqual(body.error, 'forbidden');
+          assert.strictEqual(body.reason, 'role');
+          assert.strictEqual(body.required, needed);
+          assert.ok(body.message.includes(needed));
+        }
+      });
+    }
+  }
+  const viewerSession = JSON.parse((await call(tiers, { path: '/api/auth/session', headers: { cookie: tierCookies['viewer-op'] } })).body);
+  check('an operator record with no roles is a viewer', () => {
+    assert.deepStrictEqual(viewerSession.roles, []);
+    assert.strictEqual(viewerSession.tier, 'viewer');
+  });
+  const viewerUnknown = await call(tiers, { path: '/api/not-a-route', headers: { cookie: tierCookies['viewer-op'] } });
+  const adminUnknown = await call(tiers, { path: '/api/not-a-route', headers: { cookie: tierCookies[SUBJECT] } });
+  check('an unmapped API path is denied by default, so a viewer cannot map the API', () => {
+    assert.strictEqual(viewerUnknown.status, 403, `viewer ${viewerUnknown.status}`);
+    assert.strictEqual(adminUnknown.status, 404, `admin ${adminUnknown.status}`);
+  });
+  await waitForAudit(tiers, (r) => r.event === 'auth.role.denied');
+  check('a role denial is audited with the role it needed', () => {
+    const line = auditLines(tiers).find((r) => r.event === 'auth.role.denied');
+    assert.ok(line, 'no auth.role.denied line');
+    assert.ok(['operator', 'security', 'admin'].includes(line.required));
+  });
+
+  const strangerName = 'hunter2-typed-into-the-name-box';
+  await login(tiers, strangerName, WRONG_PASSWORD);
+  await login(tiers, 'operator-op', WRONG_PASSWORD);
+  await waitForAudit(tiers, (r) => r.event === 'auth.login.failed' && r.subject === 'operator-op');
+  check('a failed sign-in for a name that is not an operator never logs the name', () => {
+    assert.strictEqual(tiers.out.includes(strangerName), false, 'the typed name reached the log');
+    const unknown = auditLines(tiers).filter((r) => r.event === 'auth.login.failed' && /^unknown:[0-9a-f]{8}$/.test(String(r.subject)));
+    assert.ok(unknown.length >= 1, 'no unknown:<hmac> subject was logged');
+  });
+  check('a failed sign-in for a known operator still names the operator', () => {
+    assert.ok(auditLines(tiers).some((r) => r.event === 'auth.login.failed' && r.subject === 'operator-op'));
+  });
+
+  const unauthenticatedHarness = await call(tiers, { path: '/tests/live.js' });
+  check('the browser test harness is not served', () => {
+    assert.strictEqual(unauthenticatedHarness.status, 404, `status ${unauthenticatedHarness.status}`);
+  });
+
+  const twoCookies = await call(tiers, {
+    path: '/api/host',
+    headers: { cookie: `${tierCookies[SUBJECT]}; argus_sid=${'B'.repeat(43)}` }
+  });
+  check('two session cookies on one request are refused and cleared', () => {
+    assert.strictEqual(twoCookies.status, 401, `status ${twoCookies.status}`);
+    assert.strictEqual(JSON.parse(twoCookies.body).reason, 'duplicate-session-cookie');
+    assert.match(String((twoCookies.headers['set-cookie'] || [])[0] || ''), /Max-Age=0/);
+  });
+
+  for (const [expected, response] of Object.entries(responses)) {
+    if (expected === '200') continue;
+    check(`a ${expected} carries the one error envelope`, () => {
+      const body = JSON.parse(response.body);
+      assert.strictEqual(body.ok, false);
+      assert.strictEqual(typeof body.reason, 'string');
+      assert.strictEqual(typeof body.error, 'string');
+      assert.ok(body.message && body.message.length > 10);
+    });
+  }
+
+  const METRICS_TOKEN = 'm'.repeat(40);
+  const metered = await launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile, ARGUS_METRICS_TOKEN: METRICS_TOKEN });
+  await waitForListening(metered);
+  const scrapeNone = await call(metered, { path: '/metrics' });
+  const scrapeWrong = await call(metered, { path: '/metrics', headers: { authorization: 'Bearer ' + 'n'.repeat(40) } });
+  const scrapeRight = await call(metered, { path: '/metrics', headers: { authorization: 'Bearer ' + METRICS_TOKEN } });
+  check('a metrics token makes /metrics answer only to that bearer token', () => {
+    assert.strictEqual(scrapeNone.status, 401, `none ${scrapeNone.status}`);
+    assert.match(String(scrapeNone.headers['www-authenticate']), /^Bearer/);
+    assert.strictEqual(scrapeWrong.status, 401, `wrong ${scrapeWrong.status}`);
+    assert.strictEqual(scrapeRight.status, 200, `right ${scrapeRight.status}`);
+    assert.match(scrapeRight.body, /argus_console_build_info/);
+  });
+
+  const tokenFile = path.join(dir, 'metrics-token');
+  fs.writeFileSync(tokenFile, METRICS_TOKEN + '\n');
+  const meteredByFile = await launch({ ARGUS_AUTH: 'off', ARGUS_METRICS_TOKEN_FILE: tokenFile });
+  const brokenFile = await launch({ ARGUS_AUTH: 'off', ARGUS_METRICS_TOKEN_FILE: path.join(dir, 'no-such-token') });
+  await waitForListening(meteredByFile);
+  await waitForListening(brokenFile);
+  const byFileNone = await call(meteredByFile, { path: '/metrics' });
+  const byFileRight = await call(meteredByFile, { path: '/metrics', headers: { authorization: 'Bearer ' + METRICS_TOKEN } });
+  const brokenRight = await call(brokenFile, { path: '/metrics', headers: { authorization: 'Bearer ' + METRICS_TOKEN } });
+  check('a token file works like the variable, and a missing one closes /metrics rather than opening it', () => {
+    assert.strictEqual(byFileNone.status, 401, `file none ${byFileNone.status}`);
+    assert.strictEqual(byFileRight.status, 200, `file right ${byFileRight.status}`);
+    assert.strictEqual(brokenRight.status, 401, `broken ${brokenRight.status}`);
+    assert.match(brokenFile.err, /ARGUS_METRICS_TOKEN_FILE/);
+  });
+
+  const streamy = await launch({
+    ARGUS_AUTH: 'session',
+    ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
+    ARGUS_SSE_HEARTBEAT_MS: '200'
+  });
+  await waitForListening(streamy);
+  const streamCookie = cookieFrom(await login(streamy, SUBJECT, PASSWORD));
+  const first = await openStream(streamy, '/api/heartbeats/stream', { cookie: streamCookie });
+  await first.until((t) => t.includes('event: open'), 4000).catch(() => {});
+  const second = await openStream(streamy, '/api/heartbeats/stream', { cookie: streamCookie });
+  await second.until((t) => t.includes('event: open'), 4000).catch(() => {});
+  const third = await openStream(streamy, '/api/heartbeats/stream', { cookie: streamCookie });
+  await third.ended;
+  check('one operator holds at most two live streams', () => {
+    assert.strictEqual(first.status, 200, `first ${first.status}`);
+    assert.strictEqual(second.status, 200, `second ${second.status}`);
+    assert.strictEqual(third.status, 429, `third ${third.status}`);
+    const body = JSON.parse(third.text);
+    assert.strictEqual(body.reason, 'too-many-streams');
+    assert.strictEqual(body.scope, 'principal');
+  });
+  second.close();
+
+  const headStream = await call(streamy, { method: 'HEAD', path: '/api/heartbeats/stream', headers: { cookie: streamCookie } });
+  check('HEAD on a stream route is refused', () => {
+    assert.strictEqual(headStream.status, 405, `status ${headStream.status}`);
+  });
+
+  await call(streamy, {
+    method: 'POST',
+    path: '/api/auth/logout',
+    headers: { cookie: streamCookie, 'content-type': 'application/json', 'x-argus-console': '1' },
+    body: '{}'
+  });
+  const endedInTime = await Promise.race([first.ended.then(() => true), sleep(3000).then(() => false)]);
+  check('a stream opened by a session ends when that session is signed out', () => {
+    assert.strictEqual(endedInTime, true, `the stream was still open: ${JSON.stringify(first.text.slice(-200))}`);
+    assert.match(first.text, /event: session-ended/);
+  });
+  first.close();
+
+  const shortStreams = await launch({
+    ARGUS_AUTH: 'session',
+    ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
+    ARGUS_SSE_HEARTBEAT_MS: '60000',
+    ARGUS_AUTH_ABSOLUTE_TIMEOUT_MS: '1500'
+  });
+  await waitForListening(shortStreams);
+  const shortStreamCookie = cookieFrom(await login(shortStreams, SUBJECT, PASSWORD));
+  const capped = await openStream(shortStreams, '/api/heartbeats/stream', { cookie: shortStreamCookie });
+  const cappedInTime = await Promise.race([capped.ended.then(() => true), sleep(4000).then(() => false)]);
+  check('a stream never outlives the absolute expiry of its session', () => {
+    assert.strictEqual(capped.status, 200, `status ${capped.status}`);
+    assert.strictEqual(cappedInTime, true, 'the stream outlived its session');
+    assert.match(capped.text, /absolute-timeout/);
+  });
+  capped.close();
+
+  const throttled2 = await launch({
+    ARGUS_AUTH: 'session',
+    ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
+    ARGUS_AUTH_TRUSTED_PROXY_CIDRS: '127.0.0.0/8,::1/128',
+    ARGUS_AUTH_TRUST_FORWARDED_FOR: '1',
+    ARGUS_AUTH_LOCKOUT_THRESHOLD: '3'
+  });
+  await waitForListening(throttled2);
+  const from = (address) => ({ 'x-forwarded-for': address });
+
+  for (let i = 0; i < 4; i += 1) await login(throttled2, 'operator-op', WRONG_PASSWORD, from('203.0.113.10'));
+  await waitForAudit(throttled2, (r) => r.event === 'auth.account.locked');
+
+  const normalStarted = Date.now();
+  const firstFromD = await login(throttled2, 'operator-op', WRONG_PASSWORD, from('203.0.113.30'));
+  const normalMs = Date.now() - normalStarted;
+  const lockedStarted = Date.now();
+  const lockedFromD = await login(throttled2, 'operator-op', PASSWORD, from('203.0.113.30'));
+  const lockedMs = Date.now() - lockedStarted;
+  check('a locked subject is still refused to a source that has been failing', () => {
+    assert.strictEqual(firstFromD.status, 401, `first ${firstFromD.status}`);
+    assert.strictEqual(lockedFromD.status, 401, `locked ${lockedFromD.status}`);
+  });
+  check('the locked path spends scrypt time on a decoy, so timing does not reveal the lock', () => {
+    assert.ok(lockedMs >= normalMs * 0.4, `locked ${lockedMs} ms against a normal ${normalMs} ms`);
+  });
+
+  const cleanSource = await login(throttled2, 'operator-op', PASSWORD, from('203.0.113.20'));
+  check('a source with no recent failures signs in through a subject lock another source caused', () => {
+    assert.strictEqual(cleanSource.status, 204, `status ${cleanSource.status} ${cleanSource.body}`);
+  });
+
+  const burst = await Promise.all([0, 1, 2, 3].map(() => login(throttled2, 'security-op', WRONG_PASSWORD, from('203.0.113.40'))));
+  const burstStatuses = burst.map((r) => r.status);
+  check('one source gets one verification in flight; the rest are told it is busy', () => {
+    assert.ok(burstStatuses.includes(401), `statuses ${burstStatuses.join(',')}`);
+    assert.ok(burstStatuses.includes(429), `statuses ${burstStatuses.join(',')}`);
+    const busy = burst.find((r) => r.status === 429);
+    assert.strictEqual(JSON.parse(busy.body).reason, 'busy');
+  });
+  await waitForAudit(throttled2, (r) => r.reason === 'verify-in-flight');
+  const afterBurst = await login(throttled2, 'security-op', PASSWORD, from('203.0.113.40'));
+  check('busy answers count as soft failures, so a burst still trips the source throttle', () => {
+    assert.strictEqual(afterBurst.status, 429, `status ${afterBurst.status}`);
+    assert.strictEqual(JSON.parse(afterBurst.body).reason, 'too-many-attempts');
+  });
+
+  await login(throttled2, 'nobody-here', WRONG_PASSWORD, from('198.51.100.7, 203.0.113.99'));
+  await login(throttled2, 'nobody-here', WRONG_PASSWORD, from('198.51.100.8, 127.0.0.5'));
+  await waitForAudit(throttled2, (r) => r.sourceAddress === '198.51.100.8');
+  check('X-Forwarded-For is read from the right, skipping only trusted hops', () => {
+    const sources = auditLines(throttled2).filter((r) => r.event === 'auth.login.failed').map((r) => r.sourceAddress);
+    assert.ok(sources.includes('203.0.113.99'), `sources ${sources.join(',')}`);
+    assert.ok(!sources.includes('198.51.100.7'), 'the leftmost, client-written entry was trusted');
+    assert.ok(sources.includes('198.51.100.8'), `sources ${sources.join(',')}`);
+  });
+
+  const stateDir = path.join(dir, 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const ringed = await launch({
+    ARGUS_AUTH: 'session',
+    ARGUS_AUTH_OPERATORS_FILE: operatorsFile,
+    ARGUS_AUDIT_RING_EVENTS: '50',
+    ARGUS_STATE_DIR: stateDir
+  });
+  await waitForListening(ringed);
+  const ringCookie = cookieFrom(await login(ringed, SUBJECT, PASSWORD));
+  const flood = [];
+  for (let i = 0; i < 300; i += 1) flood.push(call(ringed, { path: '/api/host' }));
+  await Promise.all(flood);
+  const ringAnswer = JSON.parse((await call(ringed, { path: '/api/audit/recent?limit=500', headers: { cookie: ringCookie } })).body);
+  check('a flood of unauthenticated requests cannot flush the sign-in from the audit ring', () => {
+    assert.ok(ringAnswer.events.some((e) => e.event === 'auth.login.succeeded'), 'the sign-in was evicted');
+    const denied = ringAnswer.events.filter((e) => e.event === 'auth.denied');
+    assert.strictEqual(denied.length, 1, `${denied.length} denial records for one source in one minute`);
+    assert.ok(denied[0].count >= 300, `count ${denied[0].count}`);
+  });
+  check('a writable state directory persists the security ring', () => {
+    assert.strictEqual(ringAnswer.persistence, 'file', JSON.stringify(ringAnswer.persistenceNote));
+    const persisted = fs.readFileSync(path.join(stateDir, 'console-audit.jsonl'), 'utf8');
+    assert.match(persisted, /auth\.login\.succeeded/);
+    assert.ok(!persisted.includes('auth.denied'), 'request denials were persisted with the security events');
+  });
+  ringed.child.kill('SIGKILL');
+  await waitForExit(ringed, 3000);
+  const reborn = await launch({ ARGUS_AUTH: 'session', ARGUS_AUTH_OPERATORS_FILE: operatorsFile, ARGUS_STATE_DIR: stateDir });
+  await waitForListening(reborn);
+  const rebornCookie = cookieFrom(await login(reborn, SUBJECT, PASSWORD));
+  const rebornAnswer = JSON.parse((await call(reborn, { path: '/api/audit/recent', headers: { cookie: rebornCookie } })).body);
+  check('persisted security events come back after a restart', () => {
+    assert.ok(rebornAnswer.events.some((e) => e.event === 'auth.login.succeeded' && e.restored === true),
+      'no restored sign-in');
+  });
+  const memoryOnly = JSON.parse((await call(tiers, { path: '/api/audit/recent', headers: { cookie: tierCookies['security-op'] } })).body);
+  check('an unwritable state directory says so in the audit answer', () => {
+    assert.strictEqual(memoryOnly.persistence, 'memory');
+    assert.match(String(memoryOnly.persistenceNote), /not writable/);
+  });
+
   for (const server of spawned) {
     if (server.exitCode === null) server.child.kill('SIGKILL');
   }
   fs.rmSync(dir, { recursive: true, force: true });
 
-  const failed = results.filter((r) => !r.ok);
-  const pad = Math.max(...results.map((r) => r.name.length));
-  console.log('');
-  for (const r of results) {
-    console.log(`  ${r.ok ? 'ok  ' : 'FAIL'}  ${r.name.padEnd(pad)}${r.ok ? '' : '   ' + r.detail}`);
-  }
-  console.log(`\n  ${results.length - failed.length}/${results.length} passed\n`);
-  process.exit(failed.length);
+  process.exit(report(results));
 })().catch((err) => {
   console.error('auth harness failed:', err);
   for (const server of spawned) {

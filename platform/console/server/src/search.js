@@ -1,5 +1,6 @@
 'use strict';
 
+const { baseClassify } = require('./reader');
 const cache = require('./cache');
 const storage = require('./storage');
 const pg = require('./pg');
@@ -145,7 +146,8 @@ async function build() {
 
 async function index() {
   const r = await cache.through('search:index', TTL_MS, build);
-  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
+  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale,
+    ...(r.stale ? { staleBecause: baseClassify(r.error || {}) } : {}) };
 }
 
 module.exports = { index, MAX_ITEMS, TTL_MS };

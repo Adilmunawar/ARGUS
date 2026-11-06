@@ -23,7 +23,12 @@ const authGate = require('./auth/gate');
 const authRoutes = require('./auth/routes');
 const originGate = require('./auth/origin');
 const proxyAuth = require('./auth/proxy');
+const hosts = require('./auth/hosts');
+const authorize = require('./auth/authorize');
+const scrape = require('./auth/scrape');
+const sessions = require('./auth/sessions');
 const { audit } = require('./auth/audit');
+const { sendJson, sendError, describeError, classifiedAs, levelFor } = require('./errors');
 
 const { EventStream, RingBuffer, startEventStream, replayPlan, openStreamCount } = require('./sse');
 const telemetry = require('./telemetry');
@@ -38,6 +43,8 @@ const sources = require('./sources');
 env.reportRejections();
 
 for (const note of authConfig.notes) process.stderr.write(`argus: ${note}\n`);
+for (const note of hosts.notes) process.stderr.write(`argus: ${note}\n`);
+if (scrape.bootNote()) process.stderr.write(`argus: ${scrape.bootNote()}\n`);
 
 const bootFailures = authConfig.bootFailures(operators.count());
 if (bootFailures.length > 0) {
@@ -62,30 +69,15 @@ if (authConfig.mode === 'off') {
 const STARTED = new Date();
 
 class RawResponse {
-  constructor({ status = 200, headers = {}, body = null, stream = null }) {
+  constructor({ status = 200, headers: responseHeaders = {}, body = null, stream = null }) {
     this.status = status;
-    this.headers = headers;
+    this.headers = responseHeaders;
     this.body = body;
     this.stream = stream;
   }
 }
 
-const STATUS_FOR = {
-  ValidationError: 400,
-  UnsupportedType: 415,
-  TooLarge: 413,
-  Busy: 429
-};
-
-function statusForError(err) {
-  if (err && STATUS_FOR[err.name]) return STATUS_FOR[err.name];
-  const c = storage.classify(err);
-  if (c.reason === 'not-found' || c.reason === 'no-such-bucket') return 404;
-  if (c.reason === 'denied') return 403;
-  if (c.reason === 'timeout') return 504;
-  if (c.reason === 'unreachable') return 503;
-  return 500;
-}
+const storageFailure = classifiedAs(storage.classify);
 
 function safeDecode(s) {
   try { return decodeURIComponent(s); } catch (err) { return s; }
@@ -160,7 +152,6 @@ const routes = {
         writesAllowed: false
       };
     }
-    const id = await aws.identity();
     return {
       auth: {
         mode: authConfig.mode,
@@ -168,11 +159,13 @@ const routes = {
         subject: principal.subject,
         displayName: principal.displayName,
         roles: principal.roles,
+        tier: authorize.tierOf(principal.roles),
         expiresAt: principal.expiresAt || null,
         idleExpiresAt: principal.idleExpiresAt || null
       },
       region: config.region,
       writesAllowed: config.allowWrites,
+      environment: config.environment || null,
       costEnabled: config.costEnabled,
       streams: {
         logs: logs.configured(),
@@ -181,9 +174,7 @@ const routes = {
         containers: containers.configured(),
         heartbeats: true
       },
-      aws: id.ok
-        ? { connected: true, account: id.account, arn: id.arn }
-        : { connected: false, reason: id.reason, message: id.message }
+      aws: aws.configured()
     };
   },
 
@@ -202,22 +193,23 @@ const routes = {
   'GET /api/storage/lock-status': async () => storage.lockStatus(),
 
   'GET /api/storage/objects': async (q) =>
-    storage.listObjects({ bucket: q.bucket, prefix: q.prefix || '', cursor: q.cursor || null }),
+    storage.listObjects({ bucket: q.bucket, prefix: q.prefix || '', cursor: q.cursor || null }).catch(storageFailure),
 
   'GET /api/storage/object': async (q) =>
-    storage.describeObject({ bucket: q.bucket, key: q.key }),
+    storage.describeObject({ bucket: q.bucket, key: q.key }).catch(storageFailure),
 
   'GET /api/storage/prefix-size': async (q) =>
-    storage.prefixSize({ bucket: q.bucket, prefix: q.prefix || '' }),
+    storage.prefixSize({ bucket: q.bucket, prefix: q.prefix || '' }).catch(storageFailure),
 
   'GET /api/storage/preview': async (q) => {
-    const { body, contentType, contentLength } = await storage.previewObject({ bucket: q.bucket, key: q.key });
+    const { body, contentType, contentLength } = await storage.previewObject({ bucket: q.bucket, key: q.key })
+      .catch(storageFailure);
     return new RawResponse({
       status: 200,
       headers: {
         'content-type': contentType,
         'content-length': contentLength,
-        'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        'content-security-policy': headers.PREVIEW_CSP,
         'x-content-type-options': 'nosniff',
         'content-disposition': 'inline',
         'cache-control': 'private, max-age=60',
@@ -335,7 +327,8 @@ const routes = {
   'GET /api/alerts/receivers': async () => alerts.receivers(),
   'GET /api/alerts/health': async () => alerts.health(),
 
-  'GET /api/containers': async () => containers.list(),
+  'GET /api/containers': async (q) => (q && q.detail === '1' ? containers.summary() : containers.list()),
+  'GET /api/containers/summary': async () => containers.summary(),
   'GET /api/containers/health': async () => containers.health(),
   'GET /api/containers/inspect': async (q) => containers.inspect(containers.containerId(q.id)),
   'GET /api/containers/stats': async (q) => containers.stats(containers.containerId(q.id)),
@@ -431,7 +424,7 @@ const routes = {
       'cache-control': 'no-store'
     },
     body: telemetry.render({
-      version: ctx && ctx.principal ? require('../package.json').version : null,
+      version: ctx && (ctx.principal || ctx.scrapeAuthenticated) ? require('../package.json').version : null,
       uptimeSeconds: Math.round(process.uptime()),
       openStreams: openStreamCount()
     })
@@ -460,27 +453,36 @@ const PUBLIC_API_PATHS = new Set([
   authRoutes.LOGOUT_PATH
 ]);
 
-function sendJson(res, status, body) {
-  const text = JSON.stringify(body, null, 2);
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(text),
-    'cache-control': 'no-store',
-    'x-content-type-options': 'nosniff',
-    'referrer-policy': 'no-referrer'
-  });
-  res.end(text);
+const STREAM_PATHS = new Set([
+  '/api/logs/stream',
+  '/api/containers/logs',
+  '/api/containers/events',
+  '/api/heartbeats/stream'
+]);
+
+const REFUSED_STATIC_ROOTS = new Set(['tests']);
+
+function staticRefused(target) {
+  const rel = path.relative(WEB_ROOT, target);
+  if (!rel) return false;
+  const segments = rel.split(/[\\/]+/).filter(Boolean);
+  if (segments.length && REFUSED_STATIC_ROOTS.has(segments[0].toLowerCase())) return true;
+  return segments.some((segment) => segment.startsWith('.'));
 }
 
 async function serveStatic(req, res, pathname) {
   const rel = pathname === '/' ? '/index.html' : pathname;
+  if (rel.split(/[\\/]+/).some((segment) => segment.startsWith('.') && segment !== '.' && segment !== '..')) {
+    return sendError(res, 404, 'not-found', 'There is no such file.');
+  }
   const target = path.resolve(WEB_ROOT, '.' + rel);
   if (target !== WEB_ROOT && !target.startsWith(WEB_ROOT + path.sep)) {
-    return sendJson(res, 403, { error: 'forbidden' });
+    return sendError(res, 403, 'forbidden', 'That path leaves the console web root.');
   }
+  if (staticRefused(target)) return sendError(res, 404, 'not-found', 'There is no such file.');
   try {
     const stat = await fs.promises.stat(target);
-    if (stat.isDirectory()) return sendJson(res, 404, { error: 'not found' });
+    if (stat.isDirectory()) return sendError(res, 404, 'not-found', 'There is no such file.');
     res.writeHead(200, {
       'content-type': MIME[path.extname(target).toLowerCase()] || 'application/octet-stream',
       'content-length': stat.size,
@@ -495,7 +497,7 @@ async function serveStatic(req, res, pathname) {
       }
     });
   } catch (err) {
-    sendJson(res, 404, { error: 'not found', path: rel });
+    sendError(res, 404, 'not-found', 'There is no such file.', { path: rel });
   }
 }
 
@@ -506,6 +508,21 @@ function routeLabel(method, pathname) {
   return pathname.startsWith('/api/') ? 'unmatched' : 'static';
 }
 
+function streamBinding(principal) {
+  if (!principal) return {};
+  const binding = { owner: `${principal.source}:${principal.subject}` };
+  if (principal.source === 'session' && principal.sessionKey) {
+    binding.check = () => sessions.peek(principal.sessionKey);
+    const expiresAt = Date.parse(principal.expiresAt);
+    if (Number.isFinite(expiresAt)) binding.expiresAt = expiresAt;
+  }
+  return binding;
+}
+
+const UNAUTHENTICATED_MESSAGE = authConfig.mode === 'proxy'
+  ? 'This console takes its identity from a trusted reverse proxy, and this request did not arrive through one.'
+  : 'Sign in to read this. POST /api/auth/login with an operator name and password.';
+
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
   const requestId = crypto.randomUUID();
@@ -515,9 +532,9 @@ const server = http.createServer(async (req, res) => {
 
   let parsed;
   try {
-    parsed = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
+    parsed = new URL(req.url, 'http://localhost');
   } catch (err) {
-    return sendJson(res, 400, { error: 'bad request', message: 'The request URL could not be parsed.' });
+    return sendError(res, 400, 'invalid-request', 'The request URL could not be parsed.');
   }
   const pathname = safeDecode(parsed.pathname);
   const sourceAddress = proxyAuth.sourceAddress(req);
@@ -526,7 +543,23 @@ const server = http.createServer(async (req, res) => {
   res.on('finish', () => {
     const streamed = String(res.getHeader('content-type') || '').startsWith('text/event-stream');
     telemetry.observe(routeLabel(req.method, pathname), res.statusCode, Date.now() - started, !streamed);
+    log(levelFor(res.statusCode), `${req.method} ${pathname} ${res.statusCode} ${Date.now() - started}ms`);
   });
+
+  const hostVerdict = hosts.check(req);
+  if (!hostVerdict.allowed) {
+    audit('auth.host.rejected', {
+      outcome: 'failure',
+      reason: hostVerdict.reason,
+      method: req.method,
+      path: pathname,
+      sourceAddress,
+      requestId
+    });
+    return sendError(res, 421, 'misdirected',
+      'This console does not answer for the host name this request named. Reach it on a loopback address, ' +
+      'the host of ARGUS_AUTH_PUBLIC_ORIGIN, or a host listed in ARGUS_ALLOWED_HOSTS.');
+  }
 
   const stateChanging = authRoutes.WRITE_PATHS.has(pathname) || config.allowWrites;
   const verdict = originGate.decide(req, pathname, { stateChanging });
@@ -542,48 +575,55 @@ const server = http.createServer(async (req, res) => {
       enforced: authConfig.originEnforce
     });
     if (authConfig.originEnforce) {
-      log('info', `${req.method} ${pathname} 403 cross-site ${verdict.reason}`);
-      return sendJson(res, 403, {
-        ok: false,
-        error: 'cross-site',
-        message: 'This request did not come from the console itself. The console refuses requests that a ' +
-          'browser did not originate on its own origin.'
-      });
+      return sendError(res, 403, 'cross-site',
+        'This request did not come from the console itself. The console refuses requests that a ' +
+        'browser did not originate on its own origin.', { signal: verdict.reason });
     }
   }
 
   if (pathname === authRoutes.LOGIN_PATH && req.method === 'POST') {
     try {
-      return await authRoutes.login(req, res, context, sendJson);
+      return await authRoutes.login(req, res, context);
     } catch (err) {
       log('error', `login failed: ${err && err.message}`);
-      return sendJson(res, 500, { ok: false, error: 'internal', message: 'Sign-in could not be processed.' });
-    } finally {
-      log('info', `${req.method} ${pathname} ${Date.now() - started}ms`);
+      if (res.headersSent) { res.destroy(); return; }
+      return sendError(res, 500, 'internal', 'Sign-in could not be processed.');
     }
   }
 
   if (pathname === authRoutes.LOGOUT_PATH && req.method === 'POST') {
-    try {
-      return await authRoutes.logout(req, res, context, sendJson);
-    } finally {
-      log('info', `${req.method} ${pathname} ${Date.now() - started}ms`);
-    }
+    return authRoutes.logout(req, res, context);
   }
 
   const resolved = authGate.resolvePrincipal(req, res, context);
   const principal = resolved.principal;
 
+  if (resolved.reason === 'duplicate-session-cookie') {
+    return sendError(res, 401, 'duplicate-session-cookie',
+      'This request carried two console session cookies, so neither is trusted. Both are being cleared; ' +
+      'reload the page and sign in again.');
+  }
+
   if (pathname === authRoutes.SESSION_PATH) {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.setHeader('allow', 'GET, HEAD');
-      return sendJson(res, 405, { ok: false, error: 'method-not-allowed', message: 'GET this endpoint.' });
+      return sendError(res, 405, 'method-not-allowed', 'GET this endpoint.');
     }
-    log('info', `${req.method} ${pathname} ${Date.now() - started}ms`);
-    return authRoutes.session(req, res, context, sendJson, principal);
+    return authRoutes.session(req, res, context, principal);
   }
 
   const isApi = pathname.startsWith('/api/');
+  const handlerContext = { principal, requestId, sourceAddress, scrapeAuthenticated: false };
+
+  if (pathname === '/metrics' && (req.method === 'GET' || req.method === 'HEAD')) {
+    const scraped = scrape.decide(req.headers.authorization);
+    if (!scraped.allowed) {
+      audit('auth.metrics.denied', { outcome: 'failure', reason: scraped.reason, sourceAddress, requestId });
+      return sendError(res, 401, scraped.reason, scraped.message, null,
+        { 'www-authenticate': 'Bearer realm="argus-metrics"' });
+    }
+    handlerContext.scrapeAuthenticated = !!scraped.authenticated;
+  }
 
   if (isApi && !principal && !PUBLIC_API_PATHS.has(pathname)) {
     audit('auth.denied', {
@@ -595,23 +635,39 @@ const server = http.createServer(async (req, res) => {
       requestId,
       userAgent: req.headers['user-agent']
     });
-    log('info', `${req.method} ${pathname} 401 ${resolved.reason}`);
-    return sendJson(res, 401, {
-      ok: false,
-      error: 'unauthenticated',
-      message: authConfig.mode === 'proxy'
-        ? 'This console takes its identity from a trusted reverse proxy, and this request did not arrive through one.'
-        : 'Sign in to read this. POST /api/auth/login with an operator name and password.'
-    });
+    return sendError(res, 401, 'unauthenticated', UNAUTHENTICATED_MESSAGE);
+  }
+
+  if (isApi && principal && !PUBLIC_API_PATHS.has(pathname)) {
+    const access = authorize.decide(principal, pathname);
+    if (!access.allowed) {
+      audit('auth.role.denied', {
+        outcome: 'failure',
+        reason: 'role',
+        subject: principal.subject,
+        required: access.required,
+        held: access.held,
+        method: req.method,
+        path: pathname,
+        sourceAddress,
+        requestId
+      });
+      return sendError(res, 403, 'forbidden',
+        `This needs the ${access.required} role or above, and this session holds ${access.held}.`,
+        { reason: 'role', required: access.required, held: access.held });
+    }
   }
 
   if (!config.allowWrites && !authRoutes.WRITE_PATHS.has(pathname)
       && req.method !== 'GET' && req.method !== 'HEAD') {
     res.setHeader('allow', 'GET, HEAD');
-    return sendJson(res, 405, {
-      error: 'read-only',
-      message: 'This console is running read-only. Set ARGUS_ALLOW_WRITES=1 to permit changes.'
-    });
+    return sendError(res, 405, 'read-only',
+      'This console is running read-only. Set ARGUS_ALLOW_WRITES=1 to permit changes.');
+  }
+
+  if (req.method === 'HEAD' && STREAM_PATHS.has(pathname)) {
+    res.setHeader('allow', 'GET');
+    return sendError(res, 405, 'method-not-allowed', 'A live stream is opened with GET; HEAD would hold a connection for nothing.');
   }
 
   const key = (req.method === 'HEAD' ? 'GET' : req.method) + ' ' + pathname;
@@ -619,9 +675,9 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (handler) {
-      const body = await handler(Object.fromEntries(parsed.searchParams), { principal, requestId, sourceAddress });
+      const body = await handler(Object.fromEntries(parsed.searchParams), handlerContext);
       if (body instanceof EventStream) {
-        startEventStream(req, res, body, log);
+        startEventStream(req, res, body, log, streamBinding(principal));
       } else if (body instanceof RawResponse) {
         res.writeHead(body.status, body.headers);
         if (body.stream) {
@@ -638,25 +694,15 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 200, body);
       }
     } else if (isApi) {
-      sendJson(res, 404, { error: 'no such endpoint', path: pathname });
+      sendError(res, 404, 'no-such-endpoint', 'There is no such API endpoint.', { path: pathname });
     } else {
       await serveStatic(req, res, pathname);
     }
   } catch (err) {
-    log('error', `${key} failed: ${err && err.message}`);
+    const failure = describeError(err);
+    log(levelFor(failure.status), `${key} failed: ${failure.status} ${err && err.message}`);
     if (res.headersSent) { res.destroy(); return; }
-    const status = statusForError(err);
-    if (status < 500) {
-      const c = storage.classify(err);
-      sendJson(res, status, { ok: false, error: err.name || c.reason, message: err.message || c.message });
-    } else {
-      sendJson(res, status, {
-        ok: false, error: 'internal',
-        message: 'The request failed. The reason is in the server log.'
-      });
-    }
-  } finally {
-    log('info', `${req.method} ${pathname} ${Date.now() - started}ms`);
+    sendError(res, failure.status, failure.reason, failure.message, failure.extra);
   }
 });
 

@@ -1,7 +1,7 @@
 'use strict';
 
 const config = require('./config');
-const cache = require('./cache');
+const reader = require('./reader');
 const upstream = require('./upstream');
 const { positiveInt } = require('./env');
 
@@ -21,17 +21,12 @@ function requireConfigured() {
   if (!configured()) throw upstream.notConfigured(LABEL, VARIABLE);
 }
 
+function classify(err) {
+  return upstream.classify(err, LABEL, TIMEOUT_MS);
+}
+
 function guarded(key, ttlMs, producer) {
-  return async function (...args) {
-    try {
-      requireConfigured();
-      const cacheKey = key + (args.length ? ':' + JSON.stringify(args) : '');
-      const r = await cache.through(cacheKey, ttlMs, () => producer(...args));
-      return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
-    } catch (err) {
-      return { ok: false, ...upstream.classify(err, LABEL, TIMEOUT_MS) };
-    }
-  };
+  return reader.guarded(key, ttlMs, producer, { precheck: requireConfigured, classify });
 }
 
 function severityOf(alert) {

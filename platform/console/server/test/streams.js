@@ -3,37 +3,19 @@
 const http = require('http');
 const crypto = require('node:crypto');
 const assert = require('assert');
+const { report, freePort, listen: listenAny } = require('./helpers');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const PORT = Number(process.env.STREAMS_PORT || 8951);
-const PROM_PORT = PORT + 1;
-const DOCKER_PORT = PORT + 2;
-const LOKI_PORT = PORT + 3;
-const DEAD_PORT = PORT + 4;
-
-process.env.ARGUS_PORT = String(PORT);
-process.env.ARGUS_HOST = '127.0.0.1';
-process.env.ARGUS_AUTH = 'off';
-process.env.ARGUS_LOG_LEVEL = 'error';
-process.env.ARGUS_PROM_URL = `http://127.0.0.1:${PROM_PORT}`;
-process.env.ARGUS_DOCKER_PROXY_URL = `http://127.0.0.1:${DOCKER_PORT}`;
-process.env.ARGUS_LOKI_URL = `http://127.0.0.1:${LOKI_PORT}`;
-process.env.ARGUS_ALERTMANAGER_URL = `http://127.0.0.1:${DEAD_PORT}`;
-process.env.ARGUS_UPSTREAM_TIMEOUT_MS = '3000';
-process.env.ARGUS_LOG_RING_LINES = '50';
-process.env.ARGUS_SSE_HEARTBEAT_MS = '30000';
-process.env.ARGUS_HEARTBEAT_INTERVAL_MS = '3600000';
-process.env.AWS_ACCESS_KEY_ID = '';
-process.env.AWS_SECRET_ACCESS_KEY = '';
-process.env.AWS_PROFILE = '__argus_streams_no_such_profile__';
-process.env.AWS_EC2_METADATA_DISABLED = 'true';
-
-const { server, logRingFor } = require('../src/index.js');
-const { RingBuffer, replayPlan } = require('../src/sse.js');
-const containers = require('../src/containers.js');
-const metrics = require('../src/metrics.js');
-const heartbeats = require('../src/heartbeats.js');
+let PORT = 0;
+let DEAD_PORT = 0;
+let server;
+let logRingFor;
+let RingBuffer;
+let replayPlan;
+let containers;
+let metrics;
+let heartbeats;
 
 const results = [];
 const check = (name, fn) => {
@@ -43,10 +25,10 @@ const check = (name, fn) => {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-function get(path, headers) {
+function get(requestPath, headers) {
   return new Promise((resolve, reject) => {
     const req = http.request({
-      host: '127.0.0.1', port: PORT, path, method: 'GET',
+      host: '127.0.0.1', port: PORT, path: requestPath, method: 'GET',
       headers: { 'sec-fetch-site': 'same-origin', ...(headers || {}) }
     }, (res) => {
       let body = '';
@@ -58,10 +40,10 @@ function get(path, headers) {
   });
 }
 
-function openStream(path, headers) {
+function openStream(requestPath, headers) {
   return new Promise((resolve, reject) => {
     const req = http.request({
-      host: '127.0.0.1', port: PORT, path, method: 'GET',
+      host: '127.0.0.1', port: PORT, path: requestPath, method: 'GET',
       headers: { accept: 'text/event-stream', 'sec-fetch-site': 'same-origin', ...(headers || {}) }
     }, (res) => {
       const stream = {
@@ -224,15 +206,37 @@ function pushLokiLine(line, level) {
   for (const socket of lokiSockets) socket.write(textFrame(payload));
 }
 
-function listen(s, port) {
-  return new Promise((resolve) => s.listen(port, '127.0.0.1', resolve));
-}
-
 (async () => {
-  await listen(server, PORT);
-  await listen(promStub, PROM_PORT);
-  await listen(dockerStub, DOCKER_PORT);
-  await listen(lokiStub, LOKI_PORT);
+  const PROM_PORT = await listenAny(promStub);
+  const DOCKER_PORT = await listenAny(dockerStub);
+  const LOKI_PORT = await listenAny(lokiStub);
+  DEAD_PORT = await freePort();
+  const BARE_PORT = await freePort();
+  const DEAD_UPSTREAM_PORT = await freePort();
+
+  process.env.ARGUS_PORT = '8787';
+  process.env.ARGUS_HOST = '127.0.0.1';
+  process.env.ARGUS_AUTH = 'off';
+  process.env.ARGUS_LOG_LEVEL = 'error';
+  process.env.ARGUS_PROM_URL = `http://127.0.0.1:${PROM_PORT}`;
+  process.env.ARGUS_DOCKER_PROXY_URL = `http://127.0.0.1:${DOCKER_PORT}`;
+  process.env.ARGUS_LOKI_URL = `http://127.0.0.1:${LOKI_PORT}`;
+  process.env.ARGUS_ALERTMANAGER_URL = `http://127.0.0.1:${DEAD_PORT}`;
+  process.env.ARGUS_UPSTREAM_TIMEOUT_MS = '3000';
+  process.env.ARGUS_LOG_RING_LINES = '50';
+  process.env.ARGUS_SSE_HEARTBEAT_MS = '30000';
+  process.env.ARGUS_HEARTBEAT_INTERVAL_MS = '3600000';
+  process.env.AWS_ACCESS_KEY_ID = '';
+  process.env.AWS_SECRET_ACCESS_KEY = '';
+  process.env.AWS_PROFILE = '__argus_streams_no_such_profile__';
+  process.env.AWS_EC2_METADATA_DISABLED = 'true';
+
+  ({ server, logRingFor } = require('../src/index.js'));
+  ({ RingBuffer, replayPlan } = require('../src/sse.js'));
+  containers = require('../src/containers.js');
+  metrics = require('../src/metrics.js');
+  heartbeats = require('../src/heartbeats.js');
+  PORT = await listenAny(server);
 
   const ring = new RingBuffer(4);
   for (const value of ['a', 'b', 'c']) ring.push(value);
@@ -342,12 +346,12 @@ function listen(s, port) {
     assert.strictEqual(heartbeats.uptimeOver([{ period: 0, up: 3, down: 1 }], 1, 0), 0.75);
   });
   check('an uptime window reads the slots the window covers, not the first slots in the ring', () => {
-    const ring = new Array(4).fill(null);
-    ring[2] = { period: 102, up: 1, down: 0 };
-    ring[3] = { period: 99, up: 0, down: 1 };
-    assert.strictEqual(heartbeats.uptimeOver(ring, 2, 102), 1);
-    assert.strictEqual(heartbeats.uptimeOver(ring, 4, 102), 0.5);
-    assert.strictEqual(heartbeats.uptimeOver(ring, 4, 99), 0);
+    const slots = new Array(4).fill(null);
+    slots[2] = { period: 102, up: 1, down: 0 };
+    slots[3] = { period: 99, up: 0, down: 1 };
+    assert.strictEqual(heartbeats.uptimeOver(slots, 2, 102), 1);
+    assert.strictEqual(heartbeats.uptimeOver(slots, 4, 102), 0.5);
+    assert.strictEqual(heartbeats.uptimeOver(slots, 4, 99), 0);
   });
   check('a ring slot reused by a later period does not carry the older period forward', () => {
     const reused = new heartbeats.Monitor({ id: 'streams-wrap', label: 'Wrap', probe: async () => ({ up: true }) });
@@ -549,6 +553,20 @@ function listen(s, port) {
     assert.strictEqual(stats.memoryUsedBytes, 1048576);
   });
 
+  const summaryAnswer = await get('/api/containers/summary');
+  const detailAnswer = JSON.parse((await get('/api/containers?detail=1')).body);
+  check('one summary call carries restart count and start time for every container', () => {
+    const body = JSON.parse(summaryAnswer.body);
+    assert.strictEqual(body.ok, true, summaryAnswer.body.slice(0, 300));
+    assert.strictEqual(body.count, 1);
+    assert.strictEqual(body.inspected, 1);
+    assert.strictEqual(body.containers[0].restartCount, 0);
+    assert.strictEqual(body.containers[0].startedAt, '2026-09-12T00:00:00Z');
+    assert.strictEqual(body.containers[0].restartPolicy, 'unless-stopped');
+    assert.strictEqual(summaryAnswer.body.includes(SECRET_IN_ENV), false, 'the summary leaked an environment value');
+    assert.strictEqual(detailAnswer.inspected, 1, 'GET /api/containers?detail=1 is not the summary');
+  });
+
   const badId = await get('/api/containers/inspect?id=' + encodeURIComponent('../../secrets'));
   check('a container id that is not a container id is refused before it becomes a path', () => {
     assert.strictEqual(badId.status, 400, `status ${badId.status}`);
@@ -576,9 +594,9 @@ function listen(s, port) {
 
   const unreachable = ['/api/alerts/active', '/api/alerts/groups', '/api/alerts/silences',
     '/api/alerts/receivers', '/api/alerts/health'];
-  for (const path of unreachable) {
-    const r = await get(path);
-    check(`${path} reports an unreachable Alertmanager as data, not a 500`, () => {
+  for (const route of unreachable) {
+    const r = await get(route);
+    check(`${route} reports an unreachable Alertmanager as data, not a 500`, () => {
       assert.strictEqual(r.status, 200, `status ${r.status}`);
       const body = JSON.parse(r.body);
       assert.strictEqual(body.ok, false);
@@ -656,7 +674,7 @@ function listen(s, port) {
   const bareServer = spawn(process.execPath, [path.resolve(__dirname, '..', 'src', 'index.js')], {
     env: {
       ...process.env,
-      ARGUS_PORT: String(DEAD_PORT + 1),
+      ARGUS_PORT: String(BARE_PORT),
       ARGUS_HOST: '127.0.0.1',
       ARGUS_AUTH: 'off',
       ARGUS_LOG_LEVEL: 'error',
@@ -673,7 +691,7 @@ function listen(s, port) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`${requestPath} never answered`)), 4000);
       const req = http.request({
-        host: '127.0.0.1', port: DEAD_PORT + 1, path: requestPath,
+        host: '127.0.0.1', port: BARE_PORT, path: requestPath,
         headers: { accept: 'text/event-stream', 'sec-fetch-site': 'same-origin' }
       }, (res) => {
         let body = '';
@@ -712,7 +730,7 @@ function listen(s, port) {
   const deadUpstreamServer = spawn(process.execPath, [path.resolve(__dirname, '..', 'src', 'index.js')], {
     env: {
       ...process.env,
-      ARGUS_PORT: String(DEAD_PORT + 2),
+      ARGUS_PORT: String(DEAD_UPSTREAM_PORT),
       ARGUS_HOST: '127.0.0.1',
       ARGUS_AUTH: 'off',
       ARGUS_LOG_LEVEL: 'error',
@@ -729,7 +747,7 @@ function listen(s, port) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`${requestPath} was still open after 6 seconds`)), 6000);
       const req = http.request({
-        host: '127.0.0.1', port: DEAD_PORT + 2, path: requestPath,
+        host: '127.0.0.1', port: DEAD_UPSTREAM_PORT, path: requestPath,
         headers: { accept: 'text/event-stream', 'sec-fetch-site': 'same-origin' }
       }, (res) => {
         let body = '';
@@ -766,14 +784,7 @@ function listen(s, port) {
   lokiStub.close();
   heartbeats.stop();
 
-  const failed = results.filter((r) => !r.ok);
-  const pad = Math.max(...results.map((r) => r.name.length));
-  console.log('');
-  for (const r of results) {
-    console.log(`  ${r.ok ? 'ok  ' : 'FAIL'}  ${r.name.padEnd(pad)}${r.ok ? '' : '   ' + r.detail}`);
-  }
-  console.log(`\n  ${results.length - failed.length}/${results.length} passed\n`);
-  process.exit(failed.length);
+  process.exit(report(results));
 })().catch((err) => {
   console.error('streams harness failed:', err);
   process.exit(1);

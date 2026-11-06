@@ -77,10 +77,14 @@ async function through(key, ttlMs, producer) {
 }
 
 function describe(err) {
-  return {
+  const out = {
     name: err && err.name ? err.name : 'Error',
     message: err && err.message ? err.message : String(err)
   };
+  if (err && err.code !== undefined) out.code = err.code;
+  if (err && err.status !== undefined) out.status = err.status;
+  if (err && err.reason !== undefined) out.reason = err.reason;
+  return out;
 }
 
 function clear() { entries.clear(); }

@@ -2,25 +2,7 @@
 
 const http = require('http');
 const assert = require('assert');
-
-const PORT = Number(process.env.SMOKE_PORT || 8899);
-process.env.ARGUS_PORT = String(PORT);
-process.env.ARGUS_HOST = '127.0.0.1';
-process.env.ARGUS_AUTH = 'off';
-process.env.AWS_ACCESS_KEY_ID = '';
-process.env.AWS_SECRET_ACCESS_KEY = '';
-process.env.AWS_PROFILE = '__argus_smoke_no_such_profile__';
-process.env.AWS_SHARED_CREDENTIALS_FILE = '/nonexistent/argus-smoke';
-process.env.AWS_CONFIG_FILE = '/nonexistent/argus-smoke';
-process.env.AWS_EC2_METADATA_DISABLED = 'true';
-process.env.ARGUS_AWS_TIMEOUT_MS = '4000';
-
-const NATS_PORT = Number(process.env.SMOKE_NATS_PORT || 8898);
-process.env.ARGUS_NATS_MONITOR_URL = `http://127.0.0.1:${NATS_PORT}`;
-
-const { server } = require('../src/index.js');
-const cache = require('../src/cache.js');
-const env = require('../src/env.js');
+const { listen, freePort, checker, report } = require('./helpers');
 
 const JSZ_STUB = {
   account_details: [{
@@ -47,15 +29,13 @@ const natsStub = http.createServer((req, res) => {
   res.end(text);
 });
 
-const results = [];
-const check = (name, fn) => {
-  try { fn(); results.push({ name, ok: true }); }
-  catch (err) { results.push({ name, ok: false, detail: err.message }); }
-};
+const { results, check } = checker();
 
-function get(path) {
+let PORT = 0;
+
+function get(path, headers) {
   return new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: PORT, path, method: 'GET' }, (res) => {
+    const req = http.request({ host: '127.0.0.1', port: PORT, path, method: 'GET', headers: headers || {} }, (res) => {
       let body = '';
       res.on('data', (d) => (body += d));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
@@ -70,7 +50,7 @@ function send(method, path) {
     const req = http.request({ host: '127.0.0.1', port: PORT, path, method }, (res) => {
       let body = '';
       res.on('data', (d) => (body += d));
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
     });
     req.on('error', reject);
     req.end();
@@ -78,8 +58,31 @@ function send(method, path) {
 }
 
 (async () => {
-  await new Promise((r) => server.listen(PORT, '127.0.0.1', r));
-  await new Promise((r) => natsStub.listen(NATS_PORT, '127.0.0.1', r));
+  const NATS_PORT = await listen(natsStub);
+  const DEAD_PORT = await freePort();
+
+  process.env.ARGUS_PORT = '8787';
+  process.env.ARGUS_HOST = '127.0.0.1';
+  process.env.ARGUS_AUTH = 'off';
+  process.env.AWS_ACCESS_KEY_ID = '';
+  process.env.AWS_SECRET_ACCESS_KEY = '';
+  process.env.AWS_PROFILE = '__argus_smoke_no_such_profile__';
+  process.env.AWS_SHARED_CREDENTIALS_FILE = '/nonexistent/argus-smoke';
+  process.env.AWS_CONFIG_FILE = '/nonexistent/argus-smoke';
+  process.env.AWS_EC2_METADATA_DISABLED = 'true';
+  process.env.ARGUS_AWS_TIMEOUT_MS = '4000';
+  process.env.ARGUS_NATS_MONITOR_URL = `http://127.0.0.1:${NATS_PORT}`;
+  process.env.ARGUS_SEAWEED_MASTER_URL = `http://127.0.0.1:${DEAD_PORT}`;
+  process.env.ARGUS_SEAWEED_FILER_URL = `http://127.0.0.1:${DEAD_PORT}`;
+  process.env.ARGUS_S3_ENDPOINT = `http://127.0.0.1:${DEAD_PORT}`;
+  process.env.ARGUS_GARNET_HOST = '127.0.0.1';
+  process.env.ARGUS_GARNET_PORT = String(DEAD_PORT);
+
+  const { server } = require('../src/index.js');
+  const cache = require('../src/cache.js');
+  const env = require('../src/env.js');
+
+  PORT = await listen(server);
 
   const health = await get('/api/health');
   check('health answers 200', () => assert.strictEqual(health.status, 200));
@@ -108,13 +111,25 @@ function send(method, path) {
       `window ${host2.cpu.sampledOverMs}ms`);
   });
 
+  const capStarted = Date.now();
   const cap = JSON.parse((await get('/api/capabilities')).body);
+  const capMs = Date.now() - capStarted;
   check('capabilities answers without credentials', () => assert.ok(cap.region));
-  check('capabilities reports aws as not connected', () => assert.strictEqual(cap.aws.connected, false));
-  check('the reason is actionable, not a stack trace', () => {
-    assert.ok(['not-configured', 'expired', 'denied', 'unreachable', 'timeout', 'no-sdk'].includes(cap.aws.reason),
-      `reason was ${cap.aws.reason}`);
-    assert.ok(cap.aws.message && cap.aws.message.length > 20);
+  check('capabilities reports aws as not configured, from the credentials alone', () => {
+    assert.strictEqual(cap.aws.configured, false);
+    assert.strictEqual(typeof cap.aws.sdk, 'boolean');
+    assert.strictEqual(cap.aws.connected, undefined, 'capabilities still asked AWS who it is');
+  });
+  check('capabilities does not wait on AWS, so the client never gives up on it', () => {
+    assert.ok(capMs < 1500, `capabilities took ${capMs} ms`);
+  });
+
+  const awsIdentity = JSON.parse((await get('/api/aws/identity')).body);
+  check('the AWS identity reason is actionable, not a stack trace', () => {
+    assert.strictEqual(awsIdentity.ok, false);
+    assert.ok(['not-configured', 'expired', 'denied', 'unreachable', 'timeout', 'no-sdk'].includes(awsIdentity.reason),
+      `reason was ${awsIdentity.reason}`);
+    assert.ok(awsIdentity.message && awsIdentity.message.length > 20);
   });
 
   for (const path of ['/api/aws/instances', '/api/aws/buckets', '/api/aws/databases', '/api/aws/alarms']) {
@@ -235,6 +250,65 @@ function send(method, path) {
   });
   check('api responses are not cached by the browser', () => {
     assert.strictEqual(health.headers['cache-control'], 'no-store');
+  });
+
+  for (const refusedPath of ['/tests/live.js', '/TESTS/live.js', '/tests', '/.git/config', '/assets/.hidden',
+    '/assets/../tests/run-tests.js', '/%2e%2e/server/package.json']) {
+    const refusedStatic = await get(refusedPath);
+    check(`the static server refuses ${refusedPath}`, () => {
+      assert.ok(refusedStatic.status === 404 || refusedStatic.status === 403, `status ${refusedStatic.status}`);
+      assert.ok(!/require\(|"name":/.test(refusedStatic.body), 'the file itself came back');
+    });
+  }
+
+  const envelopes = {
+    400: await get('/api/pg/tables?database=' + 'd'.repeat(64)),
+    404: missing,
+    405: post
+  };
+  for (const [expected, response] of Object.entries(envelopes)) {
+    check(`a ${expected} answers in the one error envelope`, () => {
+      assert.strictEqual(response.status, Number(expected), `status ${response.status}`);
+      const body = JSON.parse(response.body);
+      assert.strictEqual(body.ok, false);
+      assert.strictEqual(typeof body.reason, 'string');
+      assert.strictEqual(body.error, body.reason);
+      assert.ok(body.message && body.message.length > 10, 'no human-readable message');
+    });
+  }
+
+  const csp = String(health.headers['content-security-policy'] || '');
+  check('the header policy is at least as strict as the page policy', () => {
+    for (const directive of ["script-src-attr 'none'", "object-src 'none'", "require-trusted-types-for 'script'",
+      "trusted-types 'none'", "frame-ancestors 'none'"]) {
+      assert.ok(csp.includes(directive), `${directive} is missing from ${csp}`);
+    }
+    assert.ok(!/\bsandbox\b/.test(csp), 'the page policy still carries an ineffective sandbox directive');
+    assert.ok(!csp.includes('blob:'), 'img-src still allows blob:');
+  });
+  check('the permissions policy names no feature a browser rejects', () => {
+    assert.ok(!String(health.headers['permissions-policy']).includes('web-share'));
+    assert.match(String(health.headers['permissions-policy']), /camera=\(\)/);
+  });
+
+  const rebound = await get('/api/host', { host: `attacker.example:${PORT}`, 'sec-fetch-site': 'same-origin' });
+  check('a request naming a foreign host is misdirected, even in local development', () => {
+    assert.strictEqual(rebound.status, 421, `status ${rebound.status}`);
+    assert.strictEqual(JSON.parse(rebound.body).reason, 'misdirected');
+  });
+  const localhostHost = await get('/api/health', { host: `localhost:${PORT}` });
+  check('a loopback host name with the bound port is answered', () => {
+    assert.strictEqual(localhostHost.status, 200, `status ${localhostHost.status}`);
+  });
+  const wrongPort = await get('/api/health', { host: '127.0.0.1:1' });
+  check('a loopback host name with some other port is misdirected', () => {
+    assert.strictEqual(wrongPort.status, 421, `status ${wrongPort.status}`);
+  });
+
+  const headStream = await send('HEAD', '/api/heartbeats/stream');
+  check('HEAD on a stream route is refused rather than holding a connection', () => {
+    assert.strictEqual(headStream.status, 405, `status ${headStream.status}`);
+    assert.strictEqual(headStream.headers.allow, 'GET');
   });
 
   const everyConsumer = JSON.parse((await get('/api/queues/consumers')).body);
@@ -382,14 +456,7 @@ function send(method, path) {
   server.close();
   natsStub.close();
 
-  const failed = results.filter((r) => !r.ok);
-  const pad = Math.max(...results.map((r) => r.name.length));
-  console.log('');
-  for (const r of results) {
-    console.log(`  ${r.ok ? 'ok  ' : 'FAIL'}  ${r.name.padEnd(pad)}${r.ok ? '' : '   ' + r.detail}`);
-  }
-  console.log(`\n  ${results.length - failed.length}/${results.length} passed\n`);
-  process.exit(failed.length);
+  process.exit(report(results));
 })().catch((err) => {
   console.error('smoke harness failed:', err);
   process.exit(1);

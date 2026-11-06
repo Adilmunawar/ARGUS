@@ -1,5 +1,7 @@
 'use strict';
 
+const reader = require('./reader');
+const { baseClassify } = reader;
 const fs = require('node:fs');
 const http = require('node:http');
 const https = require('node:https');
@@ -7,7 +9,6 @@ const { URL } = require('node:url');
 const YAML = require('yaml');
 
 const config = require('./config');
-const cache = require('./cache');
 const { positiveInt } = require('./env');
 
 const MASTER = process.env.ARGUS_SEAWEED_MASTER_URL || 'http://seaweed-master:9333';
@@ -133,19 +134,11 @@ function classify(err) {
         '`docker compose ps` in platform/compose.'
     };
   }
-  return { reason: 'error', message: msg };
+  return baseClassify(err);
 }
 
 function guarded(key, ttlMs, producer) {
-  return async function (...args) {
-    try {
-      const r = await cache.through(key + (args.length ? ':' + JSON.stringify(args) : ''), ttlMs,
-        () => producer(...args));
-      return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
-    } catch (err) {
-      return { ok: false, ...classify(err) };
-    }
-  };
+  return reader.guarded(key, ttlMs, producer, { classify });
 }
 
 let declaredCache = null;

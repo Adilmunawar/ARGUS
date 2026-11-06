@@ -39,17 +39,24 @@ function lockedFor(record, now) {
   return record.lockedUntil > now ? record.lockedUntil - now : 0;
 }
 
+function recentFailures(record, now) {
+  if (!record || record.firstFailureAt === 0) return 0;
+  if (now - record.firstFailureAt > authConfig.lockoutWindowMs) return 0;
+  return record.count;
+}
+
 function state(subject, source) {
   const now = Date.now();
-  const sourceMs = lockedFor(bySource.get(source), now);
+  const sourceRecord = bySource.get(source);
+  const sourceMs = lockedFor(sourceRecord, now);
   if (sourceMs > 0) {
     return { locked: 'source', retryAfterSeconds: Math.max(1, Math.ceil(sourceMs / 1000)) };
   }
   const subjectMs = lockedFor(bySubject.get(subject), now);
-  if (subjectMs > 0) {
+  if (subjectMs > 0 && recentFailures(sourceRecord, now) > 0) {
     return { locked: 'subject', retryAfterSeconds: Math.max(1, Math.ceil(subjectMs / 1000)) };
   }
-  return { locked: null, retryAfterSeconds: 0 };
+  return { locked: null, retryAfterSeconds: 0, subjectLockBypassed: subjectMs > 0 };
 }
 
 function penalise(map, id, now) {
@@ -77,6 +84,22 @@ function recordFailure(subject, source) {
   };
 }
 
+function recordSoftFailure(source) {
+  return penalise(bySource, source, Date.now());
+}
+
+const inFlight = new Set();
+
+function beginVerify(source) {
+  if (inFlight.has(source)) return false;
+  inFlight.add(source);
+  return true;
+}
+
+function endVerify(source) {
+  inFlight.delete(source);
+}
+
 function recordSuccess(subject, source) {
   bySubject.delete(subject);
   bySource.delete(source);
@@ -98,6 +121,7 @@ sweeper.unref();
 function clear() {
   bySubject.clear();
   bySource.clear();
+  inFlight.clear();
 }
 
-module.exports = { state, recordFailure, recordSuccess, sweep, clear };
+module.exports = { state, recordFailure, recordSoftFailure, recordSuccess, beginVerify, endVerify, sweep, clear };

@@ -25,12 +25,31 @@ function peerTrusted(remoteAddress) {
   }
 }
 
+function normaliseHop(raw) {
+  let text = String(raw || '').trim();
+  if (text.startsWith('[')) {
+    const close = text.indexOf(']');
+    text = close > 0 ? text.slice(1, close) : '';
+  } else if (/^\d{1,3}(\.\d{1,3}){3}:\d+$/.test(text)) {
+    text = text.slice(0, text.lastIndexOf(':'));
+  }
+  return net.isIP(text) ? text : null;
+}
+
 function sourceAddress(req) {
   const peer = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : 'unknown';
   if (!authConfig.trustForwardedFor || !peerTrusted(peer)) return peer;
-  const chain = String(req.headers['x-forwarded-for'] || '');
-  const first = chain.split(',')[0].trim();
-  return first.length > 0 ? first : peer;
+  const header = req.headers['x-forwarded-for'];
+  const chain = (Array.isArray(header) ? header.join(',') : String(header || ''))
+    .split(',').map((hop) => hop.trim()).filter(Boolean);
+  let nearest = peer;
+  for (let i = chain.length - 1; i >= 0; i -= 1) {
+    const hop = normaliseHop(chain[i]);
+    if (!hop) return nearest;
+    if (!peerTrusted(hop)) return hop;
+    nearest = hop;
+  }
+  return nearest;
 }
 
 function secretMatches(presented) {

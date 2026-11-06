@@ -1,7 +1,12 @@
 'use strict';
 
+const reader = require('./reader');
+const { baseClassify } = reader;
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const config = require('./config');
-const cache = require('./cache');
 
 let sdk = null;
 let sdkError = null;
@@ -21,6 +26,48 @@ function load() {
     sdkError = 'The AWS SDK is not installed. Run `npm install` in platform/console/server.';
   }
   return sdk;
+}
+
+const SDK_PACKAGES = [
+  '@aws-sdk/client-sts', '@aws-sdk/client-ec2', '@aws-sdk/client-s3',
+  '@aws-sdk/client-rds', '@aws-sdk/client-cloudwatch', '@aws-sdk/client-cost-explorer'
+];
+
+function sdkInstalled() {
+  for (const name of SDK_PACKAGES) {
+    try { require.resolve(name); } catch (err) { return false; }
+  }
+  return true;
+}
+
+function fileExists(file) {
+  try { return fs.statSync(file).isFile(); } catch (err) { return false; }
+}
+
+function credentialsPresent(env) {
+  const e = env || process.env;
+  if (e.AWS_ACCESS_KEY_ID && e.AWS_SECRET_ACCESS_KEY) return { present: true, source: 'environment' };
+  if (e.AWS_WEB_IDENTITY_TOKEN_FILE && e.AWS_ROLE_ARN) return { present: true, source: 'web-identity' };
+  if (e.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || e.AWS_CONTAINER_CREDENTIALS_FULL_URI) {
+    return { present: true, source: 'container' };
+  }
+  const home = os.homedir();
+  const credentialsFile = e.AWS_SHARED_CREDENTIALS_FILE || (home ? path.join(home, '.aws', 'credentials') : '');
+  const configFile = e.AWS_CONFIG_FILE || (home ? path.join(home, '.aws', 'config') : '');
+  if (credentialsFile && fileExists(credentialsFile)) return { present: true, source: 'shared-credentials-file' };
+  if (configFile && fileExists(configFile)) return { present: true, source: 'shared-config-file' };
+  return { present: false, source: null };
+}
+
+function configured() {
+  const creds = credentialsPresent();
+  return {
+    configured: creds.present,
+    credentialSource: creds.source,
+    sdk: sdkInstalled(),
+    note: 'This only says whether credentials are present, not whether AWS accepts them. ' +
+      'GET /api/aws/identity asks AWS.'
+  };
 }
 
 const clients = new Map();
@@ -70,24 +117,15 @@ function classify(err) {
   if (/ENOTFOUND|EAI_AGAIN|ENETUNREACH|NetworkingError/i.test(name + msg)) {
     return { reason: 'unreachable', message: 'AWS is unreachable from this host.' };
   }
-  return { reason: 'error', message: msg };
+  return baseClassify(err);
 }
 
 function guarded(key, ttlMs, producer) {
-  return async function () {
-    if (!load()) return { ok: false, reason: 'no-sdk', message: sdkError };
-    try {
-      const r = await cache.through(key, ttlMs, producer);
-      return {
-        ok: true, ...r.value,
-        cachedAt: r.cachedAt,
-        stale: !!r.stale,
-        ...(r.stale ? { staleBecause: classify(r.error || {}) } : {})
-      };
-    } catch (err) {
-      return { ok: false, ...classify(err) };
-    }
-  };
+  return reader.guarded(key, ttlMs, producer, {
+    noArgs: true,
+    classify,
+    precheck: () => (load() ? null : { reason: 'no-sdk', message: sdkError })
+  });
 }
 
 const identity = guarded('sts:identity', config.cacheTtlMs, async () => {
@@ -240,4 +278,4 @@ const cost = guarded('ce:month', config.costCacheTtlMs, async () => {
   };
 });
 
-module.exports = { identity, instances, buckets, databases, alarms, cost, classify };
+module.exports = { identity, instances, buckets, databases, alarms, cost, classify, configured, credentialsPresent, sdkInstalled };

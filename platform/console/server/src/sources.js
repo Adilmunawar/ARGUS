@@ -5,6 +5,7 @@ const path = require('node:path');
 const YAML = require('yaml');
 
 const cache = require('./cache');
+const { baseClassify } = require('./reader');
 const operators = require('./auth/operators');
 const auditLog = require('./auth/audit');
 
@@ -26,6 +27,18 @@ function missing(what, where, err) {
     message: `${what} could not be read from ${where}: ${err && err.code ? err.code : (err && err.message) || 'unknown'}. ` +
       'Mount the directory into the console or point the variable at it.'
   };
+}
+
+function inside(base, target) {
+  return target === base || target.startsWith(base + path.sep);
+}
+
+function realInside(base, target) {
+  let realBase;
+  let realTarget;
+  try { realBase = fs.realpathSync(base); } catch (err) { return { ok: false, reason: 'base-missing', err }; }
+  try { realTarget = fs.realpathSync(target); } catch (err) { return { ok: false, reason: 'missing', err }; }
+  return inside(realBase, realTarget) ? { ok: true, real: realTarget } : { ok: false, reason: 'outside' };
 }
 
 function readYaml(file) {
@@ -54,7 +67,16 @@ function summariseApp(dir, name, doc, stat) {
   const alertRules = [];
   if (alertsFile) {
     try {
-      const alerts = readYaml(path.join(dir, alertsFile));
+      const target = path.resolve(dir, alertsFile);
+      if (!inside(path.resolve(dir), target)) {
+        throw new Error('spec.alerts names a file outside this app directory, so it is not read.');
+      }
+      const contained = realInside(dir, target);
+      if (!contained.ok && contained.reason === 'outside') {
+        throw new Error('spec.alerts resolves through a link to a file outside this app directory, so it is not read.');
+      }
+      if (!contained.ok) throw contained.err || new Error('spec.alerts could not be resolved.');
+      const alerts = readYaml(contained.real);
       (alerts.groups || []).forEach((g) => (g.rules || []).forEach((r) => {
         if (r.alert) alertRules.push({ name: r.alert, severity: (r.labels && r.labels.severity) || null, for: r.for || null });
       }));
@@ -136,7 +158,8 @@ async function apps() {
     throw err;
   });
   if (r.answer) return r.answer;
-  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
+  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale,
+    ...(r.stale ? { staleBecause: baseClassify(r.error || {}) } : {}) };
 }
 
 async function environments() {
@@ -178,7 +201,8 @@ async function environments() {
     throw err;
   });
   if (r.answer) return r.answer;
-  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
+  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale,
+    ...(r.stale ? { staleBecause: baseClassify(r.error || {}) } : {}) };
 }
 
 async function serviceAccounts() {
@@ -212,7 +236,8 @@ async function serviceAccounts() {
     throw err;
   });
   if (r.answer) return r.answer;
-  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
+  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale,
+    ...(r.stale ? { staleBecause: baseClassify(r.error || {}) } : {}) };
 }
 
 function s3Identities() {
@@ -280,14 +305,31 @@ function firstHeading(text) {
   return m ? m[1].trim() : null;
 }
 
-function walk(dir, base, out) {
+function walk(dir, base, out, seen) {
+  const visited = seen || new Set();
+  let realDir;
+  try { realDir = fs.realpathSync(dir); } catch (err) { return out; }
+  if (visited.has(realDir)) return out;
+  visited.add(realDir);
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (err) { return out; }
   for (const entry of entries) {
+    if (entry.name.startsWith('.')) continue;
     const full = path.join(dir, entry.name);
     const rel = path.relative(base, full).replace(/\\/g, '/');
-    if (entry.isDirectory()) walk(full, base, out);
-    else if (/\.md$/i.test(entry.name)) out.push({ full, rel });
+    let isDir = entry.isDirectory();
+    let isFile = entry.isFile();
+    if (entry.isSymbolicLink()) {
+      const contained = realInside(base, full);
+      if (!contained.ok) continue;
+      try {
+        const stat = fs.statSync(contained.real);
+        isDir = stat.isDirectory();
+        isFile = stat.isFile();
+      } catch (err) { continue; }
+    }
+    if (isDir) walk(full, base, out, visited);
+    else if (isFile && /\.md$/i.test(entry.name)) out.push({ full, rel });
   }
   return out;
 }
@@ -326,7 +368,8 @@ async function runbooks() {
     throw err;
   });
   if (r.answer) return r.answer;
-  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
+  return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale,
+    ...(r.stale ? { staleBecause: baseClassify(r.error || {}) } : {}) };
 }
 
 function runbookBody(rel) {
@@ -337,11 +380,14 @@ function runbookBody(rel) {
   const base = path.resolve(RUNBOOKS_DIR);
   const full = path.resolve(base, raw);
   if (full !== base && !full.startsWith(base + path.sep)) throw rejected('That path leaves the runbooks directory.');
+  const contained = realInside(base, full);
+  if (!contained.ok && contained.reason === 'outside') throw rejected('That path leaves the runbooks directory.');
   let text;
   try {
-    const stat = fs.statSync(full);
+    if (!contained.ok) throw contained.err || new Error('missing');
+    const stat = fs.statSync(contained.real);
     if (stat.size > RUNBOOK_BODY_MAX) throw rejected('That runbook is larger than the console will render.');
-    text = fs.readFileSync(full, 'utf8');
+    text = fs.readFileSync(contained.real, 'utf8');
   } catch (err) {
     if (err.name === 'ValidationError') throw err;
     throw Object.assign(new Error(`No runbook at ${raw}.`), { name: 'NotFound' });
@@ -354,15 +400,26 @@ function auditRecent(limitRaw) {
   const n = Number(limitRaw);
   const limit = Number.isInteger(n) && n > 0 ? Math.min(n, AUDIT_LIMIT_MAX) : 100;
   const all = auditLog.recent();
+  const stored = auditLog.persistenceState();
   return {
     ok: true,
     events: all.slice(-limit).reverse(),
     count: Math.min(limit, all.length),
     total: all.length,
     dropped: auditLog.dropped(),
+    droppedByRing: auditLog.droppedByRing(),
+    collapsed: auditLog.collapsed(),
     since: auditLog.since(),
-    persistence: 'memory',
-    note: 'The console API keeps its most recent audit events in memory since it started. Every event is also written to its log, which Loki keeps.'
+    persistence: stored.mode,
+    persistenceFile: stored.file,
+    persistenceRestored: stored.restored,
+    persistenceNote: stored.reason,
+    note: 'The console API keeps two rings of recent audit events: security events (sign-in, lockout, sign-out, ' +
+      'role denials) in one that request denials cannot evict, and everything else in the other. Repeated ' +
+      'denials from one source are collapsed into one counted event per minute. Every event is also written ' +
+      'to its log, which Loki keeps.' + (stored.mode === 'file'
+      ? ` Security events are also appended to ${stored.file} and survive a restart.`
+      : ' ' + (stored.reason || 'Security events are kept in memory only.'))
   };
 }
 

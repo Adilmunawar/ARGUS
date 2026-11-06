@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const { report } = require('./helpers');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -100,6 +101,7 @@ process.env.ARGUS_GITOPS_DIR = gitops;
 process.env.ARGUS_RUNBOOKS_DIR = runbooks;
 process.env.ARGUS_S3_IDENTITIES_FILE = identities;
 process.env.ARGUS_AUTH = 'session';
+process.env.ARGUS_AUDIT_RING_EVENTS = '20';
 process.env.ARGUS_AUTH_OPERATORS_FILE = operators;
 
 const sources = require('../src/sources.js');
@@ -230,6 +232,34 @@ const check = (name, fn) => {
     assert.strictEqual(sources.auditRecent('100000').count, 2);
   });
 
+  const sunk = [];
+  auditLog.setSink((line) => sunk.push(JSON.parse(line)));
+  auditLog.audit('auth.login.succeeded', { subject: 'operator-a', outcome: 'success', sourceAddress: '203.0.113.5' });
+  for (let i = 0; i < 100; i += 1) {
+    auditLog.audit('auth.denied', { outcome: 'failure', reason: 'no-session', sourceAddress: '203.0.113.6', path: '/api/host' });
+  }
+  const afterDenials = sources.auditRecent('500');
+  for (let i = 0; i < 50; i += 1) auditLog.audit('test.noise', { outcome: 'success' });
+  const afterFlood = sources.auditRecent('500');
+  check('repeated denials from one source in one minute collapse into one counted event', () => {
+    const denied = afterDenials.events.filter((e) => e.event === 'auth.denied');
+    assert.strictEqual(denied.length, 1, `${denied.length} records`);
+    assert.strictEqual(denied[0].count, 100);
+    assert.strictEqual(sunk.filter((e) => e.event === 'auth.denied').length, 1, 'every denial reached the log');
+    assert.strictEqual(afterFlood.collapsed, 99);
+  });
+  check('ordinary events cannot evict a security event from its own ring', () => {
+    assert.ok(afterFlood.events.some((e) => e.event === 'auth.login.succeeded'), 'the sign-in was evicted');
+    assert.ok(afterFlood.droppedByRing.general > 0, 'the small general ring never overflowed, so this proves nothing');
+    assert.strictEqual(afterFlood.droppedByRing.security, 0);
+  });
+  auditLog.flushCollapsed(Date.now() + 120000);
+  check('a collapsed run is reported to the log with its count when its minute closes', () => {
+    const summary = sunk.find((e) => e.event === 'audit.collapsed' && e.of === 'auth.denied');
+    assert.ok(summary, 'no audit.collapsed line');
+    assert.strictEqual(summary.count, 100);
+  });
+
   process.env.ARGUS_GITOPS_DIR = path.join(dir, 'nowhere');
   delete require.cache[require.resolve('../src/sources.js')];
   const absent = require('../src/sources.js');
@@ -240,11 +270,69 @@ const check = (name, fn) => {
     assert.ok(/nowhere/.test(noApps.message));
   });
 
+  const outside = path.join(dir, 'outside');
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(path.join(outside, 'secret.md'), '# Not a runbook\n\nprivate-outside-content\n');
+  fs.writeFileSync(path.join(outside, 'alerts.yaml'), 'groups:\n  - name: x\n    rules:\n      - alert: OutsideRule\n');
+  const gitops2 = path.join(dir, 'gitops2');
+  const runbooks2 = path.join(dir, 'runbooks2');
+  fs.mkdirSync(path.join(gitops2, 'apps', 'escape'), { recursive: true });
+  fs.mkdirSync(path.join(gitops2, 'apps', 'linked'), { recursive: true });
+  fs.mkdirSync(runbooks2, { recursive: true });
+  fs.writeFileSync(path.join(runbooks2, 'inside.md'), '# Inside\n');
+  fs.writeFileSync(path.join(gitops2, 'apps', 'escape', 'app.yaml'),
+    'metadata: { name: escape }\nspec:\n  alerts: ../../../outside/alerts.yaml\n');
+  fs.writeFileSync(path.join(gitops2, 'apps', 'linked', 'app.yaml'),
+    'metadata: { name: linked }\nspec:\n  alerts: alerts.yaml\n');
+
+  const linkProblems = [];
+  function tryLink(target, where, type) {
+    try { fs.symlinkSync(target, where, type); return true; } catch (err) { linkProblems.push(`${type} ${err.code}`); return false; }
+  }
+  const fileLinks = tryLink(path.join(outside, 'secret.md'), path.join(runbooks2, 'leak.md'), 'file')
+    && tryLink(path.join(outside, 'alerts.yaml'), path.join(gitops2, 'apps', 'linked', 'alerts.yaml'), 'file');
+  const dirLink = tryLink(outside, path.join(runbooks2, 'linked-dir'), 'junction');
+
+  process.env.ARGUS_GITOPS_DIR = gitops2;
+  process.env.ARGUS_RUNBOOKS_DIR = runbooks2;
+  delete require.cache[require.resolve('../src/sources.js')];
+  const contained = require('../src/sources.js');
+
+  const escapeApps = await contained.apps();
+  check('spec.alerts naming a path outside its app directory is not read', () => {
+    const app = escapeApps.apps.find((a) => a.name === 'escape');
+    assert.ok(app, 'the escape app is missing');
+    assert.ok(!app.alertRules.some((r) => r.name === 'OutsideRule'), 'an alert file outside the app directory was read');
+    assert.match(String(app.alertRules[0] && app.alertRules[0].error), /outside this app directory/);
+  });
+
+  if (fileLinks) {
+    check('spec.alerts that is a link to a file outside its app directory is not read', () => {
+      const app = escapeApps.apps.find((a) => a.name === 'linked');
+      assert.ok(!app.alertRules.some((r) => r.name === 'OutsideRule'), 'a linked alert file outside the app was read');
+      assert.match(String(app.alertRules[0] && app.alertRules[0].error), /link/);
+    });
+    check('a runbook that is a link to a file outside the directory is refused', () => {
+      assert.throws(() => contained.runbookBody('leak.md'), (err) => err.name === 'ValidationError');
+    });
+  }
+  const linkedBooks = await contained.runbooks();
+  check('the runbook list does not follow links out of the runbooks directory', () => {
+    assert.ok(linkedBooks.runbooks.some((r) => r.path === 'inside.md'));
+    assert.ok(!JSON.stringify(linkedBooks).includes('Not a runbook'), 'a linked file outside the directory was listed');
+    assert.ok(!linkedBooks.runbooks.some((r) => r.path.startsWith('linked-dir/')), 'a linked directory was walked');
+  });
+  if (dirLink) {
+    check('a runbook reached through a linked directory is refused', () => {
+      assert.throws(() => contained.runbookBody('linked-dir/secret.md'), (err) => err.name === 'ValidationError');
+    });
+  }
+  check('the link checks ran on this machine', () => {
+    assert.ok(dirLink, `no directory link could be made: ${linkProblems.join(', ')}`);
+    if (!fileLinks) console.log(`  note: file links could not be created here (${linkProblems.join(', ')}); the file-link checks were skipped`);
+  });
+
   fs.rmSync(dir, { recursive: true, force: true });
 
-  const failed = results.filter((r) => !r.ok);
-  console.log('');
-  results.forEach((r) => console.log(`  ${r.ok ? 'ok   ' : 'FAIL '} ${r.name}${r.ok ? '' : '\n        ' + r.detail}`));
-  console.log(`\n  ${results.length - failed.length}/${results.length} passed\n`);
-  process.exit(failed.length);
+  process.exit(report(results));
 })().catch((err) => { console.error(err); process.exit(1); });

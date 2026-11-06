@@ -1,5 +1,6 @@
 'use strict';
 
+const { baseClassify } = require('./reader');
 const http = require('node:http');
 const https = require('node:https');
 
@@ -52,7 +53,7 @@ function classify(err, label, timeoutMs) {
   if (/did not return JSON/i.test(msg)) {
     return { reason: 'protocol', message: msg };
   }
-  return { reason: 'error', message: msg };
+  return baseClassify(err);
 }
 
 function request(url, options) {

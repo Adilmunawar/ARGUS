@@ -1,10 +1,11 @@
 'use strict';
 
+const reader = require('./reader');
+const { baseClassify } = reader;
 const http = require('node:http');
 const https = require('node:https');
 const { URL } = require('node:url');
 
-const cache = require('./cache');
 const { positiveInt } = require('./env');
 
 const ADDR = (process.env.ARGUS_OPENBAO_ADDR || '').trim();
@@ -128,7 +129,7 @@ function classify(err) {
         '(it is plaintext in compose and certificate-backed at Site A), ARGUS_OPENBAO_ADDR has to say https://.'
     };
   }
-  return { reason: 'error', message: msg };
+  return baseClassify(err);
 }
 
 async function probe(name) {
@@ -597,14 +598,7 @@ async function summary() {
 }
 
 function guarded(key, ttlMs, producer) {
-  return async function () {
-    try {
-      const r = await cache.through(key, ttlMs, producer);
-      return { ok: true, ...r.value, cachedAt: r.cachedAt, stale: !!r.stale };
-    } catch (err) {
-      return { ok: false, ...classify(err) };
-    }
-  };
+  return reader.guarded(key, ttlMs, producer, { noArgs: true, classify });
 }
 
 const health = guarded('secrets:health', TTL_MS, summary);

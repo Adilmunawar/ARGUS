@@ -5,9 +5,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const assert = require('assert');
+const { report, freePort, listen } = require('./helpers');
 
-const MASTER_PORT = Number(process.env.STORAGE_MASTER_PORT || 8961);
-const DEAD_PORT = MASTER_PORT + 1;
 
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'argus-storage-test-'));
 const bucketsFile = path.join(workDir, 'buckets.yaml');
@@ -29,14 +28,13 @@ fs.writeFileSync(bucketsFile, [
   ''
 ].join('\n'));
 
-process.env.ARGUS_SEAWEED_MASTER_URL = `http://127.0.0.1:${MASTER_PORT}`;
 process.env.ARGUS_BUCKETS_FILE = bucketsFile;
 process.env.ARGUS_STATE_DIR = stateDir;
 process.env.ARGUS_UPSTREAM_TIMEOUT_MS = '3000';
 process.env.ARGUS_LOG_LEVEL = 'error';
 
-const storage = require('../src/storage.js');
-const cache = require('../src/cache.js');
+let storage;
+let cache;
 
 const VOL_STATUS = {
   Version: '30GB 3.97',
@@ -90,19 +88,16 @@ const check = (name, fn) => {
   catch (err) { results.push({ name, ok: false, detail: err.message }); }
 };
 
-function listen(server, port) {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', resolve);
-  });
-}
-
 function rowFor(answer, name) {
   return (answer.buckets || []).find((b) => b.name === name) || null;
 }
 
 (async () => {
-  await listen(master, MASTER_PORT);
+  const MASTER_PORT = await listen(master);
+  const DEAD_PORT = await freePort();
+  process.env.ARGUS_SEAWEED_MASTER_URL = `http://127.0.0.1:${MASTER_PORT}`;
+  storage = require('../src/storage.js');
+  cache = require('../src/cache.js');
 
   fs.writeFileSync(path.join(stateDir, 'storage-init.json'), JSON.stringify({
     at: '2026-09-12T00:00:00.000Z',
@@ -211,14 +206,7 @@ function rowFor(answer, name) {
   master.close();
   fs.rmSync(workDir, { recursive: true, force: true });
 
-  const failed = results.filter((r) => !r.ok);
-  const pad = Math.max(...results.map((r) => r.name.length));
-  console.log('');
-  for (const r of results) {
-    console.log(`  ${r.ok ? 'ok  ' : 'FAIL'}  ${r.name.padEnd(pad)}${r.ok ? '' : '   ' + r.detail}`);
-  }
-  console.log(`\n  ${results.length - failed.length}/${results.length} passed\n`);
-  process.exit(failed.length);
+  process.exit(report(results));
 })().catch((err) => {
   console.error('storage harness failed:', err);
   process.exit(1);

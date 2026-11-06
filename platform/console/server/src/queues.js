@@ -1,5 +1,6 @@
 'use strict';
 
+const { baseClassify } = require('./reader');
 const http = require('node:http');
 const https = require('node:https');
 const { URL } = require('node:url');
@@ -127,7 +128,7 @@ function classify(err) {
       message: msg + '. That document grows with the number of consumers, not the number of messages.'
     };
   }
-  return { reason: 'error', message: msg };
+  return baseClassify(err);
 }
 
 function reader(produce) {
@@ -348,6 +349,7 @@ const server = reader(async () => {
 
     cachedAt: snap.cachedAt,
     stale: !!snap.stale,
+    ...(snap.stale ? { staleBecause: classify(snap.error || {}) } : {}),
     at: new Date().toISOString()
   };
 });
@@ -362,6 +364,7 @@ const account = reader(async () => {
     jetStream: resolved.state,
     cachedAt: snap.cachedAt,
     stale: !!snap.stale,
+    ...(snap.stale ? { staleBecause: classify(snap.error || {}) } : {}),
     at: new Date().toISOString()
   };
 
@@ -465,6 +468,7 @@ const streams = reader(async () => {
     jetStream: resolved.state,
     cachedAt: snap.cachedAt,
     stale: !!snap.stale,
+    ...(snap.stale ? { staleBecause: classify(snap.error || {}) } : {}),
     at: new Date().toISOString()
   };
 
@@ -596,6 +600,7 @@ const consumers = reader(async (options) => {
     jetStream: resolved.state,
     cachedAt: snap.cachedAt,
     stale: !!snap.stale,
+    ...(snap.stale ? { staleBecause: classify(snap.error || {}) } : {}),
     at: new Date().toISOString()
   };
 

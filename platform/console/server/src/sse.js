@@ -1,6 +1,9 @@
 'use strict';
 
 const config = require('./config');
+const { sendError } = require('./errors');
+
+const PER_PRINCIPAL_MAX = 2;
 
 class EventStream {
   constructor({ onOpen, heartbeatMs, retryMs, label }) {
@@ -61,27 +64,37 @@ function replayPlan(ring, header) {
 }
 
 let openStreams = 0;
+const byOwner = new Map();
 
-function startEventStream(req, res, spec, onLog) {
+function ownerCount(owner) {
+  return byOwner.get(owner) || 0;
+}
+
+const SESSION_ENDED_MESSAGE = 'The session behind this stream has ended. Sign in again to reopen it.';
+
+function startEventStream(req, res, spec, onLog, binding) {
   const log = typeof onLog === 'function' ? onLog : () => {};
+  const bound = binding || {};
+  const owner = typeof bound.owner === 'string' && bound.owner ? bound.owner : null;
 
   if (openStreams >= config.sseMaxStreams) {
-    const text = JSON.stringify({
-      ok: false,
-      error: 'too-many-streams',
-      message: `This console holds at most ${config.sseMaxStreams} live streams at once. ` +
-        'Close a log or metrics panel and open this one again.'
-    }, null, 2);
-    res.writeHead(503, {
-      'content-type': 'application/json; charset=utf-8',
-      'content-length': Buffer.byteLength(text),
-      'cache-control': 'no-store'
-    });
-    res.end(text);
+    sendError(res, 503, 'too-many-streams',
+      `This console holds at most ${config.sseMaxStreams} live streams at once. ` +
+        'Close a log or metrics panel and open this one again.',
+      { scope: 'server', limit: config.sseMaxStreams });
+    return;
+  }
+
+  if (owner && ownerCount(owner) >= PER_PRINCIPAL_MAX) {
+    sendError(res, 429, 'too-many-streams',
+      `One operator holds at most ${PER_PRINCIPAL_MAX} live streams at once. ` +
+        'Close a log panel or another console tab and open this one again.',
+      { scope: 'principal', limit: PER_PRINCIPAL_MAX });
     return;
   }
 
   openStreams += 1;
+  if (owner) byOwner.set(owner, ownerCount(owner) + 1);
 
   res.writeHead(200, {
     'content-type': 'text/event-stream; charset=utf-8',
@@ -109,6 +122,7 @@ function startEventStream(req, res, spec, onLog) {
   const sink = {
     send(event, data, id) {
       if (closed) return;
+      if (sessionGone()) return;
       if (paused) { dropped += 1; return; }
       let frame = '';
       if (id !== undefined && id !== null) frame += `id: ${id}\n`;
@@ -125,13 +139,39 @@ function startEventStream(req, res, spec, onLog) {
     resetDropped() { const n = dropped; dropped = 0; return n; }
   };
 
+  function sessionEnded(reason) {
+    if (closed) return;
+    if (!paused) raw(`event: session-ended\ndata: ${JSON.stringify({ reason, message: SESSION_ENDED_MESSAGE })}\n\n`);
+    if (typeof bound.onEnded === 'function') {
+      try { bound.onEnded(reason); } catch (err) { log('warn', `${spec.label} end hook failed: ${err && err.message}`); }
+    }
+    sink.close();
+  }
+
+  function sessionGone() {
+    if (typeof bound.check !== 'function') return false;
+    let verdict;
+    try { verdict = bound.check(); } catch (err) { verdict = { ok: false, reason: 'check-failed' }; }
+    if (verdict && verdict.ok) return false;
+    sessionEnded((verdict && verdict.reason) || 'gone');
+    return true;
+  }
+
   const beat = setInterval(() => {
-    if (closed || paused) return;
+    if (closed) return;
+    if (sessionGone()) return;
+    if (paused) return;
     raw(': ping\n\n');
     const n = sink.resetDropped();
     if (n > 0) sink.note('dropped', { lines: n, reason: 'the browser could not keep up with this stream' });
   }, spec.heartbeatMs);
   beat.unref();
+
+  let lifetime = null;
+  if (Number.isFinite(bound.expiresAt)) {
+    lifetime = setTimeout(() => sessionEnded('absolute-timeout'), Math.max(0, bound.expiresAt - Date.now()));
+    lifetime.unref();
+  }
 
   let stop = () => {};
 
@@ -139,7 +179,13 @@ function startEventStream(req, res, spec, onLog) {
     if (closed) return;
     closed = true;
     openStreams -= 1;
+    if (owner) {
+      const left = ownerCount(owner) - 1;
+      if (left > 0) byOwner.set(owner, left);
+      else byOwner.delete(owner);
+    }
     clearInterval(beat);
+    if (lifetime) clearTimeout(lifetime);
     try { stop(); } catch (err) { log('warn', `${spec.label} teardown failed: ${err && err.message}`); }
   }
 
@@ -157,8 +203,12 @@ function startEventStream(req, res, spec, onLog) {
   }
 }
 
+function openStreamsFor(owner) {
+  return ownerCount(owner);
+}
+
 function openStreamCount() {
   return openStreams;
 }
 
-module.exports = { EventStream, RingBuffer, startEventStream, replayPlan, openStreamCount };
+module.exports = { EventStream, RingBuffer, startEventStream, replayPlan, openStreamCount, openStreamsFor, PER_PRINCIPAL_MAX };
