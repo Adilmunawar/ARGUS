@@ -21,20 +21,24 @@ buckets:
   - name: argus-artifacts
     owner: gmsa-ci$
     readers: [gmsa-reconciler$]
+    versioning: true
     objectLock: { mode: COMPLIANCE, days: 365 }
     replication: { siteB: true }
   - name: argus-backups
     owner: gmsa-backup$
     readers: [gmsa-restore$]
+    versioning: true
     objectLock: { mode: COMPLIANCE, days: 35 }
     replication: { siteB: true, siteBObjectLockDays: 90 }
   - name: argus-logs
     owner: gmsa-loki$
+    versioning: true
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }
   - name: argus-sessions
     owner: gmsa-guacamole$
     readers: [gmsa-console$, Argus-Console-Security]
+    versioning: true
     objectLock: { mode: COMPLIANCE, days: 400 }
     replication: { siteB: true }
   - name: argus-parity
@@ -42,6 +46,7 @@ buckets:
     readers: [argus-parity-deny]
   - name: argus-parity-worm
     owner: argus-parity
+    versioning: true
     objectLock: { mode: GOVERNANCE, days: 1 }
   - name: argus-parity-forbidden
     owner: argus-admin

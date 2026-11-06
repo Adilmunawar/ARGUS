@@ -4,7 +4,7 @@ default: deny-unauthenticated-inbound
 authentication: [kerberos-machine, certificate:Argus-Issuing-CA]
 encryption: aes256-gcm
 rules:
-  - { to: "sql-01,sql-02",       port: 1433,  from: [gmsa-orders$, gmsa-orders-jobs$, gmsa-billing$, gmsa-console$, gmsa-backup$, gmsa-restore$, svc-ml, "grafana:sql-02-only"] }
+  - { to: "sql-01,sql-02",       port: 1433,  from: [gmsa-orders$, gmsa-orders-jobs$, gmsa-billing$, gmsa-console$, gmsa-backup$, gmsa-restore$, svc-ml, "gmsa-grafana$:sql-02-only"] }
   - { to: pg-01,                 port: 5432,  from: [gmsa-geo$, svc-ml, gmsa-console$, gmsa-backup$, gmsa-maps$] }
   - { to: "sw-master-*",         port: 8333,  from: [PLATFORM, ML, "BUILD:argus-artifacts-only", gmsa-backup$] }
   - { to: garnet,                port: 6379,  from: [gmsa-orders$, gmsa-billing$, gmsa-console$] }
@@ -18,4 +18,4 @@ rules:
   - { to: "sf-*",                port: [19000, 19080, "1025-1027"], from: [gmsa-sf$, gmsa-reconciler$, ADMIN-VPN] }
   - { to: "hv-*",                port: 5986,  from: ["gmsa-reconciler$:JEA", "ADMIN-VPN:PAW"] }
   - { to: gpu-01,                port: [8265, 10001], from: [gmsa-caddy$, ADMIN-VPN] }
-  - { to: legacy-landsurvey-01,  port: 443,   from: [gmsa-caddy$, gmsa-orders$] }
+  - { to: legacy-app-01,  port: 443,   from: [gmsa-caddy$, gmsa-orders$] }
