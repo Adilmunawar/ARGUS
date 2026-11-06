@@ -48,6 +48,7 @@ ENV_LOOKUP = re.compile(
     re.IGNORECASE,
 )
 REFERENCE = re.compile(r"\{\{.*\}\}|\$\{.*\}|%[A-Za-z_]+%|<[A-Za-z_][^>]*>")
+HASH_RECORD = re.compile(r"^scrypt\$N=\d+,r=\d+,p=\d+\$[A-Za-z0-9+/=_-]+\$[A-Za-z0-9+/=_-]+$")
 IDENTIFIER_ONLY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DOTTED_PATH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)+$")
 EXPRESSION_CHARS = re.compile(r"[\[\]()]")
@@ -123,6 +124,10 @@ def shannon(value):
 
 def unquote(value):
     value = value.strip()
+    if value[:1] in ('"', "'", "`"):
+        end = value.find(value[0], 1)
+        if end > 0:
+            value = value[: end + 1]
     for quote in ('"', "'", "`"):
         if len(value) >= 2 and value.startswith(quote) and value.endswith(quote):
             return value[1:-1], True
@@ -155,6 +160,8 @@ def looks_like_secret(raw_value, in_query=False):
     if not quoted and " " in value:
         return False
     if PLACEHOLDER.match(value):
+        return False
+    if HASH_RECORD.match(value):
         return False
     if len(value) < MIN_VALUE_LENGTH:
         return False
@@ -216,7 +223,7 @@ def scan(paths):
 
 
 SELF_TEST_FLAG = [
-    ("a.yml", '      # config.alloy redacts CNIC-shaped strings and password=/token= pairs at'),
+    ("a.yml", '      # config.alloy redacts national-ID-shaped strings and password=/token= pairs at'),
     ("a.ps1", "$breakglassPassword = New-HexSecret 16"),
     ("a.ps1", "$gen['AZURITE_ACCOUNT_KEY']  = New-Base64Secret 32"),
     ("a.yml", "      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password"),
@@ -236,6 +243,8 @@ SELF_TEST_FLAG = [
     ("a.yml", "      AWS_ACCESS_KEY_ID: argus-console"),
     ("a.yml", "      ARGUS_PARITY_ACCESS_KEY: argus-parity"),
     ("a.js", "      credentials: 'same-origin',"),
+    ("a.js", "  { subject: 'a', roles: ['operator'], password: 'scrypt$N=16384,r=8,p=1$c2FsdHNhbHRzYWx0$dGFndGFndGFndGFn' }"),
+    ("a.js", "    'invalid-credentials': 'signedOut', 'duplicate-session-cookie': 'signedOut', 'cross-site': 'forbidden',"),
     ("a.js", "process.env.AWS_SHARED_CREDENTIALS_FILE = '/nonexistent/argus-smoke';"),
     ("a.yml", "      GF_DATABASE_PASSWORD_FILE: /run/secrets/grafana_db"),
     ("a.hcl", 'token_policies = ["argus-console"]'),
