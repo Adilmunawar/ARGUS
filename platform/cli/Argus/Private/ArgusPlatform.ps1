@@ -28,7 +28,7 @@ function Test-ArgusProtectedData {
     if (-not ('System.Security.Cryptography.ProtectedData' -as [type])) {
         foreach ($assembly in @('System.Security', 'System.Security.Cryptography.ProtectedData')) {
             if ('System.Security.Cryptography.ProtectedData' -as [type]) { break }
-            try { Add-Type -AssemblyName $assembly -ErrorAction Stop } catch { }
+            try { Add-Type -AssemblyName $assembly -ErrorAction Stop } catch { Write-Verbose ('{0} could not be loaded: {1}' -f $assembly, $_.Exception.Message) }
         }
     }
 
@@ -76,7 +76,7 @@ function Set-ArgusFilePermission {
     param([Parameter(Mandatory)][string]$Path)
 
     if (Test-ArgusWindowsPlatform) { return }
-    $chmod = Get-Command -Name 'chmod' -CommandType Application -ErrorAction SilentlyContinue
+    $chmod = Get-Command -Name 'chmod' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $chmod) { return }
     if ($PSCmdlet.ShouldProcess($Path, 'Restrict file permissions to the owner')) {
         & $chmod.Path '600' $Path 2>$null
@@ -84,6 +84,7 @@ function Set-ArgusFilePermission {
 }
 
 function Initialize-ArgusTls {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'TLS is an acronym, not a plural')]
     [CmdletBinding()]
     param()
 
@@ -93,5 +94,5 @@ function Initialize-ArgusTls {
         if (([Net.ServicePointManager]::SecurityProtocol -band $wanted) -ne $wanted) {
             [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor $wanted
         }
-    } catch { }
+    } catch { Write-Verbose ('TLS 1.2 could not be enabled: {0}' -f $_.Exception.Message) }
 }

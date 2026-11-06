@@ -59,7 +59,7 @@ function Read-ArgusEventStream {
                 try {
                     $body = $detail | ConvertFrom-Json
                     if ($body.PSObject.Properties['message']) { $detail = [string]$body.message }
-                } catch { }
+                } catch { Write-Verbose 'The error body was not JSON, so it is shown as text.' }
             }
             if (-not $detail) { $detail = 'It sent no explanation.' }
             throw (New-ArgusErrorRecord `

@@ -70,7 +70,7 @@ function Connect-Argus {
         Restored     = $false
     }
 
-    if ($PSCmdlet.ParameterSetName -eq 'Anonymous') {
+    if ($NoCredential) {
         $connection.AuthMode = 'off'
     } elseif ($PSCmdlet.ParameterSetName -eq 'Proxy') {
         $connection.AuthMode = 'proxy'

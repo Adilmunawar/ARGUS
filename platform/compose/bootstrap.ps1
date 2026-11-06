@@ -1,8 +1,8 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'An interactive wrapper that prompts the operator at a terminal')]
 [CmdletBinding()]
 param(
   [switch]$Rotate,
-  [switch]$Ci,
-  [switch]$SkipDigests
+  [switch]$Ci
 )
 
 $ErrorActionPreference = 'Stop'

@@ -53,6 +53,7 @@ function ConvertTo-ArgusQueryString {
 }
 
 function New-ArgusUri {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory and changes no state')]
     [CmdletBinding()]
     [OutputType([uri])]
     param(
@@ -68,6 +69,7 @@ function New-ArgusUri {
 }
 
 function New-ArgusWebSession {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory and changes no state')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][uri]$BaseUri,
@@ -154,6 +156,7 @@ function Get-ArgusResponseProblem {
 }
 
 function New-ArgusErrorRecord {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory and changes no state')]
     [CmdletBinding()]
     [OutputType([System.Management.Automation.ErrorRecord])]
     param(
@@ -170,6 +173,7 @@ function New-ArgusErrorRecord {
 }
 
 function New-ArgusHttpErrorRecord {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object in memory and changes no state')]
     [CmdletBinding()]
     [OutputType([System.Management.Automation.ErrorRecord])]
     param(
@@ -271,6 +275,7 @@ function Invoke-ArgusHttp {
 }
 
 function New-ArgusOperatorSession {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'A private helper; Connect-Argus asks ShouldProcess before it signs in')]
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(

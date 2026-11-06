@@ -77,6 +77,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - **The SeaweedFS filer crash-looped after a Docker restart.** SeaweedFS runs as root with every capability dropped, so it could not read config files owned by the console's user with mode 0400. It had only kept working because the files were already open. They are now owned by root, readable by the console group, at mode 0440.
 - **Two paging alerts fired on Docker Desktop's own mounts.** Docker Desktop mounts a read-only system image and a CD image that is always 100% full. The filesystem alerts treated them as a disk remounted read-only and a full disk. The filesystem rules now leave out `iso9660`, `rootfs` and the WSLg system distro.
 - **The secret scanner flagged two strings that are not credentials.** It took everything after a key as its value, so a map of error reasons such as `'invalid-credentials': 'signedOut'` was reported as a credential. It now reads a quoted value only up to its closing quote. It also no longer reports scrypt hash records, which are hashes, not secrets. Both cases are in its self-test.
+- **The queues init glob-expanded NATS subjects.** The subject list was passed to `printf` unquoted, so a subject such as `argus.ingest.orders.*` became the name of any matching file in the container's working directory. The list is now split by `jq`, and the subjects reach NATS exactly as declared.
+- **The CLI could not cache a session on Linux.** Where `/bin` links to `/usr/bin`, `Get-Command chmod` returns two paths, and the module ran their joined string as one command. It now takes the first. The test suite runs only on Windows in CI, so it never showed. The module tests now pass on Linux too, 249 of 249.
+- **The new CI jobs failed the first time they ran:**
+  - **Gitleaks:** the rule's `\s*` crossed line breaks, so an empty `KEY=` in `.env.example` read the next line's key as its value. It now matches spaces and tabs only. An empty assignment and a stub test value are allowed. A real value is still caught.
+  - **promtool:** the config check now has an empty token file to find.
+  - **OpenTofu:** `vm-sql-01.tf` is formatted.
+  - **ShellCheck:** every finding in the compose init scripts is fixed, `A && B || C` chains included.
+  - **PSScriptAnalyzer:** the three empty `catch` blocks now write a verbose message. A `-SkipDigests` switch that did nothing is gone. The analyzer's known false positives are suppressed with a reason: TLS read as a plural, in-memory `New-` builders, Pester's shared variables, and the prompts in the interactive wrappers.
 - **The instance detail page showed a finish time and exit code for a running container.** These were left over from the container's previous run. Both now read `-` while the container runs.
 - **The GitOps declarations were inconsistent**, which the stricter checks found:
   - production pinned a console app that had no spec;

@@ -1,3 +1,6 @@
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '', Justification = 'Pester shares these variables between its setup blocks and its tests')]
+param()
+
 BeforeAll {
     $moduleRoot = Split-Path -Parent $PSScriptRoot
     Import-Module -Name (Join-Path $moduleRoot 'Argus.psd1') -Force -ErrorAction Stop
