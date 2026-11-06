@@ -414,6 +414,8 @@ jobs:
           sudo mkdir -p /etc/prometheus
           sudo ln -sfn "${GITHUB_WORKSPACE}/platform/compose/services/observability/prometheus/rules" /etc/prometheus/rules
           sudo ln -sfn "${GITHUB_WORKSPACE}/platform/gitops" /gitops
+          sudo mkdir -p /run/secrets
+          sudo install -m 0444 /dev/null /run/secrets/console_metrics_token
           promtool check config platform/compose/services/observability/prometheus/prometheus.yml
           promtool check rules \
             platform/compose/services/observability/prometheus/rules/*.rules.yaml \

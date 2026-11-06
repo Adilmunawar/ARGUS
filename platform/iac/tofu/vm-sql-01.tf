@@ -8,10 +8,10 @@ module "sql_01" {
   vlan       = 31
   shielding  = { enabled = true, hgs = "hgs-01.argus.local" }
   disks = [
-    { name = "os",     size_gb = 100,  tier = "nvme" },
-    { name = "data",   size_gb = 2048, tier = "nvme" },
-    { name = "log",    size_gb = 512,  tier = "nvme" },
-    { name = "tempdb", size_gb = 256,  tier = "nvme" },
+    { name = "os", size_gb = 100, tier = "nvme" },
+    { name = "data", size_gb = 2048, tier = "nvme" },
+    { name = "log", size_gb = 512, tier = "nvme" },
+    { name = "tempdb", size_gb = 256, tier = "nvme" },
   ]
   replica  = { target_cluster = "argus-hvc-b", frequency_seconds = 300 }
   dsc_role = "sql-node"
