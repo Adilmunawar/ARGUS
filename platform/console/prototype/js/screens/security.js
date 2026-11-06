@@ -138,11 +138,12 @@
 
     var tiles = el('div.tiles', [
       ui.statTile('Mean baseline score', fmt.pct(mean, 1), {
+        status: mean >= 95 ? { tone: 'ok', text: 'At or above 95%' } : { tone: 'warn', text: 'Below 95%' },
         note: fmt.num(count) + ' applicable host and family pairs'
       }),
       ui.statTile('Hosts below 95%', fmt.num(worstHostCount), {
         unit: 'of ' + fmt.num(p.hosts.length),
-        note: 'Counted where any single family drifts below the threshold'
+        status: worstHostCount ? { tone: 'warn', text: 'Drifting' } : { tone: 'ok', text: 'None' }
       }),
       ui.statTile('Worst family', p.families[worstIndex], {
         note: 'Mean ' + fmt.pct(worstMean, 1) + ' across the estate'
@@ -201,24 +202,19 @@
       }
     });
 
-    return el('div.stack', [
+    tiles.style.setProperty('margin-bottom', '0');
+    return el('div.grid', [
       tiles,
-      el('div.callout.info', [
-        el('strong', { text: 'Wazuh SCA scores every host once a day.' }),
-        el('p', {
-          text: 'A control family that drifts below 95% raises an alert and pages the on-call operator. '
-            + 'The score is a measurement, not a gate: nothing is blocked automatically, because a false '
-            + 'positive that quarantines a domain controller is worse than the drift it was chasing.'
-        })
-      ]),
       ui.card('Baseline score by host and control family', [
         grid,
-        el('p.hint', {
-          text: 'Cells reading 0 for Defender on siem-01 and guac-01 are not applicable rather than failures: '
-            + 'both hosts run Ubuntu 24.04 and have no Microsoft Defender to configure. They are excluded from '
-            + 'the mean and from the alerting threshold. Select any cell for the failing checks behind its score.'
-        })
-      ], { flush: false })
+        ui.disclosure('Details', [
+          el('p', {
+            text: 'Wazuh SCA scores every host once a day at 02:00. A family below 95% raises an alert and pages the '
+              + 'on-call operator; nothing is blocked automatically. A dash is not applicable (Defender on the Ubuntu '
+              + 'hosts) and is excluded from the mean and the threshold.'
+          })
+        ])
+      ], { description: 'Select a cell for the failing checks behind its score.', counter: p.hosts.length })
     ]);
   }
 
@@ -416,12 +412,12 @@
     if (inc.state === 'resolved') actions.push(ui.btn('Reopen ' + inc.id, { variant: 'ghost', onClick: function () { setIncidentState(inc, 'open'); } }));
 
     return ui.card(inc.id + ' · ' + inc.title, [
-      el('div.row', [
-        ui.pill(inc.state, INC_TONE[inc.state] || 'idle'),
-        ui.pill(inc.severity, SEV_TONE[inc.severity] || 'idle'),
-        el('span.muted', { text: 'Commander ' + A.personName(inc.commander) + ' · opened ' + fmt.ago(inc.opened) + ' · updated ' + fmt.ago(inc.updated) })
-      ]),
       ui.dl([
+        ['State', ui.pill(inc.state, INC_TONE[inc.state] || 'idle')],
+        ['Severity', ui.pill(inc.severity, SEV_TONE[inc.severity] || 'idle')],
+        ['Commander', A.personName(inc.commander)],
+        ['Opened', fmt.time(inc.opened)],
+        ['Updated', fmt.time(inc.updated)],
         ['Host', el('span.mono', { text: inc.host })],
         ['Linked alerts', inc.alerts.length
           ? el('div.chips', inc.alerts.map(function (id) { return A.link(id, 'security', ['alerts'], { id: id }, 'chip'); }))
@@ -435,7 +431,7 @@
           el('div', { text: t.text })
         ]);
       })),
-      el('p.hint', { text: 'Notes are written here by people. Audit rows that name the incident, its host or its alerts are folded in automatically, so the timeline cannot miss an action somebody took elsewhere in the console.' })
+      ui.disclosure('Details', [el('p.hint', { text: 'Notes are written here by people. Audit rows that name the incident, its host or its alerts are folded in automatically, so the timeline cannot miss an action somebody took elsewhere in the console.' })])
     ], { actions: actions });
   }
 
@@ -452,8 +448,10 @@
     }
 
     var cols = [
-      { key: 'id', label: 'Incident', render: function (i) { return el('span.mono', { text: i.id }); } },
-      { key: 'title', label: 'Title' },
+      {
+        key: 'title', label: 'Incident',
+        render: function (i) { return el('div.col', [el('span', { text: i.title }), el('span.mono.muted', { text: i.id })]); }
+      },
       {
         key: 'severity', label: 'Severity', status: true,
         sort: function (i) { return ['critical', 'high', 'medium', 'low'].indexOf(i.severity); },
@@ -466,7 +464,6 @@
       },
       { key: 'commander', label: 'Commander', render: function (i) { return A.personName(i.commander); } },
       { key: 'host', label: 'Host', render: function (i) { return el('span.mono', { text: i.host }); } },
-      { key: 'opened', label: 'Opened', sort: function (i) { return i.opened.getTime(); }, render: function (i) { return fmt.time(i.opened); } },
       { key: 'updated', label: 'Updated', sort: function (i) { return i.updated.getTime(); }, render: function (i) { return fmt.time(i.updated); } },
       { key: 'alerts', label: 'Alerts', align: 'right', sort: function (i) { return i.alerts.length; }, csv: function (i) { return i.alerts.join('; '); }, render: function (i) { return fmt.num(i.alerts.length); } }
     ];
@@ -475,7 +472,8 @@
     var table = ui.table(cols, list, {
       id: 'security.incidents',
       caption: 'Incidents with severity, state, commander, host and the alerts linked to each',
-      empty: 'No incident has been opened. One is opened from an alert, or from the button above.',
+      emptyTitle: 'No incidents',
+      empty: 'An incident is opened from an alert, or with Open an incident.',
       sortKey: 'state', sortDir: 'asc',
       rowKey: function (i) { return i.id; },
       onRow: show
@@ -486,19 +484,22 @@
     if (initial) detailHost.appendChild(incidentDetail(initial));
     else detailHost.appendChild(ui.emptyState('No incident selected', 'Choose an incident to read its timeline, add to it, or resolve it.'));
 
-    return el('div.stack', [
-      el('div.tiles', [
-        ui.statTile('Open incidents', fmt.num(open), { note: open ? 'Somebody is on each one' : 'Nothing is being worked right now' }),
-        ui.statTile('Mitigated', fmt.num(list.filter(function (i) { return i.state === 'mitigated'; }).length), { note: 'Contained, not yet closed' }),
-        ui.statTile('Resolved', fmt.num(list.filter(function (i) { return i.state === 'resolved'; }).length), { note: 'Timelines kept for ever' })
-      ]),
-      el('div.row', [
-        ui.btn('Open an incident', { variant: 'primary', onClick: function () { openIncidentDialog(null); } }),
-        el('span.spacer'),
-        ui.columnsButton(table, 'incidents'),
-        ui.exportButton(table, 'incidents')
-      ]),
-      table,
+    var tiles = el('div.tiles', [
+      ui.statTile('Open', fmt.num(open), { status: open ? { tone: 'bad', text: 'Being worked' } : { tone: 'ok', text: 'None open' } }),
+      ui.statTile('Mitigated', fmt.num(list.filter(function (i) { return i.state === 'mitigated'; }).length), { status: { tone: 'warn', text: 'Contained, not closed' } }),
+      ui.statTile('Resolved', fmt.num(list.filter(function (i) { return i.state === 'resolved'; }).length), { status: { tone: 'ok', text: 'Timelines kept' } })
+    ]);
+    tiles.style.setProperty('margin-bottom', '0');
+    return el('div.grid', [
+      tiles,
+      ui.card('Incidents', [table], {
+        counter: list.length,
+        actions: [
+          ui.columnsButton(table, 'incidents'),
+          ui.exportButton(table, 'incidents'),
+          ui.btn('Open an incident', { variant: 'primary', onClick: function () { openIncidentDialog(null); } })
+        ]
+      }),
       detailHost
     ]);
   }
@@ -589,13 +590,16 @@
   }
 
   function alertInbox() {
-    return ui.card('Alert inbox', el('div.callout.warn', [
-      el('strong', { text: 'Alertmanager has not been read.' }),
-      el('p', {
-        text: 'The console is on bundled sample data, so nothing here is firing or not firing -- it is ' +
-          'unknown. The table below is the sample dataset and is not a reading of this estate.'
-      })
-    ]));
+    return el('div.callout.warn', [
+      el('strong', { text: 'Alertmanager has not been read' }),
+      el('p', { text: 'The table below is the bundled sample, not a reading of this estate.' })
+    ]);
+  }
+
+  function rowAction(verb, id, opts) {
+    var o = opts || {};
+    o.variant = o.variant || 'link';
+    return ui.btn([verb, el('span.sr', { text: ' ' + id })], o);
   }
 
   function linkedIncident(alert) {
@@ -625,11 +629,16 @@
         sort: function (r) { return ['critical', 'high', 'medium', 'low'].indexOf(r.severity); },
         render: function (r) { return ui.pill(r.severity, SEV_TONE[r.severity] || 'idle'); }
       },
-      { key: 'source', label: 'Source' },
-      { key: 'rule', label: 'Rule' },
+      {
+        key: 'rule', label: 'Rule',
+        csv: function (r) { return r.rule; },
+        render: function (r) { return el('div.col', [el('span', { text: r.rule }), el('span.muted', { text: r.source + ' · ' + r.id })]); }
+      },
       { key: 'host', label: 'Host', render: function (r) { return el('span.mono', { text: r.host }); } },
-      { key: 'first', label: 'First seen', sort: function (r) { return r.first.getTime(); }, render: function (r) { return fmt.time(r.first); } },
-      { key: 'last', label: 'Last seen', sort: function (r) { return r.last.getTime(); }, render: function (r) { return fmt.time(r.last); } },
+      {
+        key: 'last', label: 'Last seen', sort: function (r) { return r.last.getTime(); },
+        render: function (r) { var t = fmt.time(r.last); t.title = 'First seen ' + fmt.stamp(r.first) + ', last seen ' + fmt.stamp(r.last); return t; }
+      },
       { key: 'count', label: 'Count', align: 'right', render: function (r) { return fmt.num(r.count); } },
       {
         key: 'state', label: 'State', status: true,
@@ -644,47 +653,36 @@
       {
         key: 'actions', label: 'Actions', sortable: false,
         render: function (r) {
+          var more = [];
+          if (r.runbook) more.push({ label: 'Open runbook ' + r.runbook, onSelect: function () { A.go('ops', ['runbook', r.runbook]); } });
           if (r.state === 'resolved') {
-            return el('div.row', [
-              el('span.muted', { text: 'Resolved at the source.' }),
-              r.runbook ? ui.btn('Open runbook ' + r.runbook, {
-                variant: 'ghost',
-                onClick: function () { A.go('ops', ['runbook', r.runbook]); }
-              }) : null
+            return el('div.row.cell-actions', [
+              el('span.muted', { text: 'Resolved at the source' }),
+              more.length ? ui.menu(more, { label: 'More actions for ' + r.id }) : null
             ]);
           }
-          return el('div.row', [
-            r.state === 'open' ? ui.btn('Acknowledge ' + r.id, {
-              variant: 'ghost',
+          more.push({ label: 'Quarantine ' + r.host, danger: true, title: 'Move every NIC on ' + r.host + ' to VLAN 90', onSelect: function () { quarantineHost(r); } });
+          var incident = linkedIncident(r);
+          return el('div.row.cell-actions', [
+            r.state === 'open' ? rowAction('Acknowledge', r.id, {
               title: 'Acknowledge ' + r.rule + ' on ' + r.host,
               onClick: function () { acknowledgeDialog(r); }
-            }) : el('span.muted', { text: 'Acknowledged.' }),
-            r.state === 'open' && !silenced(r) ? ui.btn('Silence ' + r.id, {
-              variant: 'ghost',
+            }) : null,
+            r.state === 'open' && !silenced(r) ? rowAction('Silence', r.id, {
               title: 'Stop the pages for a fixed time with a reason',
               onClick: function () { silenceDialog(r); }
             }) : null,
-            silenced(r) ? ui.btn('Unsilence ' + r.id, {
-              variant: 'ghost',
+            silenced(r) ? rowAction('Unsilence', r.id, {
               title: 'Silenced until ' + fmt.stamp(r.silencedUntil) + ': ' + r.silenceReason,
               onClick: function () { unsilence(r); }
             }) : null,
-            ui.btn('Quarantine ' + r.host, {
-              variant: 'danger',
-              title: 'Move every NIC on ' + r.host + ' to VLAN 90',
-              onClick: function () { quarantineHost(r); }
-            }),
-            linkedIncident(r)
-              ? A.link('Incident ' + linkedIncident(r).id, 'security', ['incidents'], { id: linkedIncident(r).id })
-              : ui.btn('Open incident for ' + r.id, {
-                variant: 'ghost',
+            incident
+              ? A.link(incident.id, 'security', ['incidents'], { id: incident.id })
+              : rowAction('Open incident', 'for ' + r.id, {
                 title: 'Open an incident from ' + r.id + ' with a commander and a timeline',
                 onClick: function () { openIncidentDialog(r); }
               }),
-            r.runbook ? ui.btn('Open runbook ' + r.runbook, {
-              variant: 'ghost',
-              onClick: function () { A.go('ops', ['runbook', r.runbook]); }
-            }) : null
+            ui.menu(more, { label: 'More actions for ' + r.id })
           ]);
         }
       }
@@ -726,6 +724,7 @@
       alertTable = ui.table(cols, rows, {
         id: 'security.alerts',
         caption: 'Open and recent security alerts, by severity, source, host and state',
+        emptyTitle: 'No matches',
         empty: 'No alert matches every filter. Remove a token to widen the search.',
         sortKey: 'severity', sortDir: 'asc',
         rowKey: function (r) { return r.id; },
@@ -742,23 +741,22 @@
 
     paint(filter.tokens());
 
-    return el('div.stack', [
+    tableHost.style.setProperty('margin', '0 calc(-1 * var(--s-l)) calc(-1 * var(--s-l))');
+    return el('div.grid', [
       alertInbox(),
-      el('div.sectiontitle', { text: 'Console alert history' }),
-      filter,
-      el('p.hint', {
-        text: 'Filters combine with AND, so severity high and host gpu-01 narrows to the intersection. '
-          + 'The filter is part of the address, so a shared link opens the same view. Only the table repaints; the filter keeps its focus.'
-      }),
-      el('div.bulkbar', [
-        countNode,
-        bulkBtn,
-        el('span.spacer'),
-        ui.viewsBar('security', function () { return window.location.hash; }),
-        ui.columnsButton(function () { return alertTable; }, 'alerts'),
-        ui.exportButton(function () { return alertTable; }, 'alerts')
-      ]),
-      tableHost
+      ui.card('Alerts', [
+        filter,
+        el('div.bulkbar', [countNode, bulkBtn]),
+        tableHost
+      ], {
+        counter: d.alerts.length,
+        description: 'Filters combine with AND and are kept in the address.',
+        actions: [
+          ui.viewsBar('security', function () { return window.location.hash; }),
+          ui.columnsButton(function () { return alertTable; }, 'alerts'),
+          ui.exportButton(function () { return alertTable; }, 'alerts')
+        ]
+      })
     ]);
   }
 
@@ -858,6 +856,7 @@
         rowKey: function (v) { return v.id; }
       });
       return ui.card('Known vulnerabilities', vulnTable, {
+        counter: d.vulns.length,
         actions: [
           ui.exportButton(function () { return vulnTable; }, 'vulnerabilities'),
           ui.btn('Add waiver', { variant: 'ghost', onClick: function () { addWaiverDialog(null); } })
@@ -872,8 +871,10 @@
         sort: function (v) { return ['critical', 'high', 'medium', 'low'].indexOf(v.severity); },
         render: function (v) { return ui.pill(v.severity, SEV_TONE[v.severity] || 'idle'); }
       },
-      { key: 'component', label: 'Component' },
-      { key: 'app', label: 'Application' },
+      {
+        key: 'component', label: 'Component',
+        render: function (v) { return el('div.col', [el('span', { text: v.component }), el('span.muted', { text: v.app })]); }
+      },
       { key: 'fixedIn', label: 'Fixed in', render: function (v) { return el('span.mono', { text: v.fixedIn }); } },
       { key: 'found', label: 'Found', sort: function (v) { return v.found.getTime(); }, render: function (v) { return fmt.time(v.found); } },
       {
@@ -885,8 +886,7 @@
         render: function (v) {
           var live = v.waiver && v.waiver.until >= d.now;
           if (live) return el('span.muted', { text: 'Waived until ' + fmt.stamp(v.waiver.until) });
-          return ui.btn('Waive ' + v.id, {
-            variant: 'ghost',
+          return rowAction('Waive', v.id, {
             title: 'Record a named, time-boxed waiver for ' + v.id,
             onClick: function () { addWaiverDialog(v); }
           });
@@ -894,13 +894,10 @@
       }
     ];
 
-    return el('div.stack', [
+    return el('div.grid', [
       expired.length ? el('div.callout.bad', [
-        el('strong', { text: fmt.num(expired.length) + ' waiver has expired' }),
-        el('p', {
-          text: 'An expired waiver is an alert, not a pass: ' + expired.map(function (v) { return v.id; }).join(', ')
-            + '. Either patch the component or have somebody sign for the risk again.'
-        })
+        el('strong', { text: fmt.num(expired.length) + ' waiver' + (expired.length === 1 ? ' has' : 's have') + ' expired' }),
+        el('p', { text: expired.map(function (v) { return v.id; }).join(', ') + ': patch the component or have somebody sign for the risk again.' })
       ]) : null,
       vulnCard()
     ]);
@@ -1065,11 +1062,7 @@
         el('label.fieldlabel', { for: 'ks-search-' + session.id, text: 'Filter keystrokes' }),
         search
       ]),
-      logHost,
-      el('p.hint', {
-        text: 'Every control here is reachable from the keyboard, and the scrubber is a range input rather than '
-          + 'a draggable bar: dragging as the only way to seek fails WCAG 2.5.7.'
-      })
+      logHost
     ]);
 
     setPosition(0, false);
@@ -1090,14 +1083,17 @@
 
     var cols = [
       { key: 'id', label: 'Session', render: function (s) { return el('span.mono', { text: s.id }); } },
-      { key: 'user', label: 'User' },
-      { key: 'target', label: 'Target', render: function (s) { return el('span.mono', { text: s.target }); } },
-      { key: 'protocol', label: 'Protocol' },
+      {
+        key: 'user', label: 'User',
+        render: function (s) { return el('div.col', [el('span', { text: s.user }), el('span.muted', { text: 'approved by ' + s.approver })]); }
+      },
+      {
+        key: 'target', label: 'Target',
+        render: function (s) { return el('div.col', [el('span.mono', { text: s.target }), el('span.muted', { text: s.protocol + ', ' + fmt.num(s.sizeMB) + ' MB' })]); }
+      },
       { key: 'started', label: 'Started', sort: function (s) { return s.started.getTime(); }, render: function (s) { return fmt.time(s.started); } },
       { key: 'duration', label: 'Duration', align: 'right', render: function (s) { return fmt.dur(s.duration); } },
       { key: 'reason', label: 'Reason' },
-      { key: 'approver', label: 'Approver' },
-      { key: 'sizeMB', label: 'Size', align: 'right', render: function (s) { return fmt.num(s.sizeMB) + ' MB'; } },
       {
         key: 'state', label: 'State', status: true,
         render: function (s) { return ui.pill(s.state, SESSION_TONE[s.state] || 'idle'); }
@@ -1126,13 +1122,12 @@
       ui.revealRow(sessionTable, preselected.id, { label: 'Recording ' + preselected.id + ' is highlighted and open below' });
     }
 
-    return el('div.stack', [
-      el('div.callout.info', {
-        text: 'Every interactive session through the gateway is recorded to argus-sessions, which is '
-          + 'write-once for 400 days. Nobody, including an administrator, can delete a recording from the console.'
+    return el('div.grid', [
+      ui.card('Recorded sessions', [sessionTable], {
+        counter: d.sessions.length,
+        description: 'Recorded to argus-sessions, write-once for 400 days. No one can delete a recording here.',
+        actions: [ui.exportButton(sessionTable, 'sessions')]
       }),
-      el('div.row', [el('span.spacer'), ui.exportButton(sessionTable, 'sessions')]),
-      sessionTable,
       detail
     ]);
   }
@@ -1174,28 +1169,21 @@
 
   function evidenceTab() {
     var items = evidenceItems();
-    var list = el('ul', items.map(function (it) {
-      return el('li', [
-        ui.pill('included', 'ok'),
-        ' ',
-        el('strong', { text: it.label }),
-        ', ',
-        el('span', { text: it.value })
-      ]);
-    }));
+    var list = ui.dl(items.map(function (it) { return [it.label, it.value]; }));
 
     return el('div.stack', [
       ui.card('Monthly evidence pack', [
-        el('p', {
-          text: 'One PDF and one signed JSON bundle, generated on the first of each month and written to '
-            + 'argus-artifacts under a 365 day compliance lock. It is what an auditor is handed, and it is '
-            + 'assembled from the same data this console renders rather than from a screenshot of it.'
-        }),
         list,
+        ui.disclosure('Details', [el('p', {
+          text: 'One PDF and one signed JSON bundle, generated on the first of each month and written to '
+            + 'argus-artifacts under a 365 day compliance lock, assembled from the same data this console renders.'
+        })]),
         el('p.hint', {
           text: 'Values shown are from the bundled sample dataset, as of ' + fmt.stamp(A.data.now) + '. A real pack freezes them at generation time.'
         })
       ], {
+        counter: items.length,
+        description: 'Every item below is included in the pack.',
         actions: [
           ui.btn('Generate pack', {
             variant: 'primary',
@@ -1232,9 +1220,8 @@
         return;
       }
       body.appendChild(el('p.hint', {
-        text: fmt.num(open.total) + ' firing alert' + (open.total === 1 ? '' : 's') + ' in ' + fmt.num(open.groups.length) +
-          ' group' + (open.groups.length === 1 ? '' : 's') + ' by alert name, worst severity first' +
-          (open.pagingCount ? ', ' + fmt.num(open.pagingCount) + ' of them paging' : '') + '. The console is read-only here: silence or acknowledge in Alertmanager.'
+        text: fmt.num(open.total) + ' firing in ' + fmt.num(open.groups.length) + ' group' + (open.groups.length === 1 ? '' : 's') +
+          (open.pagingCount ? ', ' + fmt.num(open.pagingCount) + ' paging' : '') + '. Silence or acknowledge in Alertmanager.'
       }));
       var cols = [
         {
@@ -1244,7 +1231,7 @@
         },
         { key: 'name', label: 'Alert', render: function (g) { return el('strong', { text: g.name }); } },
         { key: 'count', label: 'Firing', align: 'right', render: function (g) { return fmt.num(g.count); } },
-        { key: 'startsAt', label: 'Since', render: function (g) { return el('span.num', { text: sinceText(g.startsAt) }); } },
+        { key: 'startsAt', label: 'Since', render: function (g) { return el('span.num', { text: sinceText(g.startsAt), style: { 'white-space': 'nowrap' } }); } },
         { key: 'summary', label: 'Summary', sortable: false, render: function (g) { return g.summary ? g.summary : el('span.muted', { text: 'no summary annotation' }); } },
         {
           key: 'links', label: 'Where to look', sortable: false,
@@ -1280,12 +1267,12 @@
   function renderLive(mount, ctx) {
     var rest = (ctx && ctx.rest) || [];
     var params = (ctx && ctx.params) || {};
-    mount.appendChild(ui.pageHeader('Security',
-      'What Alertmanager reports as firing, read through the console API. Nothing here can be changed from the console.'));
+    mount.appendChild(ui.pageHeader('Security', 'Firing alerts from Alertmanager. Read-only.'));
     mount.appendChild(liveAlertsPanel(params.alert || params.id || null));
     var strip = ui.notInStackStrip(LIVE_ABSENT);
     strip.id = 'security-absent';
-    mount.appendChild(ui.card('Other security sources', strip));
+    strip.style.setProperty('margin-top', 'var(--s-l)');
+    mount.appendChild(strip);
     if (rest[0] && rest[0] !== 'alerts') {
       window.setTimeout(function () {
         if (strip.isConnected && strip.scrollIntoView) strip.scrollIntoView({ block: 'center' });
@@ -1303,8 +1290,7 @@
         { id: 'evidence', label: 'Evidence', render: evidenceTab }
       ];
 
-      mount.appendChild(ui.pageHeader('Security',
-        'Baseline drift, alerts, vulnerabilities and every recorded session, with the evidence pack that ties them together.'));
+      mount.appendChild(ui.pageHeader('Security', 'Baseline drift, alerts, incidents, vulnerabilities and recorded sessions.'));
       mount.appendChild(ui.tabs(items, {
         label: 'Security sections',
         initial: (ctx && ctx.rest && ctx.rest[0]) || null,
@@ -1316,9 +1302,12 @@
       }));
   }
 
+  var TAB_LABEL = { posture: 'Posture', alerts: 'Alerts', incidents: 'Incidents', vulns: 'Vulnerabilities', sessions: 'Sessions', evidence: 'Evidence' };
+
   A.screen('security', {
     title: 'Security',
     crumb: 'Security',
+    crumbs: function (rest) { return rest.slice(0, 1).map(function (r) { return TAB_LABEL[r] || r; }); },
     liveCrumbs: function (rest) { return rest.slice(0, 1); },
     render: function (mount, ctx) {
       var mode = A.storeMode();

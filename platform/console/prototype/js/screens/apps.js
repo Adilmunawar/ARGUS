@@ -4,10 +4,30 @@
   var A = window.ARGUS, ui = A.ui, el = ui.el, d = A.data, fmt = ui.fmt;
 
   function healthPill(health) {
-    return ui.pill(health === 'ok' ? 'Healthy' : 'Degraded', health === 'ok' ? 'ok' : 'warn');
+    return ui.status(health === 'ok' ? 'ok' : 'warn', health === 'ok' ? 'Healthy' : 'Degraded');
+  }
+
+
+  function setCounter(node, n, rowSel, cls) {
+    var row = node.querySelector(rowSel || '.card-titlerow');
+    if (!row) return;
+    var c = row.querySelector('.' + (cls || 'card-counter'));
+    if (!c) { c = el('span.' + (cls || 'card-counter')); row.insertBefore(c, row.children[1] || null); }
+    c.textContent = '(' + fmt.num(n) + ')';
   }
 
   function mono(text) { return el('code.mono', { text: String(text) }); }
+
+  function ver(text) { return el('code.mono', { text: String(text), style: { 'white-space': 'nowrap', 'overflow-wrap': 'normal' } }); }
+
+  function tagBadges(app) {
+    var t = app.tags || {};
+    var keys = Object.keys(t).sort();
+    if (!keys.length) return el('span.muted', { text: '-' });
+    var shown = keys.slice(0, 2).map(function (k) { return ui.badge(k + ': ' + t[k]); });
+    if (keys.length > 2) shown.push(ui.badge('+' + (keys.length - 2), null, { title: keys.slice(2).map(function (k) { return k + ': ' + t[k]; }).join(', ') }));
+    return el('div.chips', shown);
+  }
 
   function named(label, suffix) {
     return [label, el('span.sr', { text: ' ' + suffix })];
@@ -39,17 +59,11 @@
       {
         key: 'name', label: 'Name',
         sort: function (r) { return r.display; },
-        render: function (r) {
-          return el('div.col', [
-            A.link(r.display, 'apps', [r.name]),
-            el('div.muted', { text: r.name })
-          ]);
-        }
+        render: function (r) { return A.link(r.display, 'apps', [r.name]); }
       },
-      { key: 'owner', label: 'Owner' },
-      { key: 'tags', label: 'Tags', sortable: false, csv: tagText, render: function (r) { return A.tagChips(r); } },
-      { key: 'version', label: 'Version', render: function (r) { return mono(r.version); } },
       { key: 'health', label: 'Health', status: true, render: function (r) { return healthPill(r.health); } },
+      { key: 'owner', label: 'Owner' },
+      { key: 'version', label: 'Version', render: function (r) { return ver(r.version); } },
       { key: 'instances', label: 'Instances', align: 'right', render: function (r) { return fmt.num(r.instances); } },
       { key: 'p95', label: 'p95', align: 'right', render: function (r) { return fmt.ms(r.p95); } },
       { key: 'errorRate', label: 'Error rate', align: 'right', render: function (r) { return fmt.ratioPct(r.errorRate, 2); } },
@@ -58,6 +72,7 @@
         sort: function (r) { return r.deployedAt.getTime(); },
         render: function (r) { return fmt.time(r.deployedAt); }
       },
+      { key: 'tags', label: 'Tags', sortable: false, csv: tagText, render: tagBadges },
       {
         key: 'actions', label: 'Actions', align: 'right', sortable: false,
         render: function (r) {
@@ -109,13 +124,10 @@
   }
 
   function renderList(mount) {
-    mount.appendChild(ui.pageHeader(
-      'Applications',
-      'Every service on the platform, what it depends on, and how it is behaving.'));
+    mount.appendChild(ui.pageHeader('Applications', null, null, { counter: d.apps.length }));
 
     var tokens = ui.decodeTokens(A.state.params && A.state.params.f);
     var filterHost = el('div');
-    var tableHost = el('div');
 
     var appTable = null;
 
@@ -124,44 +136,25 @@
     }
 
     function paint() {
-      if (!d.apps.length) {
-        appTable = null;
-        ui.clear(tableHost);
-        tableHost.appendChild(ui.emptyState(
-          'No applications',
-          'Nothing is registered in this environment. An application appears here after the reconciler applies its first declaration.'));
-        return;
-      }
       var rows = ui.applyTokens(d.apps, tokens, FILTER_ACCESSORS);
-      if (!rows.length) {
-        appTable = null;
-        ui.clear(tableHost);
-        tableHost.appendChild(ui.emptyState(
-          'No application matches these filters',
-          'Try removing a filter.',
-          ui.btn('Clear filters', { variant: 'primary', onClick: clearFilters })));
-        return;
-      }
-      if (appTable && appTable.isConnected) { appTable.setRows(rows); return; }
-      ui.clear(tableHost);
+      if (appTable) { appTable.setRows(rows); return; }
       appTable = ui.table(listColumns(), rows, {
-        id: 'apps.list',
+        id: 'apps.list', defaultHidden: ['deployedAt', 'tags'],
         caption: 'Applications, showing ' + rows.length + ' of ' + d.apps.length,
         sortKey: 'name',
         rowKey: function (r) { return r.name; },
-        onRow: function (r) { A.go('apps', [r.name]); }
+        onRow: function (r) { A.go('apps', [r.name]); },
+        emptyTitle: d.apps.length ? 'No matches' : 'No applications',
+        empty: d.apps.length ? 'No application matches these filters.' : 'An application appears after its first declaration is applied.',
+        emptyAction: d.apps.length ? ui.btn('Clear filter', { onClick: clearFilters }) : null
       });
-      tableHost.appendChild(appTable);
     }
 
     function mountFilter() {
       ui.clear(filterHost);
-      var pf = ui.propertyFilter(FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens });
+      var pf = ui.propertyFilter(FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens, placeholder: 'Find applications' });
       tokens = pf.tokens();
-      filterHost.appendChild(el('div.row', [pf, el('span.spacer'),
-        ui.viewsBar('apps', function () { return window.location.hash; }),
-        ui.columnsButton(function () { return appTable; }, 'applications'),
-        ui.exportButton(function () { return appTable; }, 'applications')]));
+      filterHost.appendChild(pf);
     }
 
     function clearFilters() {
@@ -175,37 +168,38 @@
     }
 
     mountFilter();
-    mount.appendChild(driftCard());
-    mount.appendChild(filterHost);
-    mount.appendChild(tableHost);
     paint();
+    mount.appendChild(el('div.grid', [driftCard(), ui.card('Applications', [filterHost, appTable], {
+      counter: d.apps.length,
+      actions: [
+        ui.viewsBar('apps', function () { return window.location.hash; }),
+        ui.columnsButton(function () { return appTable; }, 'applications'),
+        ui.exportButton(function () { return appTable; }, 'applications')
+      ]
+    })]));
   }
 
   function driftCard() {
     var ahead = d.apps.filter(function (a) { return a.staging && a.staging !== a.version; });
-    if (!ahead.length) {
-      return el('div.callout.ok', [
-        el('strong', { text: 'Staging and production agree.' }),
-        el('p', { text: 'Every application runs the same version in both environments, so nothing is waiting to be promoted.' })
-      ]);
-    }
-    return ui.card('Environment drift', [
-      el('p.hint', { text: fmt.num(ahead.length) + ' application' + (ahead.length === 1 ? ' has' : 's have') + ' a staging build that production has not received. Promoting opens the pull request for it.' }),
-      el('div.stack', ahead.map(function (a) {
-        return el('div.row', [
-          A.link(a.display, 'apps', [a.name]),
-          el('span.muted', { text: 'production' }), mono(a.version),
-          el('span', { 'aria-hidden': 'true', text: '→' }),
-          el('span.sr', { text: ', staging ' }),
-          el('span.muted', { text: 'staging' }), mono(a.staging),
-          el('span.spacer'),
-          ui.btn('Promote ' + a.name, {
-            variant: 'ghost', title: 'Open a pull request that puts ' + a.staging + ' into production',
+    if (!ahead.length) return null;
+    var card = ui.card('Environment drift', ui.table([
+      { key: 'display', label: 'Name', sortable: false, render: function (a) { return A.link(a.display, 'apps', [a.name]); } },
+      { key: 'version', label: 'Production', sortable: false, render: function (a) { return mono(a.version); } },
+      { key: 'staging', label: 'Staging', sortable: false, render: function (a) { return mono(a.staging); } },
+      {
+        key: 'promote', label: 'Action', sortable: false,
+        render: function (a) {
+          return ui.btn('Promote ' + a.name, {
+            title: 'Open a pull request that puts ' + a.staging + ' into production',
             onClick: function () { openDeployDialog(a, { env: 'production', version: a.staging }); }
-          })
-        ]);
-      }))
-    ]);
+          });
+        }
+      }
+    ], ahead, { caption: 'Applications whose staging build production has not received' }), {
+      counter: ahead.length,
+      description: 'Staging builds that production has not received.'
+    });
+    return card;
   }
 
   function sloTarget(app) {
@@ -249,9 +243,8 @@
         ui.statTile('Burn rate', fmt.num(b.burn, 2) + 'x', { note: hoursLeft !== null ? 'budget lasts ' + fmt.dur(hoursLeft * 3600) + ' at this rate' : b.exhausted ? 'already over' : 'nothing is burning' })
       ]),
       ui.card('Budget consumed', [
-        ui.bar(Math.min(1, b.ratioUsed), { tone: tone, label: fmt.ratioPct(Math.min(1, b.ratioUsed), 0) + ' of the error budget consumed' + (tone ? ', ' : '') }),
-        el('p.hint', { text: 'Burn rate compares the last six hours of error rate with the whole day. Above 1x the budget is going faster than the window allows for.' })
-      ]),
+        ui.bar(Math.min(1, b.ratioUsed), { tone: tone, label: fmt.ratioPct(Math.min(1, b.ratioUsed), 0) + ' of the error budget consumed' + (tone ? ', ' : '') })
+      ], { description: 'Burn rate: the last six hours against the whole day.' }),
       ui.card('Error rate, last 24 hours', [
         el('div.row', [
           ui.sparkline(app.trend.err, { width: 320, height: 40, label: 'Error rate of ' + app.display + ' over 24 hourly samples' }),
@@ -431,34 +424,36 @@
     }
     paint();
 
-    return ui.card('Metrics', [
-      el('div.row', [el('span.muted', { text: 'Range' }), bar]),
-      grid,
-      el('p.hint', { text: 'Three charts on the same clock. The range buttons change every chart at once, which is what you need when a spike in one has to be read against the other two.' })
-    ]);
+    return ui.card('Metrics', grid, { actions: [bar] });
   }
 
   function overviewTab(app) {
-    var tagsRow = el('div.row', [A.tagChips(app), el('span.spacer'), ui.btn('Edit tags', {
-      variant: 'ghost', title: 'Add or remove tags on ' + app.display,
-      onClick: function () { A.tagEditor(app, app.display, function () { A.refresh(); }); }
-    })]);
-    return el('div.stack', [
-      metricsCard(app),
-      ui.card('Declaration', ui.dl([
+    return el('div.grid', [
+      ui.card('Details', ui.dl([
+        ['Health', healthPill(app.health)],
         ['Version', mono(app.version)],
         ['Staging version', mono(app.staging)],
         ['Owner', app.owner],
         ['Tier', 'Tier ' + app.tier],
-        ['Identity', mono(app.identity)],
-        ['Host', mono(app.host)],
+        ['Instances', fmt.num(app.instances) + ' in ' + fmt.num(app.services.length) + ' services'],
+        ['Requests', fmt.num(app.rps) + ' /s'],
+        ['p95', fmt.ms(app.p95)],
+        ['Error rate', fmt.ratioPct(app.errorRate, 2)],
+        ['SLO this month', fmt.pct(app.slo, 2) + ' of ' + fmt.pct(sloTarget(app), 2) + (errorBudget(app).exhausted ? ', budget spent' : '')],
+        ['Uptime', fmt.num(app.uptimeDays) + ' days'],
         ['Last deployed', fmt.time(app.deployedAt)],
-        ['Tags', tagsRow]
+        ['Name', mono(app.name)],
+        ['Identity', mono(app.identity)],
+        ['Host', mono(app.host)]
       ])),
-      ui.card('Dependencies', [
-        el('p.hint', { text: 'This graph is generated from the same declaration file the reconciler applies, so it cannot drift from what is actually running.' }),
-        dependencyGraph(app)
-      ])
+      ui.card('Tags', A.tagChips(app), {
+        actions: [ui.btn('Edit tags', {
+          title: 'Add or remove tags on ' + app.display,
+          onClick: function () { A.tagEditor(app, app.display, function () { A.refresh(); }); }
+        })]
+      }),
+      metricsCard(app),
+      ui.card('Dependencies', dependencyGraph(app), { description: 'Generated from the declaration the reconciler applies.' })
     ]);
   }
 
@@ -527,7 +522,7 @@
       caption: 'Running instances of ' + app.display + ', by service and node',
       sortKey: 'service',
       rowKey: function (r) { return r.service + '-' + r.index; }
-    }), { flush: true });
+    }), { counter: rows.length });
   }
 
   function logEntries(app) {
@@ -672,9 +667,8 @@
         toggle,
         announceBtn
       ]),
-      view,
-      el('p.hint', { text: 'The last 14 lines from every instance, newest at the bottom. The region is not announced automatically; use Announce latest line.' })
-    ]);
+      view
+    ], { description: 'The last 14 lines from every instance, newest at the bottom.' });
   }
 
   function traceSpans(app) {
@@ -720,15 +714,12 @@
       }
     ];
 
-    return el('div.stack', [
-      ui.card('Median request, ' + fmt.ms(total) + ' at p95', [
-        el('p.hint', { text: 'One representative trace, laid out left to right against the p95 for ' + app.display + '.' }),
-        waterfall
-      ]),
+    return el('div.grid', [
+      ui.card('Median request', waterfall, { description: fmt.ms(total) + ' at p95, one representative trace.' }),
       ui.card('Spans', ui.table(cols, spans, {
         caption: 'Spans in a median ' + app.display + ' request, with start offset, duration and share of the total',
         sortKey: 'start'
-      }), { flush: true })
+      }), { counter: spans.length })
     ]);
   }
 
@@ -772,7 +763,7 @@
         sort: function (r) { return r.secret || r.value; },
         render: function (r) {
           if (r.secret) {
-            return el('div.row', [mono(r.secret), ui.pill('value hidden', 'idle')]);
+            return el('div.row', [mono(r.secret), ui.badge('Value hidden')]);
           }
           return mono(r.value);
         }
@@ -790,19 +781,16 @@
       }
     ];
 
-    return el('div.stack', [
-      el('div.callout.info', { text: 'Secret values are never fetched by the console. The application resolves them from OpenBao at start-up with its own identity, and this screen shows only the path and who has read it.' }),
-      ui.card('Environment', ui.table(cols, rows, {
-        caption: 'Environment variables and secret references for ' + app.display,
-        sortKey: 'key'
-      }), { flush: true })
-    ]);
+    return ui.card('Environment', ui.table(cols, rows, {
+      caption: 'Environment variables and secret references for ' + app.display,
+      sortKey: 'key'
+    }), { counter: rows.length, description: 'Secret values are never fetched; only the OpenBao path is shown.' });
   }
 
   var DEPLOY_STATE = {
     done: ['Completed', 'ok'],
     rolledback: ['Rolled back', 'bad'],
-    inflight: ['In flight', 'warn'],
+    inflight: ['In flight', 'pending'],
     awaiting: ['Awaiting approval', 'info'],
     rejected: ['Rejected', 'warn']
   };
@@ -825,10 +813,6 @@
 
   function deployTab(app, ctx) {
     var rows = d.deployments.filter(function (x) { return x.app === app.name; });
-    if (!rows.length) {
-      return ui.emptyState('No deployments recorded',
-        app.display + ' has not been deployed through the console in the retained window.');
-    }
     var cols = [
       { key: 'version', label: 'Version', render: function (r) { return mono(r.version); } },
       { key: 'env', label: 'Environment' },
@@ -848,7 +832,7 @@
         render: function (r) {
           var meta = DEPLOY_STATE[r.state] || ['Unknown', 'idle'];
           return el('div.col', [
-            ui.pill(meta[0], meta[1]),
+            ui.status(meta[1], meta[0]),
             r.outcome && r.outcome !== 'healthy' ? el('div.muted', { text: r.outcome }) : null
           ]);
         }
@@ -865,10 +849,12 @@
         }
       }
     ];
-    return ui.card('Deploy history', ui.table(cols, rows, {
+    return ui.card('Deployments', ui.table(cols, rows, {
       caption: 'Deployments of ' + app.display + ', newest first',
-      sortKey: 'version', sortDir: 'desc'
-    }), { flush: true });
+      sortKey: 'version', sortDir: 'desc',
+      emptyTitle: 'No deployments',
+      empty: 'Nothing deployed through the console in the retained window.'
+    }), { counter: rows.length });
   }
 
   function renderDetail(mount, ctx) {
@@ -878,39 +864,26 @@
       return;
     }
 
-    mount.appendChild(ui.pageHeader(
-      app.display,
-      app.name + ' · ' + app.identity + ' · ' + app.host,
-      [
-        ui.btn(named('Deploy', app.display), {
-          variant: 'primary',
-          title: 'Open a pull request that deploys ' + app.display,
-          onClick: function () { openDeployDialog(app); }
-        }),
-        ui.btn(named('Restart', app.display), {
-          variant: 'ghost',
-          title: 'Restart every instance of ' + app.display,
-          onClick: function () { confirmRestart(app, ctx); }
-        })
-      ]));
-
-    mount.appendChild(el('div.tiles', [
-      ui.statTile('Instances', fmt.num(app.instances), { note: fmt.num(app.services.length) + ' services' }),
-      ui.statTile('p95', fmt.ms(app.p95), { note: 'over the last hour' }),
-      ui.statTile('Requests', fmt.num(app.rps), { unit: '/s' }),
-      ui.statTile('Error rate', fmt.ratioPct(app.errorRate, 2), { note: 'budget 0.10%' }),
-      ui.statTile('SLO this month', fmt.pct(app.slo, 2), { note: 'objective ' + fmt.pct(sloTarget(app), 2) + (errorBudget(app).exhausted ? ', budget spent' : '') }),
-      ui.statTile('Uptime', fmt.num(app.uptimeDays), { unit: 'days' })
-    ]));
+    mount.appendChild(ui.pageHeader(app.display, null, [
+      ui.btn(named('Restart', app.display), {
+        title: 'Restart every instance of ' + app.display,
+        onClick: function () { confirmRestart(app, ctx); }
+      }),
+      ui.btn(named('Deploy', app.display), {
+        variant: 'primary',
+        title: 'Open a pull request that deploys ' + app.display,
+        onClick: function () { openDeployDialog(app); }
+      })
+    ], { status: healthPill(app.health) }));
 
     mount.appendChild(ui.tabs([
-      { id: 'overview', label: 'Overview', render: function () { return overviewTab(app); } },
+      { id: 'overview', label: 'Details', render: function () { return overviewTab(app); } },
       { id: 'instances', label: 'Instances', render: function () { return instancesTab(app); } },
       { id: 'logs', label: 'Logs', render: function () { return logsTab(app); } },
       { id: 'traces', label: 'Traces', render: function () { return tracesTab(app); } },
-      { id: 'config', label: 'Config', render: function () { return configTab(app); } },
+      { id: 'config', label: 'Configuration', render: function () { return configTab(app); } },
       { id: 'budget', label: 'Error budget', render: function () { return budgetTab(app); } },
-      { id: 'deploys', label: 'Deploy history', render: function () { return deployTab(app, ctx); } }
+      { id: 'deploys', label: 'Deployments', render: function () { return deployTab(app, ctx); } }
     ], {
       label: 'Sections of ' + app.display,
       initial: (ctx && ctx.params && ctx.params.tab) || (ctx && ctx.rest && ctx.rest[1]) || null,
@@ -966,12 +939,7 @@
       {
         key: 'name', label: 'Name',
         sort: function (r) { return r.name; },
-        render: function (r) {
-          return el('div.col', [
-            A.link(r.name, 'apps', [r.name]),
-            el('div.muted', { text: (r.kind || 'app') + ' in ' + r.directory })
-          ]);
-        }
+        render: function (r) { return A.link(r.name, 'apps', [r.name]); }
       },
       { key: 'owner', label: 'Owner', render: function (r) { return r.owner || dash(); } },
       { key: 'tier', label: 'Tier', align: 'right', render: function (r) { return r.tier === null ? dash() : 'Tier ' + r.tier; } },
@@ -981,7 +949,7 @@
         csv: function (r) { var v = productionVersion(byApp, r.name); return v && v.version ? v.version : ''; },
         render: function (r) {
           var v = productionVersion(byApp, r.name);
-          return v && v.version ? mono(v.version) : dash();
+          return v && v.version ? ver(v.version) : dash();
         }
       },
       { key: 'instances', label: 'Declared instances', align: 'right', render: function (r) { return fmt.num(r.instances); } },
@@ -999,78 +967,63 @@
 
   function problemsList(problems) {
     if (!problems || !problems.length) return null;
-    return el('div.stack', [
-      el('h3', { text: 'Directories without a usable spec' }),
-      el('ul', problems.map(function (p) {
+    return el('div.callout.warn', [
+      el('strong', { text: fmt.num(problems.length) + ' director' + (problems.length === 1 ? 'y has' : 'ies have') + ' no usable spec.' }),
+      el('ul.nis-list', problems.map(function (p) {
         return el('li', [mono(p.directory), ' ', String(p.message || '')]);
       }))
     ]);
   }
 
   function renderLiveList(mount) {
-    mount.appendChild(ui.pageHeader(
-      'Applications',
-      'Every application declared in the GitOps repository, read from its spec. Nothing here is measured from a running cluster.'));
+    var head = ui.pageHeader('Applications');
+    mount.appendChild(head);
 
     var tokens = ui.decodeTokens(A.state.params && A.state.params.f);
+    var appTable = null;
 
     function syncUrl() {
       A.replaceHash(A.href('apps', [], { f: ui.encodeTokens(tokens) }));
     }
 
-    mount.appendChild(A.livePanel('Declared applications', APPS_PATH, function (body, data, env) {
+    var card = A.livePanel('Declared applications', APPS_PATH, function (body, data) {
       var apps = data.apps || [];
+      setCounter(head, apps.length, '.pagehead-title', 'pagehead-counter');
+      setCounter(card, apps.length);
       var filterHost = el('div');
       var tableHost = el('div');
-      var appTable = null;
       body.appendChild(filterHost);
       body.appendChild(tableHost);
-      body.appendChild(el('div.stack', [
-        problemsList(data.problems),
-        readAt(env, data.source)
-      ]));
+      function place(node) {
+        if (tableHost.parentNode) tableHost.parentNode.replaceChild(node, tableHost);
+        tableHost = node;
+      }
+      var problems = problemsList(data.problems);
+      if (problems) body.appendChild(problems);
       var byApp = Object.create(null);
-      var envNote = el('p.hint', { text: 'Reading the declared versions from ' + ENVS_PATH + '.' });
+      var envNote = el('p.hint', { text: 'Reading the declared versions.' });
       body.appendChild(envNote);
 
       function paint() {
-        if (!apps.length) {
-          appTable = null;
-          ui.clear(tableHost);
-          tableHost.appendChild(ui.emptyState(
-            'No applications declared',
-            'The GitOps apps directory holds no app.yaml.'));
-          return;
-        }
         var rows = ui.applyTokens(apps, tokens, LIVE_FILTER_ACCESSORS);
-        if (!rows.length) {
-          appTable = null;
-          ui.clear(tableHost);
-          tableHost.appendChild(ui.emptyState(
-            'No application matches these filters',
-            'Try removing a filter.',
-            ui.btn('Clear filters', { variant: 'primary', onClick: clearFilters })));
-          return;
-        }
-        ui.clear(tableHost);
         appTable = ui.table(liveListColumns(byApp), rows, {
-          id: 'apps.live',
+          id: 'apps.live', defaultHidden: ['tier', 'alerts'],
           caption: 'Declared applications, showing ' + rows.length + ' of ' + apps.length,
           sortKey: 'name',
           rowKey: function (r) { return r.name; },
-          onRow: function (r) { A.go('apps', [r.name]); }
+          onRow: function (r) { A.go('apps', [r.name]); },
+          emptyTitle: apps.length ? 'No matches' : 'No applications declared',
+          empty: apps.length ? 'No application matches these filters.' : 'The GitOps apps directory holds no app.yaml.',
+          emptyAction: apps.length ? ui.btn('Clear filter', { onClick: clearFilters }) : null
         });
-        tableHost.appendChild(appTable);
+        place(appTable);
       }
 
       function mountFilter() {
         ui.clear(filterHost);
-        var pf = ui.propertyFilter(LIVE_FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens });
+        var pf = ui.propertyFilter(LIVE_FILTER_FIELDS, function (t) { tokens = t; paint(); syncUrl(); }, { initial: tokens, placeholder: 'Find applications' });
         tokens = pf.tokens();
-        filterHost.appendChild(el('div.row', [pf, el('span.spacer'),
-          ui.viewsBar('apps', function () { return window.location.hash; }),
-          ui.columnsButton(function () { return appTable; }, 'applications'),
-          ui.exportButton(function () { return appTable; }, 'applications')]));
+        filterHost.appendChild(pf);
       }
 
       function clearFilters() {
@@ -1090,17 +1043,25 @@
       A.onLeave(function () { alive = false; });
       A.read(ENVS_PATH).then(function (envEnv) {
         if (!alive) return;
-        ui.clear(envNote);
         if (!envEnv.ok) {
           envNote.textContent = 'Declared versions could not be read: ' + ((envEnv.error && envEnv.error.message) || 'the environments answer failed.');
           return;
         }
         byApp = versionsByApp(envEnv.data.environments);
-        envNote.textContent = 'Versions are the declarations in ' + (envEnv.data.source || 'the environments directory') +
-          ', read at ' + fmt.stamp(new Date(envEnv.at)) + '. ' + (envEnv.data.note || '');
+        envNote.textContent = envEnv.data.note || '';
         paint();
       });
-    }, { skeletonRows: 5 }));
+    }, {
+      skeletonRows: 5,
+      card: {
+        actions: [
+          ui.viewsBar('apps', function () { return window.location.hash; }),
+          ui.columnsButton(function () { return appTable; }, 'applications'),
+          ui.exportButton(function () { return appTable; }, 'applications')
+        ]
+      }
+    });
+    mount.appendChild(card);
   }
 
   function findApp(data, name) {
@@ -1209,12 +1170,11 @@
     return A.livePanel('Secret references', APPS_PATH, function (body, data, env) {
       var app = findApp(data, name);
       if (!app) { body.appendChild(notDeclared(name)); return; }
-      body.appendChild(el('div.callout.info', { text: 'Only the OpenBao paths the spec references are shown. The console never reads a secret value.' }));
       if (!app.secretRefs.length) {
         body.appendChild(ui.emptyState('No secret references', 'The spec references nothing in OpenBao.'));
       } else {
         body.appendChild(el('ul', app.secretRefs.map(function (p) {
-          return el('li', [mono(p), ' ', ui.pill('value never fetched', 'idle')]);
+          return el('li', [mono(p), ' ', ui.badge('Value never fetched')]);
         })));
       }
       body.appendChild(readAt(env, app.file));
@@ -1224,7 +1184,7 @@
   function severityPill(sev) {
     if (!sev) return dash();
     var tone = sev === 'page' || sev === 'critical' ? 'bad' : sev === 'warning' || sev === 'ticket' ? 'warn' : 'info';
-    return ui.pill(sev, tone);
+    return ui.status(tone, sev);
   }
 
   function alertsPanel(name) {
@@ -1251,7 +1211,6 @@
         sortKey: 'name',
         rowKey: function (r) { return String(r.name || r.error); }
       }));
-      body.appendChild(el('p.hint', { text: 'Declared in ' + app.alertsFile + '. Whether Prometheus has loaded them is a question for the security screen.' }));
       body.appendChild(readAt(env, app.file));
     });
   }
@@ -1260,7 +1219,7 @@
     var cols = [
       { key: 'env', label: 'Environment' },
       { key: 'version', label: 'Declared version', render: function (r) { return r.version ? mono(r.version) : dash(); } },
-      { key: 'pinned', label: 'Digest', status: true, render: function (r) { return r.pinned ? ui.pill('pinned', 'ok') : ui.pill('not pinned', 'idle', { title: r.sha256 || '' }); } }
+      { key: 'pinned', label: 'Digest', status: true, render: function (r) { return r.pinned ? ui.status('ok', 'Pinned') : ui.status('idle', 'Not pinned', { title: r.sha256 || '' }); } }
     ];
     return A.livePanel('Declared versions', ENVS_PATH, function (body, data, env) {
       var rows = versionsByApp(data.environments)[name] || [];
@@ -1278,6 +1237,39 @@
     });
   }
 
+  function cap(t) { t = String(t); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+  function exitOf(c) {
+    if (c && typeof c.exitCode === 'number') return c.exitCode;
+    var m = /Exited \((-?\d+)\)/i.exec((c && c.status) || '');
+    return m ? Number(m[1]) : null;
+  }
+
+  function containerStatus(state, code) {
+    var s = String(state || 'unknown');
+    if (s === 'running') return ui.status('ok', 'Running');
+    if (s === 'exited' || s === 'dead') {
+      if (code === 0) return ui.status('idle', 'Completed', { title: 'Exited with code 0: a one-shot container that finished its job.' });
+      return ui.status('bad', 'Exited' + (code === null || code === undefined ? '' : ' (' + code + ')'));
+    }
+    if (s === 'restarting') return ui.status('warn', 'Restarting');
+    if (s === 'paused') return ui.status('warn', 'Paused');
+    if (s === 'created') return ui.status('pending', 'Created');
+    return ui.status('idle', s.charAt(0).toUpperCase() + s.slice(1));
+  }
+
+  function shortImage(img) {
+    var t = String(img || '');
+    var m = /^(.*?)(@?)sha256:([0-9a-f]{12})[0-9a-f]{52}$/i.exec(t);
+    if (m) return (m[1] ? m[1] + (m[2] || '@') : '') + 'sha256:' + m[3];
+    return t;
+  }
+
+  function imageNode(img) {
+    if (!img) return el('span.muted', { text: '-' });
+    return el('span.mono', { text: shortImage(img), title: img, style: { display: 'inline-block', 'max-width': '42ch', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis', 'vertical-align': 'top', 'overflow-wrap': 'normal' } });
+  }
+
   function containerMatches(c, name) {
     return (c.names || []).some(function (n) { return String(n).indexOf(name) !== -1; });
   }
@@ -1285,9 +1277,9 @@
   function runningPanel(name) {
     var cols = [
       { key: 'name', label: 'Container', sort: function (r) { return (r.names || []).join(' '); }, csv: function (r) { return (r.names || []).join(' '); }, render: function (r) { return mono((r.names || []).join(', ')); } },
-      { key: 'image', label: 'Image', render: function (r) { return r.image ? mono(r.image) : dash(); } },
-      { key: 'state', label: 'State', status: true, render: function (r) { return ui.pill(r.state || 'unknown', r.state === 'running' ? 'ok' : 'warn'); } },
-      { key: 'health', label: 'Health', status: true, render: function (r) { return r.health ? ui.pill(r.health, r.health === 'healthy' ? 'ok' : r.health === 'starting' ? 'info' : 'bad') : el('span.muted', { text: 'no healthcheck' }); } },
+      { key: 'image', label: 'Image', csv: function (r) { return r.image || ''; }, render: function (r) { return r.image ? imageNode(r.image) : dash(); } },
+      { key: 'state', label: 'State', status: true, render: function (r) { return containerStatus(r.state, exitOf(r)); } },
+      { key: 'health', label: 'Health', status: true, render: function (r) { return r.health ? ui.status(r.health === 'healthy' ? 'ok' : r.health === 'starting' ? 'pending' : 'bad', cap(r.health)) : el('span.muted', { text: 'No health check' }); } },
       { key: 'status', label: 'Status' }
     ];
     return A.livePanel('Running here', CONTAINERS_PATH, function (body, data, env) {
@@ -1317,9 +1309,9 @@
 
   function renderLiveDetail(mount, ctx) {
     var name = ctx.rest[0];
-    var head = ui.pageHeader(name, 'Declared in the GitOps repository. What is below is the spec as written, not what is running.');
+    var head = ui.pageHeader(name, 'The declaration as written in the GitOps repository.');
     mount.appendChild(head);
-    var holder = el('div.stack');
+    var holder = el('div.grid');
     mount.appendChild(holder);
     holder.appendChild(ui.skeleton(4));
     var alive = true;
@@ -1332,10 +1324,11 @@
         holder.appendChild(ui.notFound('application', name, 'apps', 'All applications'));
         return;
       }
-      holder.appendChild(el('div.grid.grid-2', [specPanel(name), versionsPanel(name)]));
+      holder.appendChild(specPanel(name));
+      holder.appendChild(el('div.grid.grid-2', [versionsPanel(name), ingressPanel(name)]));
       holder.appendChild(servicesPanel(name));
-      holder.appendChild(el('div.grid.grid-2', [ingressPanel(name), egressPanel(name)]));
-      holder.appendChild(el('div.grid.grid-2', [secretsPanel(name), alertsPanel(name)]));
+      holder.appendChild(el('div.grid.grid-2', [secretsPanel(name), egressPanel(name)]));
+      holder.appendChild(alertsPanel(name));
       holder.appendChild(runningPanel(name));
       holder.appendChild(notInStackPanel(name));
     });

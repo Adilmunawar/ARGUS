@@ -62,8 +62,8 @@
       {
         key: 'materialise', label: 'Actions', sortable: false,
         render: function (p) {
-          return ui.btn('Materialise ' + p.asset, {
-            variant: 'ghost',
+          return ui.btn(['Materialise', el('span.sr', { text: ' ' + p.asset })], {
+            variant: 'link',
             title: 'Queue a Dagster materialisation of ' + p.asset,
             onClick: function () {
               var down = downstreamOf(p.asset);
@@ -78,17 +78,16 @@
       }
     ];
 
-    return el('div.stack', [
+    return el('div.grid', [
       failed.length ? el('div.callout.bad', [
         el('strong', { text: failed.map(function (p) { return p.asset; }).join(', ') + ' failed' }),
         el('p', {
           text: failed.map(function (p) {
             var down = downstreamOf(p.asset);
-            return p.asset + ' last ran ' + fmt.ago(p.lastRun) + ' and failed after ' + fmt.dur(p.durationS) + '. '
+            return 'Last ran ' + fmt.ago(p.lastRun) + ', failed after ' + fmt.dur(p.durationS) + '. '
               + (down.length
-                ? 'Downstream: ' + down.join(', ') + ' cannot refresh until it succeeds.'
-                : 'Nothing downstream re-runs, which makes this the last mile: the Orders dashboard keeps '
-                  + 'serving the previous predictions, silently, until somebody looks at this row.');
+                ? 'Blocks ' + down.join(', ') + '.'
+                : 'The Orders dashboard keeps serving the previous predictions.');
           }).join(' ')
         })
       ]) : null,
@@ -102,12 +101,8 @@
           caption: 'Dagster assets with freshness state, last run, duration and freshness SLA',
           empty: 'No asset is defined in this deployment.',
           sortKey: 'state', sortDir: 'asc'
-        }),
-        el('p.hint', {
-          text: 'The graph shows shape, not health: it has no way to carry freshness. The table is the '
-            + 'authoritative view of which assets are stale, and it is the one to read first.'
         })
-      ])
+      ], { counter: d.pipelines.length, description: 'Freshness is read from this table; the graph shows shape only.' })
     ]);
   }
 
@@ -306,7 +301,7 @@
       { key: 'word', label: 'State', status: true, render: function (r) { return ui.pill(r.word, r.tone); } }
     ];
 
-    return el('div.stack', [
+    return el('div.grid', [
       ui.card('Cloud-free coverage, last eight fortnights', [
         el('div.grid.grid-4', cards),
         ui.table(coverCols, rows, {
@@ -330,11 +325,11 @@
               q ? 'Query: ' + q : 'Empty query, so the whole sentinel-2-l2a collection was counted.');
           }
         }),
-        el('p.hint', {
+        ui.disclosure('Details', [el('p', {
           text: 'pgstac holds the item metadata on pg-01. TiTiler reads the COGs out of argus-sentinel and '
-            + 'serves the map tiles directly, so no tile is ever pre-rendered or cached to disk twice.'
-        })
-      ])
+            + 'serves the map tiles directly.'
+        })])
+      ], { description: 'Search the sentinel-2-l2a collection in pgstac.' })
     ]);
   }
 
@@ -390,6 +385,7 @@
 
     var tiles = el('div.tiles', d.gpu.cards.map(function (c) {
       return ui.statTile('GPU ' + c.id + ' utilisation', fmt.pct(c.util, 0), {
+        status: c.util >= 90 ? { tone: 'warn', text: 'Saturated' } : c.util < 20 ? { tone: 'info', text: 'Underused' } : { tone: 'ok', text: 'Busy' },
         note: c.model + ' · ' + fmt.num(c.memUsedGB) + ' of ' + fmt.num(c.memTotalGB)
           + ' GB · ' + fmt.num(c.tempC) + '°C · ' + c.user
       });
@@ -401,8 +397,8 @@
       })
     ]));
 
-    mount.appendChild(ui.pageHeader('ML & geospatial',
-      'Dagster assets, model runs, inference endpoints and imagery coverage, all on ' + d.gpu.name + '.'));
+    mount.appendChild(ui.pageHeader('ML and geospatial',
+      'Dagster assets, model runs, inference endpoints and imagery coverage on ' + d.gpu.name + '.'));
     mount.appendChild(tiles);
     mount.appendChild(ui.tabs([
       { id: 'pipelines', label: 'Pipelines', render: pipelinesTab },
@@ -417,19 +413,23 @@
   }
 
   function renderLive(mount) {
-    mount.appendChild(ui.pageHeader('ML & geospatial',
-      'The ML platform is not part of this stack. What exists is the object-store buckets reserved for its data and the applications declared to use them.'));
-    mount.appendChild(el('div.stack', [
-      A.notInStack('The ML platform (GPU node, pipelines, model registry, endpoints).',
-        'Pipelines would come from Dagster, models from MLflow, endpoints and canary share from Ray Serve, and GPU utilisation and the job queue from the GPU node. None of them runs here, so those panels and their actions are not shown.'),
+    mount.appendChild(ui.pageHeader('ML and geospatial',
+      'Buckets reserved for ML and imagery data, and the applications declared to use them.'));
+    mount.appendChild(el('div.grid', [
       bucketsPanel(),
-      accountsPanel()
+      accountsPanel(),
+      A.notInStack('The ML platform (GPU node, pipelines, model registry, endpoints).',
+        'Pipelines would come from Dagster, models from MLflow, endpoints and canary share from Ray Serve, and GPU utilisation and the job queue from the GPU node. None of them runs here, so those panels and their actions are not shown.')
     ]));
   }
 
   A.screen('ml', {
-    title: 'ML & geospatial',
-    crumb: 'ML & geospatial',
+    title: 'ML and geospatial',
+    crumb: 'ML and geospatial',
+    crumbs: function (rest) {
+      var label = { pipelines: 'Pipelines', models: 'Models', endpoints: 'Endpoints', imagery: 'Imagery' };
+      return rest.slice(0, 1).map(function (r) { return label[r] || r; });
+    },
     render: function (mount, ctx) {
       if (window.location.protocol === 'file:' || A.storeMode() === 'sample') {
         renderSample(mount, ctx);

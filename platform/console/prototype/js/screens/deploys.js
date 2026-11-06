@@ -12,7 +12,6 @@
   };
   var CHECK_WORD = { pass: 'passed', verified: 'verified', warn: 'warning', fail: 'failed' };
   var CHECK_TONE = { pass: 'pass', verified: 'pass', warn: 'warn', fail: 'fail' };
-  var CHECK_GLYPH = { pass: '✓', warn: '▲', fail: '✕' };
 
   function personName(upn) {
     var p = d.personByUpn(upn);
@@ -36,18 +35,45 @@
     return CHECK_LABEL[key] || (key.charAt(0).toUpperCase() + key.slice(1));
   }
 
-  function checkRow(dep) {
-    return el('div.checkrow', {
-      role: 'group',
-      'aria-label': 'Continuous integration evidence for deployment ' + dep.id
-    }, checkKeys(dep.checks).map(function (k) {
-      var value = dep.checks[k];
-      var tone = CHECK_TONE[value] || 'fail';
-      return el('span.check.' + tone, [
-        el('span', { 'aria-hidden': 'true', text: CHECK_GLYPH[tone] }),
-        ' ' + checkLabel(k) + ' ' + (CHECK_WORD[value] || value)
-      ]);
-    }));
+  var STATE = {
+    awaiting: ['Awaiting approval', 'pending'],
+    inflight: ['In progress', 'info'],
+    done: ['Succeeded', 'ok'],
+    rolledback: ['Rolled back', 'bad'],
+    rejected: ['Rejected', 'warn']
+  };
+
+  function stateStatus(dep) {
+    var m = STATE[dep.state] || [String(dep.state), 'idle'];
+    return ui.status(m[1], m[0]);
+  }
+
+  function checksStatus(dep) {
+    var keys = checkKeys(dep.checks);
+    var failed = keys.filter(function (k) { return CHECK_TONE[dep.checks[k]] === 'fail'; }).length;
+    var warned = keys.filter(function (k) { return CHECK_TONE[dep.checks[k]] === 'warn'; }).length;
+    if (failed) return ui.status('bad', fmt.num(failed) + ' failed');
+    if (warned) return ui.status('warn', fmt.num(warned) + ' warning');
+    return ui.status('ok', fmt.num(keys.length) + ' passed');
+  }
+
+  function mono(text) { return el('span.mono', { text: String(text) }); }
+
+  function progressBar(dep) {
+    var p = dep.progress || { ud: 0, total: 1, healthy: true };
+    var pct = (p.total ? (p.ud / p.total) * 100 : 0);
+    var sentence = 'Upgrade domain ' + fmt.num(p.ud) + ' of ' + fmt.num(p.total) + ', health ' + (p.healthy ? 'OK' : 'failing');
+    return el('div.col', [
+      el('div.progressbar', {
+        role: 'progressbar',
+        'aria-valuenow': String(p.ud),
+        'aria-valuemin': '0',
+        'aria-valuemax': String(p.total),
+        'aria-valuetext': sentence,
+        'aria-label': 'Rolling upgrade for deployment ' + dep.id
+      }, el('div.progressbar-fill', { style: { width: pct.toFixed(1) + '%' } })),
+      el('span.num', { text: fmt.num(p.ud) + ' of ' + fmt.num(p.total) })
+    ]);
   }
 
   function progressBlock(dep) {
@@ -64,7 +90,7 @@
         'aria-valuetext': sentence,
         'aria-label': 'Rolling upgrade for deployment ' + dep.id
       }, el('div.progressbar-fill', { style: { width: pct.toFixed(1) + '%' } })),
-      el('p.hint', { text: sentence + '. The reconciler moves one domain at a time and stops and rolls back on its own if a domain fails its health policy.' })
+      el('p.hint', { text: sentence + '. One domain at a time; a failing domain rolls back.' })
     ]);
   }
 
@@ -108,45 +134,27 @@
     A.onLeave(function () { window.clearInterval(timer); });
   }
 
-  function deployCard(dep) {
-    var progressHost = dep.state === 'inflight' ? el('div', progressBlock(dep)) : null;
-    if (progressHost) progressHost.repaint = function () { ui.clear(progressHost); progressHost.appendChild(progressBlock(dep)); };
-    return el('div.deploycard', { data: { key: 'dep-' + dep.id } }, [
-      el('h3', { text: appDisplay(dep) + ' ' + dep.version }),
-      el('div.chips', [
-        el('span.chip', { text: dep.env }),
-        el('span.chip', { text: 'Deployment ' + dep.id }),
-        el('span.chip.mono', { text: dep.sha }),
-        dep.state === 'awaiting' && approvalsNeeded(dep) > 1 ? el('span.chip', { text: (dep.approvals || []).length + ' of ' + approvalsNeeded(dep) + ' approvals' }) : null,
-        dep.state === 'awaiting' && frozenFor(dep) ? el('span.chip', { text: 'freeze in force' }) : null
-      ]),
-      el('div.row', [
-        el('span.muted', { text: 'Opened by ' + personName(dep.author) }),
-        fmt.time(dep.opened)
-      ]),
-      checkRow(dep),
-      progressHost,
-      dep.state === 'rolledback' ? el('div.callout.bad', { text: 'Rolled back: ' + dep.outcome }) : null,
-      dep.state === 'rejected' ? el('div.callout.warn', { text: 'Rejected: ' + dep.outcome }) : null,
-      dep.state === 'done' && dep.durationS
-        ? el('p.hint', { text: 'Applied in ' + fmt.dur(dep.durationS) + ', outcome ' + dep.outcome + '.' })
-        : null,
-      el('div.row', A.link(
-        (dep.state === 'awaiting' ? 'Review' : 'Open') + ' deployment ' + dep.id,
-        'deploys', [String(dep.id)]))
+  function queueColumns(extra) {
+    var cols = [
+      { key: 'id', label: 'Deployment', render: function (dep) { return A.link(String(dep.id), 'deploys', [String(dep.id)]); } },
+      { key: 'app', label: 'Application', sort: function (dep) { return appDisplay(dep); }, render: function (dep) { return appDisplay(dep); } },
+      { key: 'version', label: 'Version', render: function (dep) { return mono(dep.version); } },
+      { key: 'env', label: 'Environment', sort: function (dep) { return dep.env + ' ' + (100000000 + Number(dep.id || 0)); } }
+    ];
+    return cols.concat(extra || []).concat([
+      { key: 'opened', label: 'Opened', sort: function (dep) { return dep.opened.getTime(); }, render: function (dep) { return fmt.time(dep.opened); } }
     ]);
   }
 
-  function lane(heading, deps, emptyTitle, emptyDetail) {
-    return el('div.lane', [
-      el('div.row', [
-        el('h2', { text: heading }),
-        el('span.chip', { text: fmt.num(deps.length) })
-      ]),
-      deps.length
-        ? el('div.stack', deps.map(deployCard))
-        : ui.emptyState(emptyTitle, emptyDetail)
-    ]);
+  function queueTable(caption, rows, extra, empty) {
+    return ui.table(queueColumns(extra), rows, {
+      caption: caption,
+      sortKey: 'opened', sortDir: 'desc',
+      rowKey: function (dep) { return 'dep-' + dep.id; },
+      onRow: function (dep) { A.go('deploys', [String(dep.id)]); },
+      emptyTitle: empty[0],
+      empty: empty[1]
+    });
   }
 
   function renderQueue(mount) {
@@ -157,69 +165,66 @@
       return p.state === 'done' || p.state === 'rolledback' || p.state === 'rejected';
     }).sort(byNewest);
 
-    mount.appendChild(ui.pageHeader(
-      'Deployments',
-      'Every write to production is a pull request. Nothing reaches a server that a person did not approve.'));
+    mount.appendChild(ui.pageHeader('Deployments', null, null, { counter: d.deployments.length }));
 
-    var lanes = el('div.lanes', [
-      lane('Awaiting approval', awaiting,
-        'Nothing is waiting for an approver',
-        'The queue is empty. A deployment appears here as soon as somebody opens a pull request against the production branch.'),
-      lane('In flight', inflight,
-        'No upgrade is running',
-        'The reconciler is idle. An upgrade shows its progress here, one upgrade domain at a time.'),
-      lane('Recent', recent,
-        'No deployment has finished yet',
-        'Completed and rolled-back deployments stay here so you can see what changed and when.')
-    ]);
-    mount.appendChild(lanes);
+    var approvals = {
+      key: 'approvals', label: 'Approvals', align: 'right', sort: function (dep) { return (dep.approvals || []).length; },
+      render: function (dep) { return fmt.num((dep.approvals || []).length) + ' of ' + fmt.num(approvalsNeeded(dep)); }
+    };
+    var checks = { key: 'checks', label: 'Checks', status: true, sortable: false, render: checksStatus };
+    var progress = { key: 'progress', label: 'Upgrade domains', sortable: false, render: progressBar };
+    var status = { key: 'state', label: 'Status', status: true, render: stateStatus };
+    var duration = { key: 'durationS', label: 'Duration', align: 'right', render: function (dep) { return dep.durationS ? fmt.dur(dep.durationS) : '-'; } };
+
+    var flight = queueTable('Deployments rolling out now', inflight, [progress], ['Nothing in progress', 'An approved deployment rolls out here, one upgrade domain at a time.']);
+    mount.appendChild(el('div.grid', [
+      ui.card('Awaiting approval', queueTable('Deployments waiting for an approver', awaiting, [checks, approvals], ['Nothing awaiting approval', 'A pull request against production appears here.']), { counter: awaiting.length }),
+      ui.card('In progress', flight, { counter: inflight.length }),
+      ui.card('Recent', queueTable('Finished, rolled back and rejected deployments', recent, [status, duration], ['No finished deployments', 'Finished deployments stay here.']), { counter: recent.length })
+    ]));
 
     if (inflight.length) {
-      rollWhile(lanes, function () {
+      rollWhile(flight, function () {
         return d.deployments.filter(function (p) { return p.state === 'inflight'; });
-      }, function () {
-        Array.prototype.forEach.call(lanes.querySelectorAll('.deploycard'), function (card) {
-          var dep = d.deployments.filter(function (p) { return 'dep-' + p.id === card.dataset.key; })[0];
-          var host = card.querySelector('.progressbar') && card.querySelector('.progressbar').parentNode.parentNode;
-          if (dep && host && host.repaint) host.repaint();
-        });
-      });
+      }, function () { flight.repaint(); });
     }
   }
 
   function planTab(dep) {
-    var intro = el('div.callout.info', [
-      el('strong', { text: 'This is desired state against actual state.' }),
-      el('p', {
-        text: 'The reconciler computed this difference by comparing the manifests in Git with what is running in the cluster. Nothing below has been applied yet, and nothing will be until an approver signs off.'
-      })
+    var steps = dep.plan || [];
+    return el('div.grid', [
+      detailsCard(dep),
+      ui.card('Plan', ui.table([
+        { key: 'action', label: 'Action', render: function (p) { return ui.badge(p.action); } },
+        { key: 'kind', label: 'Kind', render: function (p) { return mono(p.kind); } },
+        { key: 'name', label: 'Name' },
+        { key: 'from', label: 'From', render: function (p) { return el('span.plan-del', [el('span.sr', { text: 'changes from ' }), String(p.from)]); } },
+        { key: 'to', label: 'To', render: function (p) { return el('span.plan-add', [el('span.sr', { text: 'to ' }), String(p.to)]); } }
+      ], steps, {
+        caption: 'What applying deployment ' + dep.id + ' changes',
+        rowKey: function (p) { return p.kind + ':' + p.name; },
+        emptyTitle: 'Nothing to apply',
+        empty: 'Git and the cluster agree for this deployment.'
+      }), { counter: steps.length, description: 'Git against the cluster. Nothing applies until an approver signs off.' }),
+      steps.length ? declarationDiff(dep) : null
     ]);
+  }
 
-    if (!dep.plan || !dep.plan.length) {
-      return el('div.stack', [
-        intro,
-        ui.emptyState(
-          'Nothing to apply',
-          'The reconciler found no difference between Git and the cluster for this deployment. That is normal for a deployment that has already been applied.')
-      ]);
-    }
-
-    return el('div.stack', [
-      intro,
-      el('div.plan-diff', dep.plan.map(function (p) {
-        return el('div.row', [
-          el('span.chip', { text: p.action }),
-          el('span.mono', { text: p.kind }),
-          el('strong', { text: p.name }),
-          el('span.sr', { text: ' changes from ' }),
-          el('span.plan-del', { text: String(p.from) }),
-          el('span', { 'aria-hidden': 'true', text: '→' }),
-          el('span.sr', { text: ' to ' }),
-          el('span.plan-add', { text: String(p.to) })
-        ]);
-      })),
-      declarationDiff(dep)
-    ]);
+  function detailsCard(dep) {
+    var app = appOf(dep);
+    return ui.card('Details', ui.dl([
+      ['Application', app ? A.link(app.display, 'apps', [app.name]) : dep.app],
+      ['Version', mono(dep.version)],
+      ['Environment', dep.env],
+      ['Status', stateStatus(dep)],
+      ['Opened by', personName(dep.author)],
+      ['Opened', fmt.time(dep.opened)],
+      ['Commit', mono(dep.sha)],
+      ['Checks', checksStatus(dep)],
+      ['Approvals', fmt.num((dep.approvals || []).length) + ' of ' + fmt.num(approvalsNeeded(dep)) +
+        ((dep.approvals && dep.approvals.length) ? ': ' + dep.approvals.map(personName).join(', ') : '')],
+      dep.durationS ? ['Duration', fmt.dur(dep.durationS)] : null
+    ]));
   }
 
   function blastTab(dep) {
@@ -241,27 +246,15 @@
       edges.push([id, '__app']);
     });
 
-    var risk = 'Applying this restarts ' + fmt.num((b.services || []).length) +
-      ' service group' + ((b.services || []).length === 1 ? '' : 's') + ' and touches ' +
-      fmt.num((b.dependents || []).length) + ' dependent workload' +
-      ((b.dependents || []).length === 1 ? '' : 's') + '. ' +
-      (b.sessions
-        ? fmt.num(b.sessions) + ' signed-in session' + (b.sessions === 1 ? '' : 's') +
-          ' will reconnect once as each upgrade domain is replaced.'
-        : 'Nobody is signed in to it right now.');
-
-    return el('div.stack', [
-      el('div.blast', [
-        ui.dl([
-          ['Services touched', chipList(b.services, 'None')],
-          ['Dependents', chipList(b.dependents, 'Nothing depends on it')],
-          ['Signed-in sessions', fmt.num(b.sessions || 0)],
-          ['Environment', dep.env],
-          ['Tier', app ? fmt.num(app.tier) : 'unknown']
-        ])
-      ]),
-      el('p', { text: risk }),
-      ui.graph(nodes, edges, { label: 'What depends on ' + appLabel })
+    return el('div.grid', [
+      ui.card('Blast radius', ui.dl([
+        ['Services touched', chipList(b.services, 'None')],
+        ['Dependents', chipList(b.dependents, 'None')],
+        ['Signed-in sessions', fmt.num(b.sessions || 0)],
+        ['Environment', dep.env],
+        ['Tier', app ? fmt.num(app.tier) : 'Unknown']
+      ])),
+      ui.card('Dependents', ui.graph(nodes, edges, { label: 'What depends on ' + appLabel }), { counter: (b.dependents || []).length })
     ]);
   }
 
@@ -270,8 +263,7 @@
       return { key: k, check: checkLabel(k), result: dep.checks[k] };
     });
 
-    return el('div.stack', [
-      ui.table([
+    return ui.card('Evidence', ui.table([
         { key: 'check', label: 'Check' },
         {
           key: 'result', label: 'Result', status: true,
@@ -279,26 +271,15 @@
             var tone = CHECK_TONE[row.result] === 'pass' ? 'ok'
               : CHECK_TONE[row.result] === 'warn' ? 'warn' : 'bad';
             var word = CHECK_WORD[row.result] || row.result;
-            return ui.pill(word.charAt(0).toUpperCase() + word.slice(1), tone);
+            return ui.status(tone, word.charAt(0).toUpperCase() + word.slice(1));
           }
         }
       ], rows, {
         caption: 'Continuous integration evidence for deployment ' + dep.id,
         rowKey: function (row) { return row.key; },
-        empty: 'This deployment carries no recorded evidence, which should never happen in production.'
-      }),
-      ui.dl([
-        ['Commit', el('code', { text: dep.sha })],
-        ['Author', personName(dep.author)],
-        ['Opened', fmt.time(dep.opened)],
-        ['Approvals', (dep.approvals && dep.approvals.length)
-          ? dep.approvals.map(function (a) { return personName(a); }).join(', ')
-          : el('span.muted', { text: 'None yet' })]
-      ]),
-      el('p.hint', {
-        text: 'The signature line is checked again by the reconciler at apply time. Evidence recorded here is what the pipeline saw when the artefact was built.'
-      })
-    ]);
+        emptyTitle: 'No evidence',
+        empty: 'This deployment carries no recorded evidence.'
+      }), { counter: rows.length, description: 'What the pipeline saw at build time. The signature is checked again at apply.' });
   }
 
   function approvalsNeeded(dep) {
@@ -442,7 +423,6 @@
     var lines = diffLines(before, after);
     var changed = lines.filter(function (l) { return l.kind !== 'same'; }).length;
     return ui.card('Declaration diff', [
-      el('p.hint', { text: 'platform/gitops/apps/' + dep.app + '.yaml as the reconciler will read it, before and after. ' + fmt.num(changed) + ' line' + (changed === 1 ? '' : 's') + ' change.' }),
       el('div.diffview', { role: 'region', 'aria-label': 'Unified diff of the ' + dep.app + ' declaration, ' + changed + ' changed lines' },
         lines.map(function (l) {
           return el('div.diffline.' + l.kind, [
@@ -452,12 +432,11 @@
             el('span', { text: l.text })
           ]);
         }))
-    ]);
+    ], { description: 'platform/gitops/apps/' + dep.app + '.yaml, ' + fmt.num(changed) + ' line' + (changed === 1 ? '' : 's') + ' changed.' });
   }
 
   function rejectButton(dep) {
     return ui.btn('Reject deployment ' + dep.id, {
-      variant: 'ghost',
       onClick: function () {
         var area = el('textarea.field', {
           id: 'reject-reason', rows: '4', autocomplete: 'off',
@@ -543,58 +522,60 @@
     }
 
     var actions = [];
-    if (dep.state === 'awaiting') { actions.push(approveButton(dep)); actions.push(rejectButton(dep)); }
+    if (dep.state === 'awaiting') { actions.push(rejectButton(dep)); actions.push(approveButton(dep)); }
     if (dep.state === 'done') actions.push(rollbackButton(dep));
 
-    mount.appendChild(ui.pageHeader(
-      appDisplay(dep) + ' ' + dep.version + ' to ' + dep.env,
-      'Deployment ' + dep.id + ', opened by ' + personName(dep.author) + ' ' + fmt.ago(dep.opened) +
-        '. Commit ' + dep.sha + '.',
-      actions));
+    mount.appendChild(ui.pageHeader('Deployment ' + dep.id, appDisplay(dep) + ' ' + dep.version + ' to ' + dep.env, actions, { status: stateStatus(dep) }));
 
-    if (dep.state === 'awaiting' && frozenFor(dep)) {
-      mount.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'A change freeze is in force until ' + fmt.stamp(frozenFor(dep).until) + '.' }),
-        el('p', { text: frozenFor(dep).reason + ' Approving into production needs security sign-off with a written reason, recorded beside the approval.' })
+    var notes = [];
+    var freeze = frozenFor(dep);
+    if (dep.state === 'awaiting' && freeze) {
+      notes.push(el('div.callout.warn', [
+        el('strong', { text: 'Change freeze until ' + fmt.stamp(freeze.until) + '.' }),
+        el('p', { text: freeze.reason + ' Approving needs security sign-off.' })
       ]));
     }
     if (dep.state === 'awaiting' && approvalsNeeded(dep) > 1) {
-      mount.appendChild(el('div.callout.info', [
+      notes.push(el('div.callout.info', [
         el('strong', { text: 'Tier ' + appOf(dep).tier + ': ' + approvalsNeeded(dep) + ' approvals required.' }),
         el('p', { text: (dep.approvals || []).length ? 'Approved so far by ' + dep.approvals.map(personName).join(', ') + '.' : 'Nobody has approved it yet.' })
       ]));
     }
     if (dep.state === 'awaiting' && dep.author === ME) {
-      mount.appendChild(el('div.callout.warn', [
+      notes.push(el('div.callout.warn', [
         el('strong', { text: 'You opened this deployment.' }),
-        el('p', { text: 'Four eyes: a different Tier 1 person has to approve it. You can still reject your own deployment.' })
+        el('p', { text: 'A different Tier 1 person has to approve it. You can still reject it.' })
       ]));
     }
+    if (dep.state === 'rolledback') notes.push(el('div.callout.bad', [el('strong', { text: 'Rolled back.' }), el('p', { text: dep.outcome })]));
+    if (dep.state === 'rejected') {
+      notes.push(el('div.callout.warn', [
+        el('strong', { text: 'Rejected.' }),
+        el('p', { text: dep.outcome || 'No reason was recorded.' })
+      ]));
+    }
+    notes.forEach(function (n) { mount.appendChild(n); });
+
     if (dep.state === 'inflight') {
       var progressHost = el('div', progressBlock(dep));
-      mount.appendChild(progressHost);
+      mount.appendChild(ui.card('Rollout', progressHost));
       rollWhile(progressHost, function () { return dep.state === 'inflight' ? [dep] : []; }, function () {
         ui.clear(progressHost);
         progressHost.appendChild(progressBlock(dep));
       });
     }
-    if (dep.state === 'rolledback') mount.appendChild(el('div.callout.bad', { text: 'Rolled back: ' + dep.outcome }));
-    if (dep.state === 'rejected') {
-      mount.appendChild(el('div.callout.warn', [
-        el('strong', { text: 'Rejected.' }),
-        el('p', { text: dep.outcome || 'No reason was recorded.' })
-      ]));
-    }
 
-    mount.appendChild(ui.card(null, ui.tabs([
-      { id: 'plan', label: 'Plan', render: function () { return planTab(dep); } },
+    var tabs = ui.tabs([
+      { id: 'plan', label: 'Details', render: function () { return planTab(dep); } },
       { id: 'blast', label: 'Blast radius', render: function () { return blastTab(dep); } },
       { id: 'evidence', label: 'Evidence', render: function () { return evidenceTab(dep); } }
     ], {
       label: 'Deployment ' + dep.id + ' detail',
       initial: tab || null,
       href: function (t) { return A.href('deploys', [String(dep.id), t]); }
-    }), { flush: true }));
+    });
+    if (dep.state === 'inflight') tabs.style.marginTop = 'var(--s-l)';
+    mount.appendChild(tabs);
   }
 
   function placeholderOf(sha) {
@@ -617,17 +598,18 @@
         key: 'pinned', label: 'Digest', status: true,
         render: function (r) {
           return r.pinned
-            ? ui.pill('Pinned', 'ok')
-            : ui.pill('Unpinned: ' + placeholderOf(r.sha256), 'warn');
+            ? ui.status('ok', 'Pinned')
+            : ui.status('warn', 'Unpinned: ' + placeholderOf(r.sha256));
         }
       },
       { key: 'file', label: 'File', render: function (r) { return el('code', { text: String(r.file) }); } }
     ], rows, {
       caption: 'Versions declared per environment',
       rowKey: function (r) { return r.env + '/' + r.app; },
+      emptyTitle: 'No versions declared',
       empty: 'No environment declares any application.'
     }));
-    body.appendChild(el('p.hint', { text: 'Declared in the repository, not applied. ' + (data.note || '') }));
+    if (data.note) body.appendChild(el('p.hint', { text: data.note }));
   }
 
   function declaredApps(body, data) {
@@ -639,9 +621,9 @@
     body.appendChild(ui.table([
       { key: 'name', label: 'Application', render: function (r) { return A.link(r.name, 'apps', [r.name]); } },
       { key: 'kind', label: 'Kind' },
-      { key: 'tier', label: 'Tier' },
+      { key: 'tier', label: 'Tier', align: 'right' },
       { key: 'owner', label: 'Owner' },
-      { key: 'services', label: 'Services', render: function (r) { return fmt.num((r.services || []).length); } },
+      { key: 'services', label: 'Services', align: 'right', render: function (r) { return fmt.num((r.services || []).length); } },
       { key: 'directory', label: 'Directory', render: function (r) { return el('code', { text: String(r.directory || '') }); } }
     ], apps, {
       caption: 'Applications declared in the repository',
@@ -650,19 +632,31 @@
     if (data.problems && data.problems.length) {
       body.appendChild(el('div.callout.warn', [
         el('strong', { text: fmt.num(data.problems.length) + ' declaration' + (data.problems.length === 1 ? '' : 's') + ' could not be read.' }),
-        el('p', { text: data.problems.map(function (p) { return p.directory + ': ' + p.message; }).join('; ') })
+        el('ul.nis-list', data.problems.map(function (p) { return el('li', [mono(p.directory), ' ', String(p.message || '')]); }))
       ]));
     }
   }
 
+  function counted(title, path, draw, count) {
+    var card = null;
+    card = A.livePanel(title, path, function (body, data, env) {
+      var row = card.querySelector('.card-titlerow');
+      if (row && !row.querySelector('.card-counter')) row.appendChild(el('span.card-counter', { text: '(' + fmt.num(count(data)) + ')' }));
+      draw(body, data, env);
+    });
+    return card;
+  }
+
   function renderLive(host) {
-    host.appendChild(ui.pageHeader(
-      'Deployments',
-      'What the repository declares for each environment. Nothing here has been applied.'));
-    host.appendChild(A.notInStack('The GitOps reconciler',
-      'does not run in this stack, so no deployment has been planned, approved or applied. What follows is what the repository declares.'));
-    host.appendChild(A.livePanel('Declared versions', '/api/gitops/environments', declaredVersions));
-    host.appendChild(A.livePanel('Declared applications', '/api/gitops/apps', declaredApps));
+    host.appendChild(ui.pageHeader('Deployments', 'Declared in the repository; nothing here has been applied.'));
+    host.appendChild(el('div.grid', [
+      counted('Declared versions', '/api/gitops/environments', declaredVersions, function (data) {
+        return (data.environments || []).reduce(function (n, e) { return n + (e.apps || []).length; }, 0);
+      }),
+      counted('Declared applications', '/api/gitops/apps', declaredApps, function (data) { return (data.apps || []).length; }),
+      A.notInStack('The GitOps reconciler',
+        'does not run in this stack, so nothing has been planned, approved or applied.')
+    ]));
   }
 
   function renderLiveDetail(host, id) {
@@ -676,9 +670,9 @@
     crumb: 'Deployments',
     liveCrumbs: function (rest) { return ['Deployment ' + rest[0]]; },
     crumbs: function (rest) {
-      var out = ['Deployment ' + rest[0]];
-      if (rest[1]) out.push(rest[1].charAt(0).toUpperCase() + rest[1].slice(1));
-      return out;
+      var TAB = { plan: 'Details', blast: 'Blast radius', evidence: 'Evidence' };
+      if (!rest[1]) return ['Deployment ' + rest[0]];
+      return [{ label: 'Deployment ' + rest[0], href: A.href('deploys', [rest[0]]) }, TAB[rest[1]] || rest[1]];
     },
     render: function (mount, ctx) {
       var host = el('div');

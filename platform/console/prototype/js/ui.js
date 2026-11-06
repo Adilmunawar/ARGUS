@@ -59,6 +59,38 @@
 
   function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); return node; }
 
+  var ICONS = {
+    'status-positive': [['circle', { cx: 8, cy: 8, r: 6.5 }], ['path', { d: 'M5.2 8.2l1.9 1.9 3.7-3.9' }]],
+    'status-negative': [['circle', { cx: 8, cy: 8, r: 6.5 }], ['path', { d: 'M5.9 5.9l4.2 4.2M10.1 5.9l-4.2 4.2' }]],
+    'status-warning': [['path', { d: 'M8 1.9l6.5 11.6h-13z' }], ['path', { d: 'M8 6.3v3.3M8 11.6v.1' }]],
+    'status-info': [['circle', { cx: 8, cy: 8, r: 6.5 }], ['path', { d: 'M8 7.4v3.9M8 4.8v.1' }]],
+    'status-pending': [['circle', { cx: 8, cy: 8, r: 6.5 }], ['path', { d: 'M8 4.6V8l2.3 1.5' }]],
+    'status-stopped': [['circle', { cx: 8, cy: 8, r: 6.5 }]],
+    close: [['path', { d: 'M4 4l8 8M12 4l-8 8' }]],
+    search: [['circle', { cx: 7, cy: 7, r: 4.75 }], ['path', { d: 'M10.5 10.5L14 14' }]],
+    'chevron-down': [['path', { d: 'M4 6l4 4 4-4' }]],
+    'chevron-right': [['path', { d: 'M6 3.5L10.5 8 6 12.5' }]],
+    more: [['path', { d: 'M3.5 8h.01M8 8h.01M12.5 8h.01', 'stroke-width': '2.5' }]],
+    refresh: [['path', { d: 'M13 8a5 5 0 11-1.5-3.6' }], ['path', { d: 'M13 2.5v3h-3' }]],
+    external: [['path', { d: 'M9.5 2.5h4v4M13.5 2.5L8 8' }], ['path', { d: 'M12 9.5v4h-9.5V4h4' }]],
+    download: [['path', { d: 'M8 2.5v8M4.5 7L8 10.5 11.5 7M2.5 13.5h11' }]],
+    copy: [['rect', { x: 5.5, y: 5.5, width: 8, height: 8, rx: 1 }], ['path', { d: 'M10.5 5.5v-3h-8v8h3' }]],
+    settings: [['circle', { cx: 8, cy: 8, r: 2 }], ['path', { d: 'M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2' }]],
+    filter: [['path', { d: 'M2.5 3.5h11l-4.2 5v4l-2.6 1v-5z' }]],
+    add: [['path', { d: 'M8 3v10M3 8h10' }]],
+    remove: [['path', { d: 'M3 8h10' }]]
+  };
+
+  function icon(name) {
+    var known = Object.prototype.hasOwnProperty.call(ICONS, name);
+    var spec = known ? ICONS[name] : ICONS['status-stopped'];
+    return svg('svg', {
+      viewBox: '0 0 16 16', width: '16', height: '16', class: 'icon icon-' + (known ? name : 'status-stopped'),
+      'aria-hidden': 'true', focusable: 'false', fill: 'none', stroke: 'currentColor',
+      'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round'
+    }, spec.map(function (part) { return svg(part[0], part[1]); }));
+  }
+
   var collator = new Intl.Collator('en-GB', { numeric: true });
   var numFormats = {};
   function numFormat(dp) {
@@ -142,29 +174,56 @@
     }
   };
 
+  var TONE_ICON = {
+    ok: 'status-positive', bad: 'status-negative', warn: 'status-warning',
+    info: 'status-info', idle: 'status-stopped', pending: 'status-pending'
+  };
+
   function pill(text, tone, opts) {
     opts = opts || {};
-    var p = el('span.pill.' + (tone || 'idle'), { text: text });
-    var glyph = { ok: '●', warn: '▲', bad: '■', info: '◆', idle: '○' }[tone || 'idle'];
-    p.insertBefore(el('span.pill-glyph', { 'aria-hidden': 'true', text: glyph }), p.firstChild);
-    if (opts.title) p.title = opts.title;
+    var t = Object.prototype.hasOwnProperty.call(TONE_ICON, tone) ? tone : 'idle';
+    var p = el('span.pill.' + t, { title: opts.title || null });
+    p.appendChild(el('span.pill-glyph', { 'aria-hidden': 'true', 'data-icon': TONE_ICON[t] }, icon(TONE_ICON[t])));
+    p.appendChild(el('span.pill-text', { text: text }));
     return p;
   }
+
+  function status(tone, text, opts) { return pill(text, tone, opts); }
+
+  var BADGE_TONES = { idle: true, info: true, ok: true, bad: true, warn: true, strong: true };
+
+  function badge(text, tone, opts) {
+    opts = opts || {};
+    var known = Object.prototype.hasOwnProperty.call(BADGE_TONES, tone);
+    return el('span.badge' + (known ? '.' + tone : ''), { text: text, title: opts.title || null });
+  }
+
+  function statusNode(s) {
+    if (!s) return null;
+    if (s instanceof Node) return s;
+    return pill(s.text, s.tone, { title: s.title });
+  }
+
+  var VARIANT_CLASS = { primary: 'primary', normal: '', ghost: 'ghost', link: 'link', icon: 'btn-icon', danger: 'danger' };
 
   function btn(label, opts) {
     opts = opts || {};
     var disabled = !!opts.disabled;
-    var b = el('button.btn' + (opts.variant ? '.' + opts.variant : ''), {
+    var variant = Object.prototype.hasOwnProperty.call(VARIANT_CLASS, opts.variant) ? VARIANT_CLASS[opts.variant] : '';
+    var iconOnly = opts.variant === 'icon';
+    var b = el('button.btn' + (variant ? '.' + variant : ''), {
       type: 'button',
       'aria-disabled': disabled ? 'true' : null,
-      title: opts.title || null,
+      'aria-label': iconOnly ? String(label) : null,
+      title: opts.title || (iconOnly ? String(label) : null),
       on: {
         click: function (e) {
           if (disabled) { e.preventDefault(); e.stopPropagation(); return; }
           if (opts.onClick) opts.onClick(e);
         }
       }
-    }, label);
+    }, iconOnly ? null : label);
+    if (opts.icon || iconOnly) b.insertBefore(icon(opts.icon || 'more'), b.firstChild);
     if (disabled) b.classList.add('is-disabled');
     b.setDisabled = function (v) {
       disabled = !!v;
@@ -175,13 +234,25 @@
     return b;
   }
 
-  function pageHeader(title, desc, actions) {
+  function counterText(n) {
+    if (n === null || n === undefined || n === '') return null;
+    var raw = typeof n === 'number' ? fmt.num(n) : String(n);
+    return /^\(.*\)$/.test(raw) ? raw : '(' + raw + ')';
+  }
+
+  function pageHeader(title, desc, actions, opts) {
+    opts = opts || {};
+    var counter = counterText(opts.counter);
     return el('header.pagehead', [
-      el('div.pagehead-text', [
-        el('h1', { tabindex: '-1', text: title }),
-        desc ? el('p.pagehead-desc', { text: desc }) : null
+      el('div.pagehead-row', [
+        el('div.pagehead-title', [
+          el('h1', { tabindex: '-1', text: title }),
+          counter ? el('span.pagehead-counter', { text: counter }) : null,
+          opts.status ? el('span.pagehead-status', statusNode(opts.status)) : null
+        ]),
+        actions && actions.length ? el('div.pagehead-actions', actions) : null
       ]),
-      actions && actions.length ? el('div.pagehead-actions', actions) : null
+      desc ? el('p.pagehead-desc', { text: desc }) : null
     ]);
   }
 
@@ -194,23 +265,33 @@
         String(value),
         opts.unit ? el('span.tile-unit', { text: ' ' + opts.unit }) : null
       ]),
+      opts.status ? el('div.tile-status', statusNode(opts.status)) : null,
       opts.delta ? el('div.delta.' + (opts.delta.good ? 'up' : 'down'), [
         el('span', { 'aria-hidden': 'true', text: opts.delta.dir === 'up' ? '↑' : '↓' }),
         el('span.sr', { text: (opts.delta.dir === 'up' ? 'up, ' : 'down, ') + (opts.delta.good ? 'good' : 'bad') + ': ' }),
         ' ' + opts.delta.value
       ]) : null,
-      opts.note ? el('div.tile-note', { text: opts.note }) : null
+      opts.note ? el('div.tile-note', { text: opts.note }) : null,
+      opts.link ? el('div.tile-foot', el('span.tile-link', { text: opts.link })) : null
     ]);
   }
 
   function card(title, body, opts) {
     opts = opts || {};
+    var counter = counterText(opts.counter);
     return el('section.card' + (opts.grow ? '.grow' : ''), [
       title ? el('div.card-head', [
-        el('h2.card-title', { text: title }),
+        el('div.card-heading', [
+          el('div.card-titlerow', [
+            el('h2.card-title', { text: title }),
+            counter ? el('span.card-counter', { text: counter }) : null
+          ]),
+          opts.description ? el('p.card-desc', { text: opts.description }) : null
+        ]),
         opts.actions ? el('div.card-actions', opts.actions) : null
       ]) : null,
-      el('div.card-body' + (opts.flush ? '.flush' : ''), body)
+      el('div.card-body' + (opts.flush ? '.flush' : ''), body),
+      opts.footer ? el('div.card-foot', opts.footer) : null
     ]);
   }
 
@@ -219,14 +300,23 @@
   function colId(c) { return String(c.key || c.label); }
 
   function loadHiddenCols(id) {
-    if (!id) return {};
+    if (!id) return null;
     try {
       var all = JSON.parse(window.localStorage.getItem(COLS_KEY) || '{}');
-      var list = all && typeof all === 'object' && Array.isArray(all[id]) ? all[id] : [];
+      if (!all || typeof all !== 'object' || !Array.isArray(all[id])) return null;
       var out = {};
-      list.forEach(function (k) { if (typeof k === 'string' && k.length < 64) out[k] = true; });
+      all[id].forEach(function (k) { if (typeof k === 'string' && k.length < 64) out[k] = true; });
       return out;
-    } catch (e) { return {}; }
+    } catch (e) { return null; }
+  }
+
+  function defaultHiddenCols(cols, keys) {
+    var out = {};
+    var known = {};
+    cols.forEach(function (c) { known[colId(c)] = true; });
+    (Array.isArray(keys) ? keys : []).forEach(function (k) { if (known[String(k)]) out[String(k)] = true; });
+    if (Object.keys(out).length >= cols.length) return {};
+    return out;
   }
 
   function saveHiddenCols(id, hidden) {
@@ -235,8 +325,7 @@
       var all = {};
       try { all = JSON.parse(window.localStorage.getItem(COLS_KEY) || '{}') || {}; } catch (e) { all = {}; }
       if (typeof all !== 'object' || Array.isArray(all)) all = {};
-      var list = Object.keys(hidden);
-      if (list.length) all[id] = list; else delete all[id];
+      all[id] = Object.keys(hidden);
       window.localStorage.setItem(COLS_KEY, JSON.stringify(all));
     } catch (e) {  }
   }
@@ -247,7 +336,7 @@
     var announceNext = false;
     var current = rows.slice();
     var selectable = !!(opts.selectable && opts.rowKey);
-    var hidden = loadHiddenCols(opts.id);
+    var hidden = loadHiddenCols(opts.id) || defaultHiddenCols(cols, opts.defaultHidden);
     function shown() { return cols.filter(function (c) { return !hidden[colId(c)]; }); }
     var selected = Object.create(null);
     var headCheck = null;
@@ -399,8 +488,12 @@
       clear(tbody);
 
       if (!list.length) {
-        tbody.appendChild(el('tr', el('td', { colspan: String(shown().length + (selectable ? 1 : 0)) },
-          el('div.empty-inline', { text: opts.empty || 'Nothing to show.' }))));
+        tbody.appendChild(el('tr.empty-row', el('td', { colspan: String(shown().length + (selectable ? 1 : 0)) },
+          el('div.empty-inline', [
+            el('span.empty-inline-title', { text: opts.emptyTitle || opts.empty || 'No resources' }),
+            opts.emptyTitle && opts.empty ? el('span', { text: opts.empty }) : null,
+            opts.emptyAction || null
+          ]))));
         restoreRowFocus(keepFocus);
         return;
       }
@@ -513,7 +606,7 @@
               paint();
             }
           }
-        }, [c.label, el('span.th-arrow', { 'aria-hidden': 'true', text: '↕' })]);
+        }, [c.label, el('span.th-arrow', { 'aria-hidden': 'true' })]);
         th.dataset.col = c.key;
         th.setAttribute('aria-sort', state.key === c.key ? (state.dir === 'asc' ? 'ascending' : 'descending') : 'none');
         th.appendChild(sortBtn);
@@ -1152,7 +1245,7 @@
     }, runs.map(function (points) {
       return svg('polyline', {
         points: points.join(' '), fill: 'none',
-        stroke: 'var(' + (opts.stroke || '--c1') + ')',
+        stroke: 'var(' + (opts.stroke || '--accent') + ')',
         'stroke-width': '1.6', 'stroke-linejoin': 'round', 'stroke-linecap': 'round'
       });
     }));
@@ -1323,7 +1416,7 @@
     });
 
     var g = svg('svg', {
-      viewBox: '0 0 ' + W + ' ' + H, class: 'graph', role: 'img',
+      viewBox: '0 0 ' + W + ' ' + H, width: W, height: H, class: 'graph', role: 'img',
       'aria-label': opts.label || 'Dependency graph', focusable: 'false',
       preserveAspectRatio: 'xMinYMid meet'
     });
@@ -1335,7 +1428,7 @@
       var mid = (x1 + x2) / 2;
       g.appendChild(svg('path', {
         d: 'M' + x1 + ',' + y1 + ' C' + mid + ',' + y1 + ' ' + mid + ',' + y2 + ' ' + x2 + ',' + y2,
-        fill: 'none', stroke: 'var(--grid)', 'stroke-width': '1.4'
+        fill: 'none', stroke: 'var(--border)', 'stroke-width': '1.4'
       }));
     });
 
@@ -1343,7 +1436,7 @@
       var p = pos[n.id];
       var kind = String(n.kind || 'app').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       var grp = svg('g', { class: 'gnode gnode-' + (kind || 'app') });
-      grp.appendChild(svg('rect', { x: p.x, y: p.y, width: boxW, height: boxH, rx: 9 }));
+      grp.appendChild(svg('rect', { x: p.x, y: p.y, width: boxW, height: boxH, rx: 8 }));
       grp.appendChild(svg('text', { x: p.x + 11, y: p.y + 16, class: 'gnode-label' }, n.label));
       grp.appendChild(svg('text', { x: p.x + 11, y: p.y + 29, class: 'gnode-kind' }, n.kind || ''));
       g.appendChild(grp);
@@ -1416,7 +1509,7 @@
       if (f && t.value) tokens.push({ key: f.key, label: f.label, value: String(t.value) });
     });
     var input = el('input.pf-input', {
-      type: 'text', 'aria-label': 'Filter', placeholder: 'Filter by property, then press Enter',
+      type: 'text', 'aria-label': 'Filter', placeholder: opts.placeholder || 'Find resources',
       autocomplete: 'off', spellcheck: 'false'
     });
     var tokenBox = el('div.pf-tokens');
@@ -1431,12 +1524,12 @@
           el('button.pf-token-x', {
             type: 'button', 'aria-label': 'Remove filter ' + t.label + ' ' + t.value,
             on: { click: function () { tokens.splice(i, 1); repaintTokens(); onChange(tokens); A.announce('Filter removed, ' + tokens.length + ' remaining'); } }
-          }, '×')
+          }, icon('close'))
         ]));
       });
       if (tokens.length > 1) {
-        tokenBox.appendChild(btn('Clear all', {
-          variant: 'ghost', onClick: function () { tokens = []; repaintTokens(); onChange(tokens); A.announce('All filters cleared'); }
+        tokenBox.appendChild(btn('Clear filters', {
+          variant: 'link', onClick: function () { tokens = []; repaintTokens(); onChange(tokens); A.announce('All filters cleared'); }
         }));
       }
     }
@@ -1465,7 +1558,7 @@
 
     repaintTokens();
     var node = el('div.pf', [
-      el('div.pf-row', [fieldSel, input, btn('Add filter', { variant: 'ghost', onClick: add })]),
+      el('div.pf-row', [fieldSel, el('div.pf-search', input), btn('Add filter', { variant: 'ghost', onClick: add })]),
       tokenBox
     ]);
     node.tokens = function () { return tokens.slice(); };
@@ -1520,12 +1613,13 @@
     opts = opts || {};
     var open = false, pop = null, offClick = null, onScroll = null;
 
-    var trigger = el('button.iconbtn.menubtn', {
+    var labelled = typeof opts.text === 'string' && opts.text.length > 0;
+    var trigger = el(labelled ? 'button.btn.menubtn.has-label' + (opts.variant === 'primary' ? '.primary' : '') : 'button.iconbtn.menubtn', {
       type: 'button',
       'aria-haspopup': 'menu',
       'aria-expanded': 'false',
-      'aria-label': opts.label || 'More actions',
-      title: opts.label || 'More actions',
+      'aria-label': labelled ? null : (opts.label || 'More actions'),
+      title: labelled ? (opts.label || null) : (opts.label || 'More actions'),
       on: {
         click: function (e) { e.stopPropagation(); open ? close() : show(); },
         keydown: function (e) {
@@ -1533,7 +1627,7 @@
           else if (e.key === 'ArrowUp') { e.preventDefault(); show(-1); }
         }
       }
-    }, el('span.menudots', { 'aria-hidden': 'true', text: '⋯' }));
+    }, labelled ? [el('span', { text: opts.text }), icon('chevron-down')] : el('span.menudots', { 'aria-hidden': 'true' }, icon('more')));
 
     function entries() {
       return pop ? Array.prototype.filter.call(pop.querySelectorAll('.menuitem'), function () { return true; }) : [];
@@ -1654,7 +1748,7 @@
   UI.revealRow = revealRow;
 
   UI.el = el; UI.svg = svg; UI.clear = clear; UI.append = append; UI.fmt = fmt;
-  UI.pill = pill; UI.btn = btn; UI.pageHeader = pageHeader; UI.statTile = statTile;
+  UI.pill = pill; UI.status = status; UI.badge = badge; UI.icon = icon; UI.ICONS = ICONS; UI.btn = btn; UI.pageHeader = pageHeader; UI.statTile = statTile;
   UI.card = card; UI.table = table; UI.emptyState = emptyState; UI.errorState = errorState;
   UI.skeleton = skeleton; UI.stateBlock = stateBlock; UI.notInStackStrip = notInStackStrip;
   UI.notFound = notFound; UI.disclosure = disclosure; UI.STATES = STATES; UI.TRANSIENT = TRANSIENT; UI.dl = dl; UI.tabs = tabs; UI.sparkline = sparkline; UI.bar = bar;

@@ -622,19 +622,32 @@
   ];
 
   function sourcesCard(sources, at) {
-    var rows = sources.map(function (s) {
-      var tone = s.status === 'ok' ? 'ok' : s.status === 'notConfigured' ? 'idle' : 'warn';
-      return [s.label, el('div.col', { 'data-source': s.id, 'data-state': s.status }, [
-        el('div.row', [ui.pill(STATUS_WORD[s.status] || s.status, tone), el('span.mono', { text: 'GET ' + s.path }), s.at ? el('span.muted', { text: fmt.stamp(s.at) }) : null]),
-        s.status !== 'ok' && s.message ? el('div.muted', { text: s.message }) : null
-      ])];
-    });
     var read = sources.filter(function (s) { return s.status === 'ok'; }).length;
-    return ui.card('What was read', [
-      el('p', { text: fmt.num(read) + ' of ' + fmt.num(sources.length) + ' reads answered, evaluated ' + fmt.stamp(new Date(at)) + '.' }),
-      ui.dl(rows),
-      ui.disclosure('Details', [el('p.hint', { text: 'Every finding above cites one of these reads. A read that is not configured or failed produced no finding, only its line here, so nothing on this screen is a guess.' })])
-    ]);
+    var t = ui.table([
+      { key: 'label', label: 'Source' },
+      {
+        key: 'status', label: 'Status', status: true,
+        render: function (s) {
+          var tone = s.status === 'ok' ? 'ok' : s.status === 'notConfigured' ? 'idle' : 'warn';
+          return el('span', { 'data-source': s.id, 'data-state': s.status }, ui.pill(STATUS_WORD[s.status] || s.status, tone));
+        }
+      },
+      { key: 'path', label: 'Request', render: function (s) { return el('span.mono', { text: 'GET ' + s.path }); } },
+      { key: 'at', label: 'Read at', sort: function (s) { return s.at ? s.at.getTime() : 0; }, render: function (s) { return s.at ? el('span.mono', { text: fmt.stamp(s.at) }) : '-'; } },
+      { key: 'message', label: 'Message', sortable: false, render: function (s) { return s.status !== 'ok' && s.message ? el('span.muted', { text: s.message }) : ''; } }
+    ], sources, {
+      id: 'advisor.sources',
+      caption: 'Every read the rules were evaluated against, with its status and time'
+    });
+    return ui.card('Sources read', [t], {
+      counter: fmt.num(read) + ' of ' + fmt.num(sources.length),
+      description: 'Evaluated ' + fmt.stamp(new Date(at)) + '. A source that failed or is not configured produced no finding.'
+    });
+  }
+
+  function firstSentence(text) {
+    var m = /^.*?[.!?](?=\s|$)/.exec(String(text || ''));
+    return m ? m[0] : String(text || '');
   }
 
   function paintScreen(mount, ctx, all, opts) {
@@ -658,28 +671,28 @@
       (liveMode ? fmt.num(READS.length) + ' reads of the console API at ' + fmt.stamp(new Date(opts.at)) : 'the estate as it is right now') +
       (all.length - active.length ? ', ' + fmt.num(all.length - active.length) + ' accepted' : '') + '.', headActions));
 
+    var worstLink = null;
+    if (worst && worst.id === 'seal-sandbox') worstLink = A.link('Unseal posture on Services', 'stack');
+    else if (worst && worst.route) worstLink = A.link('Open ' + worst.resource, worst.route, worst.rest, worst.params);
     mount.appendChild(el('div.callout.' + (worst ? SEV_TONE[worst.severity] : 'ok'), { 'data-worst': worst ? worst.id : '' }, [
-      el('strong', { text: worst ? 'Worst finding: ' + String(worst.title).replace(/[.!?]+$/, '') + '.' : 'Nothing to report.' }),
-      worst && worst.id === 'seal-sandbox'
-        ? el('p', [A.link('Unseal posture on Services', 'stack')])
-        : null,
-      worst && worst.id !== 'seal-sandbox' && worst.route
-        ? el('p', [A.link('Open ' + worst.resource, worst.route, worst.rest, worst.params)])
-        : null,
+      el('strong', { text: worst ? 'Worst finding: ' + String(worst.title).replace(/[.!?]+$/, '') : 'No findings' }),
       worst
-        ? ui.disclosure('Details', [el('p', { text: worst.detail })])
+        ? el('p', [firstSentence(worst.detail) + ' ', worstLink])
         : el('p', { text: liveMode ? 'Every rule passed against what the console API answered.' : 'Every check passed against the estate as it is now.' })
     ]));
 
-    mount.appendChild(el('div.tiles', CATEGORIES.map(function (c) {
+    var tiles = el('div.tiles', CATEGORIES.map(function (c) {
       var list = byCat[c.id];
       var top = list.slice().sort(function (a, b) { return SEV_RANK[a.severity] - SEV_RANK[b.severity]; })[0];
       return ui.statTile(c.label, fmt.num(list.length), {
-        note: top ? 'worst: ' + top.severity : 'clean',
+        status: top ? { tone: SEV_TONE[top.severity], text: 'Worst: ' + top.severity } : { tone: 'ok', text: 'No findings' },
         href: A.href('advisor', [], { f: tokenParam([{ key: 'category', value: c.label }]) }),
         title: c.what
       });
-    })));
+    }));
+    tiles.style.setProperty('grid-template-columns', 'repeat(auto-fit, minmax(176px, 1fr))');
+    tiles.style.setProperty('margin-top', 'var(--s-l)');
+    mount.appendChild(tiles);
 
     var accessors = {
       category: function (f) { return CATEGORIES.filter(function (c) { return c.id === f.category; })[0].label; },
@@ -690,6 +703,7 @@
 
     var tableHost = el('div');
     var table = null;
+    var findingsCard = null;
     var showAccepted = false;
 
     function rowsFor(tokens) {
@@ -704,11 +718,12 @@
       table = ui.table(cols, rows, {
         id: 'advisor.findings',
         caption: 'Advisor findings with category, severity, the resource concerned and what to do',
+        emptyTitle: 'No matches',
         empty: 'No finding matches every filter. Remove a token to widen the search.',
         sortKey: 'severity', sortDir: 'asc',
         rowKey: function (f) { return f.id; }
       });
-      tableHost.appendChild(table);
+      tableHost.parentNode.appendChild(table);
     }
 
     var cols = [
@@ -772,15 +787,15 @@
     }, { initial: ui.decodeTokens(ctx && ctx.params && ctx.params.f) });
 
     var acceptedNote = el('p.hint', { role: 'status', hidden: true });
-    var toggle = ui.btn('Show accepted findings', {
+    var toggle = ui.btn('Show accepted', {
       variant: 'ghost',
       onClick: function () {
         showAccepted = !showAccepted;
-        toggle.textContent = showAccepted ? 'Hide accepted findings' : 'Show accepted findings';
+        toggle.textContent = showAccepted ? 'Hide accepted' : 'Show accepted';
         toggle.setAttribute('aria-pressed', showAccepted ? 'true' : 'false');
         var accepted = all.length - active.length;
         acceptedNote.textContent = showAccepted
-          ? (accepted ? 'Showing ' + fmt.num(accepted) + ' accepted finding' + (accepted === 1 ? '' : 's') + ' alongside the ' + fmt.num(active.length) + ' active ones. Each says who accepted it and until when.' : 'No finding has been accepted, so the list is unchanged.')
+          ? (accepted ? fmt.num(accepted) + ' accepted finding' + (accepted === 1 ? '' : 's') + ' shown with the ' + fmt.num(active.length) + ' active ones.' : 'No finding has been accepted.')
           : '';
         acceptedNote.hidden = !showAccepted;
         paint(filter.tokens());
@@ -803,20 +818,27 @@
     eachToggle.id = 'advisor-each';
     eachToggle.setAttribute('aria-pressed', groupedView ? 'false' : 'true');
 
-    mount.appendChild(el('div.row', [
-      filter, el('span.spacer'), eachToggle, toggle,
-      ui.columnsButton(function () { return table; }, 'findings'),
-      ui.exportButton(function () { return table; }, 'findings')
-    ]));
-    mount.appendChild(ui.disclosure('Details', [el('p.hint', {
-      text: liveMode
-        ? 'Every row is a rule evaluated against what the console API answered, and each cites the read and the time it was made, so a finding disappears when the next read differs. Accepting a risk stays in this browser: this console has no write path, so nothing is recorded on the server.'
-        : 'Every row is a rule evaluated against the dataset this console holds, so a finding disappears the moment the data changes. Accepting a risk records who, why and until when, and the finding comes back when that passes.'
-    })]));
-    mount.appendChild(acceptedNote);
-    mount.appendChild(tableHost);
+    tableHost.hidden = true;
+    findingsCard = ui.card('Findings', [filter, acceptedNote, tableHost], {
+      counter: active.length,
+      actions: [
+        eachToggle, toggle,
+        ui.columnsButton(function () { return table; }, 'findings'),
+        ui.exportButton(function () { return table; }, 'findings')
+      ],
+      footer: ui.disclosure('Details', [el('p.hint', {
+        text: liveMode
+          ? 'Every row is a rule evaluated against what the console API answered, and each cites the read and the time it was made, so a finding disappears when the next read differs. Accepting a risk stays in this browser: this console has no write path, so nothing is recorded on the server.'
+          : 'Every row is a rule evaluated against the dataset this console holds, so a finding disappears the moment the data changes. Accepting a risk records who, why and until when, and the finding comes back when that passes.'
+      })])
+    });
+    mount.appendChild(findingsCard);
     paint(filter.tokens());
-    if (liveMode && opts.sources) mount.appendChild(sourcesCard(opts.sources, opts.at));
+    if (liveMode && opts.sources) {
+      var src = sourcesCard(opts.sources, opts.at);
+      src.style.setProperty('margin-top', 'var(--s-l)');
+      mount.appendChild(src);
+    }
   }
 
   A.screen('advisor', {

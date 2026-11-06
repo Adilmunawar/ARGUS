@@ -11,10 +11,20 @@
     return 'now, ' + (s < 10 ? fmt.num(s, 1) : fmt.num(Math.round(s))) + ' s sample';
   }
 
+  function setCounter(body, n) {
+    var card = body.closest ? body.closest('.card') : null;
+    var row = card ? card.querySelector('.card-titlerow') : null;
+    if (!row) return;
+    var c = row.querySelector('.card-counter');
+    if (!c) { c = el('span.card-counter'); row.appendChild(c); }
+    c.textContent = '(' + fmt.num(n) + ')';
+  }
+
   function renderHost(body, h) {
     var cpu = h.cpu || {};
     var mem = h.memory || {};
     var proc = h.process || {};
+    var caps = A.capabilities() || {};
     body.appendChild(el('div.tiles', [
       ui.statTile('CPU', fmt.pct(cpu.usageRatio * 100, 1), {
         note: sampleWindow(cpu.sampledOverMs) + ', ' + fmt.num(cpu.cores) + ' cores'
@@ -33,17 +43,23 @@
     body.appendChild(ui.dl([
       ['Hostname', el('code.mono', { text: h.hostname })],
       ['Platform', h.platform + ' ' + h.release + ' (' + h.arch + ')'],
-      ['CPU', cpu.model || 'unknown']
+      ['CPU model', cpu.model || 'unknown'],
+      ['Region', el('code.mono', { text: caps.region || 'unknown' })],
+      ['Console access', caps.writesAllowed ? ui.status('warn', 'Read-write') : ui.status('ok', 'Read-only')],
+      ['AWS credentials', caps.aws && caps.aws.configured ? ui.status('ok', 'Configured') : ui.status('idle', 'Not configured')]
     ]));
+  }
 
-    body.appendChild(el('div.sectiontitle', { text: 'Volumes, now' }));
+  function renderVolumes(body, h) {
+    var disks = h.disks || [];
+    setCounter(body, disks.length);
     body.appendChild(ui.table([
       { key: 'mount', label: 'Mount', render: function (d) { return el('code.mono', { text: d.mount }); } },
       {
-        key: 'usageRatio', label: 'Used', align: 'right',
+        key: 'usageRatio', label: 'Used',
         render: function (d) {
           if (d.error) return ui.pill(d.error, 'idle');
-          return el('div.row', [
+          return el('div.row', { title: fmt.bytes(d.usedBytes) + ' used', style: { 'flex-wrap': 'nowrap' } }, [
             ui.bar(d.usageRatio, {
               tone: ratioTone(d.usageRatio),
               label: d.mount + ' is ' + fmt.pct(d.usageRatio * 100, 0) + ' full'
@@ -52,22 +68,24 @@
           ]);
         }
       },
-      { key: 'usedBytes', label: 'Used', align: 'right', render: function (d) { return d.error ? '-' : fmt.bytes(d.usedBytes); } },
       { key: 'freeBytes', label: 'Free', align: 'right', render: function (d) { return d.error ? '-' : fmt.bytes(d.freeBytes); } },
       { key: 'totalBytes', label: 'Size', align: 'right', render: function (d) { return d.error ? '-' : fmt.bytes(d.totalBytes); } }
-    ], h.disks || [], {
+    ], disks, {
       caption: 'Volumes on this host, with used, free and total capacity',
       sortKey: 'mount',
       rowKey: function (d) { return d.mount; },
       empty: 'No volume could be read on this host.'
     }));
+  }
 
-    body.appendChild(el('div.sectiontitle', { text: 'Network interfaces' }));
+  function renderNetwork(body, h) {
+    var nics = h.network || [];
+    setCounter(body, nics.length);
     body.appendChild(ui.table([
-      { key: 'interface', label: 'Interface' },
+      { key: 'interface', label: 'Interface', render: function (n) { return el('code.mono', { text: n.interface }); } },
       { key: 'family', label: 'Family' },
       { key: 'address', label: 'Address', render: function (n) { return el('code.mono', { text: n.address }); } }
-    ], h.network || [], {
+    ], nics, {
       caption: 'Non-loopback network interfaces on this host',
       sortKey: 'interface',
       empty: 'This host has no non-loopback interface.'
@@ -99,11 +117,9 @@
 
   function countPanel(body, d, key, noun) {
     var rows = d[key] || [];
-    if (!rows.length) {
-      body.appendChild(ui.emptyState('No ' + noun, 'This account has no ' + noun + ' in this region.'));
-      return;
-    }
-    body.appendChild(el('p', { text: fmt.num(rows.length) + ' ' + noun + ' in this region.' }));
+    setCounter(body, rows.length);
+    body.appendChild(el('div.tile-value', { text: fmt.num(rows.length) }));
+    body.appendChild(el('p.hint', { text: noun + ' in this region' }));
   }
 
   var SERIES = [
@@ -163,29 +179,55 @@
     return runs;
   }
 
-  function overlaySpark(current, previous, range, end, stepMs, label) {
-    var w = 220, h = 34, pad = 2;
+  var CHART_W = 600, CHART_H = 160;
+  var GRID = [1, 0.75, 0.5, 0.25, 0];
+
+  function chart(current, previous, range, end, stepMs, label) {
     var start = end - range.ms;
     var gap = Math.max(stepMs * 2.5, range.ms / 60);
-    var nodes = [];
+    var nodes = GRID.map(function (g) {
+      var y = (CHART_H - (g * CHART_H)).toFixed(1);
+      return ui.svg('line', {
+        x1: 0, x2: CHART_W, y1: y, y2: y, stroke: 'var(--border-subtle)', 'stroke-width': '1',
+        'vector-effect': 'non-scaling-stroke'
+      });
+    });
     if (previous) {
-      polylines(previous, start - range.ms, range.ms, gap, w, h, pad).forEach(function (pts) {
+      polylines(previous, start - range.ms, range.ms, gap, CHART_W, CHART_H, 0).forEach(function (pts) {
         nodes.push(ui.svg('polyline', {
-          points: pts.join(' '), fill: 'none', stroke: 'var(--muted)', 'stroke-width': '1.4',
-          'stroke-dasharray': '3 3', 'stroke-linejoin': 'round', 'data-period': 'previous'
+          points: pts.join(' '), fill: 'none', stroke: 'var(--text-muted)', 'stroke-width': '1.5',
+          'stroke-dasharray': '4 4', 'stroke-linejoin': 'round', 'vector-effect': 'non-scaling-stroke', 'data-period': 'previous'
         }));
       });
     }
-    polylines(current, start, range.ms, gap, w, h, pad).forEach(function (pts) {
+    polylines(current, start, range.ms, gap, CHART_W, CHART_H, 0).forEach(function (pts) {
       nodes.push(ui.svg('polyline', {
-        points: pts.join(' '), fill: 'none', stroke: 'var(--c1)', 'stroke-width': '1.6',
-        'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'data-period': 'current'
+        points: pts.join(' '), fill: 'none', stroke: 'var(--accent)', 'stroke-width': '2',
+        'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'vector-effect': 'non-scaling-stroke', 'data-period': 'current'
       }));
     });
-    return ui.svg('svg', {
-      viewBox: '0 0 ' + w + ' ' + h, width: w, height: h, class: 'spark',
+    var plot = ui.svg('svg', {
+      viewBox: '0 0 ' + CHART_W + ' ' + CHART_H, preserveAspectRatio: 'none', class: 'chart-plot',
       role: 'img', 'aria-label': label, focusable: 'false'
     }, nodes);
+    plot.style.setProperty('width', '100%');
+    plot.style.setProperty('height', CHART_H + 'px');
+    plot.style.setProperty('display', 'block');
+    plot.style.setProperty('overflow', 'visible');
+
+    var axisY = el('div', {
+      'aria-hidden': 'true',
+      style: { display: 'flex', 'flex-direction': 'column', 'justify-content': 'space-between', height: (CHART_H + 16) + 'px', 'text-align': 'right', 'margin-top': '-8px' }
+    }, GRID.map(function (g) { return el('span.hint', { text: Math.round(g * 100) + '%', style: { margin: '0', 'line-height': '16px' } }); }));
+    var axisX = el('div', { 'aria-hidden': 'true', style: { display: 'flex', 'justify-content': 'space-between', 'margin-top': '-8px' } }, [
+      el('span.hint', { text: fmt.clock(new Date(start)) }),
+      el('span.hint', { text: fmt.clock(new Date(start + range.ms / 2)) }),
+      el('span.hint', { text: fmt.clock(new Date(end)) })
+    ]);
+    return el('div', {
+      'data-chart': '',
+      style: { display: 'grid', 'grid-template-columns': 'auto minmax(0, 1fr)', 'column-gap': 'var(--s-xs)', 'margin-top': 'var(--s-m)' }
+    }, [axisY, plot, el('span'), axisX]);
   }
 
   function renderSeries(spec, range, compare) {
@@ -212,19 +254,17 @@
         fmt.ratioPct(latest, 1) + (previous ? '. The dashed line is the previous ' + range.label +
           (prevMean === null ? ', which has no sample' : ', averaging ' + fmt.ratioPct(prevMean, 1)) : '');
 
-      body.appendChild(el('div.row', [
-        el('span.num', { text: fmt.ratioPct(latest, 1) }),
-        el('span.muted', { text: 'latest, ' + spec.basis }),
-        el('span.spacer'),
-        overlaySpark(current, previous, range, end, stepMs, label)
+      body.appendChild(el('div.row', { style: { 'align-items': 'baseline' } }, [
+        el('span.tile-value.num', { text: fmt.ratioPct(latest, 1), style: { 'margin-top': '0' } }),
+        el('span.muted', { text: 'latest, ' + spec.basis })
       ]));
+      body.appendChild(chart(current, previous, range, end, stepMs, label));
 
-      var line = 'Line: ' + range.words + ', ' + fmt.num(current.length) + ' samples, average ' +
-        fmt.ratioPct(curMean, 1) + '.';
+      var line = range.label + ', ' + fmt.num(current.length) + ' samples, average ' + fmt.ratioPct(curMean, 1) + '.';
       if (previous) {
         line += ' Previous ' + range.label + ' (dashed): ' + (prevMean === null
           ? 'no sample.'
-          : 'average ' + fmt.ratioPct(prevMean, 1) + ', ' + fmt.num(previous.length) + ' samples.');
+          : 'average ' + fmt.ratioPct(prevMean, 1) + '.');
       }
       body.appendChild(el('p.hint', { text: line }));
     };
@@ -233,7 +273,7 @@
   function seriesPanel(spec, range, compare) {
     var span = compare ? range.ms * 2 : range.ms;
     var points = compare ? SERIES_POINTS * 2 : SERIES_POINTS;
-    return A.livePanel(spec.title + ', ' + range.words,
+    return A.livePanel(spec.title,
       '/api/metrics/series?name=' + encodeURIComponent(spec.name) + '&window=' + span + '&points=' + points,
       renderSeries(spec, range, compare),
       { ttlMs: 15000 });
@@ -248,13 +288,13 @@
       b.title = 'Show the ' + r.words;
       bar.appendChild(b);
     });
-    var cmp = ui.btn('Compare with the previous period', {
+    var cmp = ui.btn('Compare with previous period', {
       variant: 'ghost',
       onClick: function () { onChange(range.key, !compare); }
     });
     cmp.setAttribute('aria-pressed', compare ? 'true' : 'false');
     cmp.setAttribute('data-compare', '');
-    return el('div.row', { 'data-metrics-controls': '' }, [el('span.fieldlabel', { text: 'Window' }), bar, cmp]);
+    return el('div.row', { 'data-metrics-controls': '' }, [bar, cmp]);
   }
 
   function metricsSection(mount, params) {
@@ -270,15 +310,20 @@
       host.setAttribute('data-range', range.key);
       host.setAttribute('data-compare', compare ? 'true' : 'false');
       dispose = A.scopeLeaveHooks(function () {
-        host.appendChild(rangeControls(range, compare, function (k, c) {
+        var controls = rangeControls(range, compare, function (k, c) {
           if (A.replaceHash) {
             A.replaceHash(A.href('system', [], { range: k === DEFAULT_RANGE ? null : k, compare: c ? '1' : null }));
           }
           paint(k, c);
           if (A.announce) A.announce('Metrics now show the ' + rangeOf(k).words + (c ? ', with the previous period dashed.' : '.'));
-        }));
-        host.appendChild(el('div.grid.grid-2', [seriesPanel(SERIES[0], range, compare), seriesPanel(SERIES[1], range, compare)]));
-        host.appendChild(el('div.grid.grid-2', [seriesPanel(SERIES[2], range, compare), seriesPanel(SERIES[3], range, compare)]));
+        });
+        host.appendChild(el('div.row', { style: { 'margin-bottom': 'var(--s-s)' } }, [
+          el('h2', { text: 'Monitoring' }), el('span.spacer'), controls
+        ]));
+        host.appendChild(el('div.grid.grid-2', [
+          seriesPanel(SERIES[0], range, compare), seriesPanel(SERIES[1], range, compare),
+          seriesPanel(SERIES[2], range, compare), seriesPanel(SERIES[3], range, compare)
+        ]));
       });
     }
 
@@ -306,7 +351,7 @@
 
       mount.appendChild(ui.pageHeader(
         'System',
-        'The machine this console runs on, and the cloud account it can see.',
+        'Host health, metrics and the cloud account this console can see.',
         [ui.btn('Refresh', {
           onClick: function () {
             A.forget();
@@ -327,33 +372,38 @@
   function build(mount, params) {
     if (A.storeMode() !== A.MODE.LIVE) {
       mount.appendChild(ui.stateBlock('sample', {
-        detail: 'This screen reads the machine and the cloud account through the console API, and has no ' +
-          'fixtures. Start the API with `npm start` in platform/console/server and open the console it serves.'
+        detail: 'System has no fixtures. Run the console API (`npm start` in platform/console/server) and open the console it serves.'
       }));
       return;
     }
 
     var caps = A.capabilities() || {};
-    mount.appendChild(el('p.hint', {
-      text: 'Region ' + (caps.region || 'unknown') + '. ' +
-        (caps.writesAllowed ? 'This console may make changes.' : 'This console is read-only.') +
-        (caps.aws && caps.aws.configured
-          ? ' AWS credentials are present; the AWS account panel says whether AWS accepts them.'
-          : ' No AWS credentials are configured.')
-    }));
+    var layout = el('div.grid');
+    mount.appendChild(layout);
 
-    mount.appendChild(A.livePanel('This host', '/api/host', renderHost, { ttlMs: 2000 }));
-
-    metricsSection(mount, params);
-
-    mount.appendChild(el('div.grid.grid-2', [
-      A.livePanel('AWS account', '/api/aws/identity', renderAws, AWS_OPTS),
-      A.livePanel('EC2 instances', '/api/aws/instances', function (b, d) { countPanel(b, d, 'instances', 'instances'); }, AWS_OPTS)
+    layout.appendChild(A.livePanel('Host', '/api/host', renderHost, { ttlMs: 2000 }));
+    layout.appendChild(el('div.grid.grid-2', [
+      A.livePanel('Volumes', '/api/host', renderVolumes, { ttlMs: 2000 }),
+      A.livePanel('Network interfaces', '/api/host', renderNetwork, { ttlMs: 2000 })
     ]));
 
-    mount.appendChild(el('div.grid.grid-2', [
-      A.livePanel('S3 buckets', '/api/aws/buckets', function (b, d) { countPanel(b, d, 'buckets', 'buckets'); }, AWS_OPTS),
-      A.livePanel('RDS databases', '/api/aws/databases', function (b, d) { countPanel(b, d, 'databases', 'databases'); }, AWS_OPTS)
-    ]));
+    var metrics = el('div');
+    layout.appendChild(metrics);
+    metricsSection(metrics, params);
+
+    if (caps.aws && caps.aws.configured) {
+      layout.appendChild(A.livePanel('AWS account', '/api/aws/identity', renderAws, AWS_OPTS));
+      layout.appendChild(el('div.grid.grid-3', [
+        A.livePanel('EC2 instances', '/api/aws/instances', function (b, d) { countPanel(b, d, 'instances', 'Instances'); }, AWS_OPTS),
+        A.livePanel('S3 buckets', '/api/aws/buckets', function (b, d) { countPanel(b, d, 'buckets', 'Buckets'); }, AWS_OPTS),
+        A.livePanel('RDS databases', '/api/aws/databases', function (b, d) { countPanel(b, d, 'databases', 'Databases'); }, AWS_OPTS)
+      ]));
+    } else {
+      layout.appendChild(ui.stateBlock('notConfigured', {
+        reason: 'no-aws-credentials',
+        detail: 'AWS account, EC2 instances, S3 buckets and RDS databases: no AWS credentials are configured. ' +
+          'Configure a profile, an SSO session or an instance role on the console service.'
+      }));
+    }
   }
 })();

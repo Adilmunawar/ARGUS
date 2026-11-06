@@ -106,10 +106,27 @@
       }
     });
     return ui.card('Tamper evidence', [
-      el('p', { text: 'Every audit row is sealed with a SHA-256 over its contents and the seal of the row before it. A real deployment writes the same chain into an object-locked bucket at the end of every day; here it is computed in the page so you can see it break.' }),
       el('div.row', [verify, status]),
-      summary
-    ]);
+      summary,
+      ui.disclosure('Details', [el('p', { text: 'Every audit row is sealed with a SHA-256 over its contents and the seal of the row before it. A real deployment writes the same chain into an object-locked bucket at the end of every day; here it is computed in the page so you can see it break.' })])
+    ], { description: 'Each row is sealed with a hash of its contents and the seal before it.' });
+  }
+
+  function setCounter(node, n) {
+    var card = node && node.closest ? node.closest('.card') : null;
+    var row = card ? card.querySelector('.card-titlerow') : null;
+    if (!row) return;
+    var c = row.querySelector('.card-counter');
+    if (!c) { c = el('span.card-counter'); row.appendChild(c); }
+    c.textContent = '(' + fmt.num(n) + ')';
+  }
+
+  function setHeadCounter(mount, n) {
+    var title = mount.querySelector('.pagehead-title');
+    if (!title) return;
+    var c = title.querySelector('.pagehead-counter');
+    if (!c) { c = el('span.pagehead-counter'); title.insertBefore(c, title.querySelector('h1').nextSibling); }
+    c.textContent = '(' + fmt.num(n) + ')';
   }
 
   var table = null;
@@ -174,16 +191,6 @@
   function renderSample(mount, ctx) {
       var d = A.data;
 
-      var since = d.now.getTime() - 86400000;
-      var last24 = d.audit.filter(function (r) { return r.at.getTime() >= since; }).length;
-
-      var actors = {}, prs = {};
-      d.audit.forEach(function (r) {
-        actors[r.actor] = true;
-        if (r.pr !== null && r.pr !== undefined) prs[r.pr] = true;
-      });
-      var privileged = d.audit.filter(isPrivileged).length;
-
       var accessors = {
         actor: function (r) { return r.actor; },
         action: function (r) { return r.action; },
@@ -193,13 +200,10 @@
 
       var cols = [
         {
-          key: 'at', label: 'When',
+          key: 'at', label: 'Event time',
           sort: function (r) { return r.at.getTime(); },
           render: function (r) {
-            return el('div.col', [
-              fmt.time(r.at),
-              el('div.muted', el('span.mono', { text: fmt.stamp(r.at) }))
-            ]);
+            return el('time.mono', { datetime: r.at.toISOString(), title: fmt.ago(r.at), text: fmt.stamp(r.at), style: { 'white-space': 'nowrap' } });
           }
         },
         { key: 'actor', label: 'Actor' },
@@ -207,15 +211,20 @@
           key: 'role', label: 'Role', status: true,
           render: function (r) { return ui.pill(r.role, ROLE_TONE[r.role] || 'idle'); }
         },
-        { key: 'action', label: 'Action', render: function (r) { return el('span.mono', { text: r.action }); } },
-        { key: 'target', label: 'Target' },
         {
-          key: 'pr', label: 'PR', sortable: false,
+          key: 'action', label: 'Action',
           render: function (r) {
-            if (r.pr === null || r.pr === undefined) return el('span.muted', { text: '-' });
+            return el('span.row', [el('span.mono', { text: r.action }), isPrivileged(r) ? ui.badge('Privileged', 'warn') : null]);
+          }
+        },
+        {
+          key: 'target', label: 'Target',
+          csv: function (r) { return r.target + (r.pr === null || r.pr === undefined ? '' : ' (#' + r.pr + ')'); },
+          render: function (r) {
+            if (r.pr === null || r.pr === undefined) return r.target;
             var a = A.link('#' + r.pr, 'deploys', [String(r.pr)]);
             a.title = 'Open deployment ' + r.pr;
-            return a;
+            return el('span', [r.target + ' ', a]);
           }
         },
         { key: 'ip', label: 'Source IP', render: function (r) { return el('span.mono', { text: r.ip }); } },
@@ -224,7 +233,7 @@
           csv: function (r) { return r.hash || ''; },
           render: function (r) {
             return r.hash
-              ? el('span.chain', { title: r.hash }, [ui.pill('sealed', 'ok'), el('span.mono.muted', { text: r.hash.split(':')[1].slice(0, 8) })])
+              ? el('span.chain', { title: r.hash }, [ui.pill('sealed', 'ok'), el('span.mono.muted', { text: r.hash.split(':')[1].slice(0, 12) })])
               : ui.pill('unsealed', 'idle', { title: 'Verify the chain to seal this row' });
           }
         }
@@ -244,6 +253,7 @@
         table = ui.table(cols, visible, {
           id: 'audit.events',
           caption: 'Audit events, newest first, with actor, role, action, target, pull request and source address',
+          emptyTitle: 'No matches',
           empty: 'No event matches every filter. Remove a token to widen the search.',
           sortKey: 'at', sortDir: 'desc',
           rowKey: function (r) { return r.at.toISOString() + r.action; }
@@ -266,36 +276,26 @@
 
       mount.appendChild(ui.pageHeader(
         'Audit',
-        'Every action by anyone, kept forever. This is the record an auditor is given.',
+        'Every action by anyone, kept forever.',
         [ui.btn('Export as CSV', {
           variant: 'primary',
           title: 'Show the filtered audit events as CSV text',
           onClick: function () { exportDialog(exportRows()); }
-        })]));
+        })], { counter: d.audit.length }));
 
-      mount.appendChild(el('div.tiles', [
-        ui.statTile('Events, last 24 hours', fmt.num(last24), { note: 'Of ' + fmt.num(d.audit.length) + ' retained' }),
-        ui.statTile('Distinct actors', fmt.num(Object.keys(actors).length), { note: 'People and automation, counted the same way' }),
-        ui.statTile('Privileged actions', fmt.num(privileged), { note: 'Admin role, a grant, or the reconciler being overridden' }),
-        ui.statTile('Pull requests referenced', fmt.num(Object.keys(prs).length), { note: 'Every change traceable to a diff somebody approved' })
-      ]));
-
-      mount.appendChild(chainCard(d));
-
-      mount.appendChild(el('div.callout.info', [
-        el('strong', { text: 'Filters combine with AND.' }),
-        el('p', {
-          text: 'AWS CloudTrail lets you filter on one attribute at a time, which is the single most complained-about '
-            + 'thing about it: you cannot ask for "actor adil and action grant" in one query. Here you can stack as '
-            + 'many predicates as you like and they all apply at once. The filter is part of the address, so a '
-            + 'filtered view can be handed to somebody as a link.'
-        })
-      ]));
-
-      mount.appendChild(el('div.row', [filter, el('span.spacer'),
-        ui.viewsBar('audit', function () { return window.location.hash; }),
-        ui.columnsButton(function () { return table; }, 'audit events')]));
-      mount.appendChild(tableHost);
+      var events = ui.card('Event history', [filter, tableHost], {
+        counter: d.audit.length,
+        description: 'Filters combine with AND and are kept in the address.',
+        actions: [
+          ui.viewsBar('audit', function () { return window.location.hash; }),
+          ui.columnsButton(function () { return table; }, 'audit events')
+        ]
+      });
+      tableHost.style.setProperty('margin', '0 calc(-1 * var(--s-l)) calc(-1 * var(--s-l))');
+      var chain = chainCard(d);
+      chain.style.setProperty('margin-top', 'var(--s-l)');
+      mount.appendChild(chain);
+      mount.insertBefore(events, chain);
       paint(filter.tokens());
   }
 
@@ -401,21 +401,14 @@
 
   function liveHeader(body, data, env) {
     var rows = liveRowsOf(env).rows;
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Events held', fmt.num(data.total), { note: 'In the API\'s memory right now' }),
-      ui.statTile('Dropped', fmt.num(data.dropped), { note: 'Pushed out when the memory ring filled' }),
-      ui.statTile('Shown here', fmt.num(rows.length), { note: 'The most recent, up to 500' }),
-      ui.statTile('Since', fmt.stamp(new Date(data.since)), { note: 'When the API last started' })
-    ]));
     body.appendChild(el('p', {
       id: 'audit-live-summary',
       text: fmt.num(data.total) + ' events held, ' + fmt.num(data.dropped) + ' dropped, since ' + fmt.stamp(new Date(data.since)) + '.'
     }));
-    body.appendChild(el('p', [
-      el('span.mono', { text: 'persistence: ' + data.persistence }),
-      ' This trail lives in the API process only and is emptied when the API restarts. Every event is also written to the API\'s log, '
-        + 'which Loki keeps, so for anything older than the list below open ',
-      A.link('the Logs screen', 'logs'),
+    body.appendChild(el('p', [el('span.mono', { text: 'persistence: ' + data.persistence }), ', the newest ' + fmt.num(rows.length) + ' shown.']));
+    body.appendChild(el('p.hint', [
+      'Emptied when the API restarts. Older events are in the API log: ',
+      A.link('Logs', 'logs'),
       '.'
     ]));
   }
@@ -451,12 +444,8 @@
         }
       });
     }
-    body.appendChild(el('p', { text: 'Each row received is sealed with a SHA-256 over its contents and the seal of the row before it, computed in this page. Verifying recomputes every seal.' }));
-    body.appendChild(el('div.callout.warn', [
-      el('strong', { text: 'What this proves.' }),
-      el('p', { text: 'It shows the rows were not altered between the API and this browser, and that none has been changed or removed since they arrived. It does not show the API\'s memory was untouched: the seals are made here, after the API answered.' })
-    ]));
     body.appendChild(el('div.row', [verify, status]));
+    body.appendChild(el('p.hint', { text: 'Seals are made in this page as rows arrive. Verifying proves no row changed since; it does not show the API\'s memory was untouched.' }));
     body.appendChild(ui.disclosure('Demonstration of tamper evidence', [
       el('p.hint', { text: 'Alter one row in this page only, then verify: the chain breaks at that row. Restore it and verify again.' }),
       el('div.row', [alter, restore])
@@ -475,7 +464,7 @@
     };
     var cols = [
       { key: 'seq', label: 'When (UTC)', sort: function (r) { return r.seq; },
-        render: function (r) { return el('span.mono', { text: liveWhen(r.ts) }); },
+        render: function (r) { return el('span.mono', { text: liveWhen(r.ts), style: { 'white-space': 'nowrap' } }); },
         csv: function (r) { return r.ts; } },
       { key: 'actor', label: 'Actor' },
       { key: 'event', label: 'Event', render: function (r) { return el('span.mono', { text: r.event }); } },
@@ -484,16 +473,20 @@
       { key: 'reason', label: 'Reason' },
       { key: 'path', label: 'Path', render: function (r) { return el('span.mono', { text: r.path || '-' }); } },
       { key: 'source', label: 'Source address', render: function (r) { return el('span.mono', { text: r.source || '-' }); } },
-      { key: 'requestId', label: 'Request id', render: function (r) { return el('span.mono', { text: r.requestId || '-' }); } }
+      { key: 'requestId', label: 'Request id', render: function (r) { return r.requestId ? el('span.mono', { title: r.requestId, text: String(r.requestId).slice(0, 12) }) : el('span.mono', { text: '-' }); } }
     ];
     var host = el('div');
+    host.style.setProperty('margin', '0 calc(-1 * var(--s-l))');
+    setCounter(body, rows.length);
     liveTable = null;
     function paint(tokens) {
       visible = ui.applyTokens(rows, tokens || [], accessors);
       if (liveTable) { liveTable.setRows(visible); return; }
       liveTable = ui.table(cols, visible, {
         id: 'audit.live',
+        defaultHidden: ['requestId'],
         caption: 'Audit events held by the console API, newest first, with actor, event, outcome, reason, path, source address and request id',
+        emptyTitle: rows.length ? 'No matches' : 'No events',
         empty: rows.length ? 'No event matches every filter. Remove a token to widen the search.' : 'The API has recorded no audit events yet.',
         sortKey: 'seq', sortDir: 'desc',
         rowKey: function (r) { return String(r.seq); },
@@ -513,6 +506,8 @@
     }, { initial: ui.decodeTokens((ctx && ctx.params && ctx.params.f) || (A.state.params && A.state.params.f)) });
     body.appendChild(el('div.row', [filter, el('span.spacer'), ui.columnsButton(function () { return liveTable; }, 'audit events')]));
     body.appendChild(host);
+    var head = body.closest ? body.closest('#main') : null;
+    if (head) setHeadCounter(head, rows.length);
     paint(filter.tokens());
   }
 
@@ -531,19 +526,16 @@
       sortKey: 'at', sortDir: 'desc',
       rowKey: function (r) { return r.at.toISOString() + r.action + r.target; }
     });
-    return ui.card('This browser', [
-      el('div.callout.info', [
-        el('strong', { text: 'Not sent anywhere.' }),
-        el('p', { text: 'These are actions taken in this page since it loaded. They exist only in this browser tab and are not part of the API\'s audit trail above.' })
-      ]),
-      t
-    ]);
+    return ui.card('This browser', [t], {
+      counter: mine.length,
+      description: 'Actions taken in this page since it loaded. Not sent anywhere and not part of the API trail.'
+    });
   }
 
   function renderLive(mount, ctx) {
     mount.appendChild(ui.pageHeader(
       'Audit',
-      'What the console API itself recorded: sign-ins, refusals and session events, newest first.',
+      'Sign-ins, refusals and session events recorded by the console API.',
       [
         ui.btn('Refresh', { variant: 'ghost', onClick: function () { A.forget(LIVE_PATH); A.refresh(); } }),
         ui.btn('Export as CSV', {
@@ -557,11 +549,15 @@
         })
       ]));
     var opts = { ttlMs: 5000, skeletonRows: 4 };
-    mount.appendChild(A.livePanel('Audit trail held by the API', LIVE_PATH, liveHeader, opts));
-    mount.appendChild(A.livePanel('Tamper evidence', LIVE_PATH, liveChain, opts));
-    mount.appendChild(A.livePanel('Events, newest first', LIVE_PATH, function (b, d, e) { liveTablePanel(b, d, e, ctx); }, opts));
+    var layout = el('div.grid');
+    mount.appendChild(layout);
+    layout.appendChild(A.livePanel('Event history', LIVE_PATH, function (b, d, e) { liveTablePanel(b, d, e, ctx); }, opts));
+    layout.appendChild(el('div.grid.grid-2', [
+      A.livePanel('Trail', LIVE_PATH, liveHeader, opts),
+      A.livePanel('Tamper evidence', LIVE_PATH, liveChain, opts)
+    ]));
     var mine = browserSection();
-    if (mine) mount.appendChild(mine);
+    if (mine) layout.appendChild(mine);
   }
 
   A.screen('audit', {

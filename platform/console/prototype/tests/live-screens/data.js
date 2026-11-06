@@ -108,12 +108,15 @@ module.exports = async function (ctx) {
   await page.route('**/api/pg/activity', (r) => r.fulfill(json(realActivity)));
   await page.evaluate(() => window.ARGUS.forget());
   await goto(page, 'overview');
-  await goto(page, 'data/databases');
-  await settled();
-  const drawn = await page.evaluate(() => ['/api/pg/databases', '/api/pg/activity'].map((p) => {
-    const n = document.querySelector('#main .livepanel[data-path="' + p + '"]');
-    return { path: p, state: n ? n.getAttribute('data-state') : null, reason: n ? n.getAttribute('data-reason') : null, rows: n ? n.querySelectorAll('tbody tr[data-key]').length : 0 };
-  }));
+  const drawnOn = async (tab, p) => {
+    await goto(page, 'data/' + tab);
+    await settled();
+    return page.evaluate((path) => {
+      const n = document.querySelector('#main .livepanel[data-path="' + path + '"]');
+      return { path, state: n ? n.getAttribute('data-state') : null, reason: n ? n.getAttribute('data-reason') : null, rows: n ? n.querySelectorAll('tbody tr[data-key]').length : 0 };
+    }, p);
+  };
+  const drawn = [await drawnOn('databases', '/api/pg/databases'), await drawnOn('sessions', '/api/pg/activity')];
   rec('a full PostgreSQL answer with nothing to footnote draws the databases and sessions panels instead of failing to render',
     drawn[0].state === 'ok' && drawn[0].rows === 3 && drawn[1].state === 'ok' && drawn[1].rows === 3, JSON.stringify(drawn));
   await page.unroute('**/api/pg/databases');

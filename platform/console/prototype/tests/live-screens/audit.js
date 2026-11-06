@@ -35,9 +35,10 @@ module.exports = async function (ctx) {
   const events = (api && api.events) || [];
 
   rec('AUDIT live: the table settles with rows from the API', settled && s.rows.length > 0 && s.errors === 0, s.rows.length + ' rows, ' + events.length + ' events');
-  const want = ['when (utc)', 'actor', 'event', 'outcome', 'reason', 'path', 'source address', 'request id'];
-  rec('AUDIT live: the columns are when, actor, event, outcome, reason, path, source address, request id',
-    s.heads.map((h) => h.toLowerCase()).join('|') === want.join('|'), s.heads.join('|'));
+  const want = ['when (utc)', 'actor', 'event', 'outcome', 'reason', 'path', 'source address'];
+  const allCols = await page.evaluate(() => { const w = document.querySelector('#main .tablewrap'); return w && w.columns ? w.columns.map((c) => c.label.toLowerCase()) : []; });
+  rec('AUDIT live: the columns are when, actor, event, outcome, reason, path, source address, with request id behind the columns preference',
+    s.heads.map((h) => h.toLowerCase()).join('|') === want.join('|') && allCols.join('|') === want.concat(['request id']).join('|'), s.heads.join('|') + ' / ' + allCols.join('|'));
 
   const failedIx = s.rows.findIndex((r) => r[2] === 'auth.login.failed');
   const okIx = s.rows.findIndex((r) => r[2] === 'auth.login.succeeded');

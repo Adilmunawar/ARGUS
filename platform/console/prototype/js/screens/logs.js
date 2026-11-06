@@ -52,9 +52,9 @@
       'cache lookup ' + app.name + ':summary hit',
       'reconciled ' + app.name + ' desired state, no change',
       'POST /api/' + app.name + '/ingest 202 accepted, 41 records',
-      'upstream ' + (app.depends && app.depends.databases ? app.depends.databases[0] : 'postgres') + ' answered in 9 ms',
+      'upstream ' + ((app.depends && app.depends.databases && app.depends.databases[0]) || 'postgres') + ' answered in 9 ms',
       'slow query over 500 ms on ' + app.name + ', plan cached',
-      'retrying publish to ' + (app.depends && app.depends.queues ? app.depends.queues[0] : 'argus.ingest') + ' after a timeout',
+      'retrying publish to ' + ((app.depends && app.depends.queues && app.depends.queues[0]) || 'argus.ingest') + ' after a timeout',
       'health probe ok, ' + app.instances + ' instances serving'
     ];
   }
@@ -137,10 +137,7 @@
         }
       });
 
-      mount.appendChild(ui.pageHeader(
-        'Logs',
-        'Follow the live tail, or query a time range. The tail yields the moment you scroll up.',
-        [refresh]));
+      mount.appendChild(ui.pageHeader('Logs', 'Tail or query the platform logs held in Loki.', [refresh]));
       mount.appendChild(host);
 
       var gen = 0;
@@ -224,7 +221,7 @@
     }));
     var textInput = el('input.field', {
       id: 'log-filter', type: 'search', value: state.text,
-      placeholder: 'Contains...', autocomplete: 'off', spellcheck: 'false'
+      placeholder: 'Find text in a line', autocomplete: 'off', spellcheck: 'false'
     });
 
     levelSel.value = LEVELS.indexOf(state.level) === -1 ? 'all' : state.level;
@@ -236,35 +233,36 @@
     followBtn.setAttribute('aria-pressed', 'true');
 
     var jumpBtn = ui.btn('Jump to the newest line', {
-      variant: 'ghost',
+      variant: 'link',
       onClick: function () { view.follow(true); }
     });
     jumpBtn.hidden = true;
 
-    var announceBtn = ui.btn('Announce the latest line', {
-      onClick: function () {
-        var line = view.latest();
-        var sentence = line
-          ? fmt.stamp(line.at) + ', ' + line.stream + ', ' + line.level + ': ' + line.text
-          : 'No line is in the buffer.';
-        A.announce(sentence);
-        echo.textContent = 'Announced: ' + sentence;
-      }
-    });
+    function announceLatest() {
+      var line = view.latest();
+      var sentence = line
+        ? fmt.stamp(line.at) + ', ' + line.stream + ', ' + line.level + ': ' + line.text
+        : 'No line is in the buffer.';
+      A.announce(sentence);
+      echo.textContent = 'Announced: ' + sentence;
+      echo.hidden = false;
+    }
 
-    var clearBtn = ui.btn('Clear the view', {
-      variant: 'ghost',
-      onClick: function () {
-        buffer.length = 0;
-        state.shown = 0;
-        view.say('Cleared. Lines that arrive from here on will appear below.');
-        paintStatus();
-        A.announce('Log view cleared.');
-      }
-    });
+    function clearView() {
+      buffer.length = 0;
+      state.shown = 0;
+      view.say('Cleared. Lines that arrive from here on will appear below.');
+      paintStatus();
+      A.announce('Log view cleared.');
+    }
 
-    var pollingBtn = ui.btn('Show the console\'s own polling', {
-      variant: 'ghost',
+    var moreMenu = ui.menu([
+      { label: 'Announce the latest line', hint: 'screen reader', onSelect: announceLatest },
+      { label: 'Clear the view', onSelect: clearView }
+    ], { label: 'More log actions' });
+
+    var pollingBtn = ui.btn('Show console polling', {
+      variant: 'link',
       title: 'The console API logs every read it serves. Those lines are hidden unless this is pressed.',
       onClick: function () {
         state.showPolling = !state.showPolling;
@@ -277,7 +275,7 @@
     pollingBtn.setAttribute('aria-pressed', state.showPolling ? 'true' : 'false');
 
     var counters = el('p.logstat');
-    var echo = el('p.logstat');
+    var echo = el('p.logstat', { hidden: true });
 
     var view = ui.logView({
       cap: state.cap,
@@ -384,6 +382,7 @@
       }
       if (state.connectionNote && state.mode === 'follow') parts.push(state.connectionNote);
       counters.textContent = parts.join(' ');
+      if (resultCounter) resultCounter.textContent = '(' + fmt.num(state.shown) + ')';
     }
 
     function announceThrottled(message) {
@@ -425,120 +424,104 @@
       repaintFiltered();
     });
 
-    var followModeBtn = ui.btn('Follow live', { variant: 'ghost', onClick: function () { setMode('follow', true); } });
-    var queryModeBtn = ui.btn('Query a range', { variant: 'ghost', onClick: function () { setMode('query', true); } });
+    var followModeBtn = ui.btn('Live tail', { variant: 'ghost', onClick: function () { setMode('follow', true); } });
+    var queryModeBtn = ui.btn('Time range', { variant: 'ghost', onClick: function () { setMode('query', true); } });
     followModeBtn.setAttribute('data-log-mode', 'follow');
     queryModeBtn.setAttribute('data-log-mode', 'query');
     var modeBar = el('div.rangebar', { role: 'group', 'aria-label': 'What the view shows' }, [followModeBtn, queryModeBtn]);
 
     var rangeSel = el('select.field', { id: 'log-range' }, RANGES.map(function (r) {
-      return el('option', { value: r.key, text: r.label });
+      return el('option', { value: r.key, text: 'Last ' + r.label });
     }));
     rangeSel.value = state.range;
-    var queryInput = el('input.field', {
+    var queryInput = el('input.field.mono', {
       id: 'log-query', type: 'text', value: params.query || '', maxlength: String(QUERY_MAX_CHARS),
       placeholder: '{service_name="console"} |= "error"', autocomplete: 'off', spellcheck: 'false'
     });
-    var runBtn = ui.btn('Run the query', { onClick: function () { runQuery(); } });
+    var runBtn = ui.btn('Run query', { variant: 'primary', onClick: function () { runQuery(); } });
     queryInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); runQuery(); } });
     rangeSel.addEventListener('change', function () { state.range = rangeSel.value; runQuery(); });
 
+    function field(id, label, control, grow) {
+      return el('div.col', { style: grow ? { flex: '1 1 260px', 'min-width': '0' } : { flex: '0 0 auto' } }, [
+        el('label.fieldlabel', { for: id, text: label }), control
+      ]);
+    }
+    [queryInput, textInput].forEach(function (n) { n.style.setProperty('width', '100%'); n.style.setProperty('flex', '0 0 auto'); });
+
     var queryBar = el('div.logbar', { 'data-log-querybar': '' }, [
-      el('label.fieldlabel', { for: 'log-range', text: 'Range' }), rangeSel,
-      el('label.fieldlabel', { for: 'log-query', text: 'LogQL' }), queryInput,
+      field('log-range', 'Time range', rangeSel),
+      field('log-query', 'LogQL query', queryInput, true),
       runBtn
     ]);
     var queryState = el('div.livepanel', { 'data-path': '/api/logs/query' });
 
     var controls = el('div.logbar', [
-      el('label.fieldlabel', { for: 'log-stream', text: 'Stream' }), streamSel,
-      el('label.fieldlabel', { for: 'log-level', text: 'Level' }), levelSel,
-      el('label.fieldlabel', { for: 'log-filter', text: 'Filter' }), textInput,
-      el('label.fieldlabel', { for: 'log-buffer', text: 'Buffer' }), capSel,
-      followBtn, jumpBtn, announceBtn, clearBtn, pollingBtn
+      field('log-stream', 'Stream', streamSel),
+      field('log-level', 'Severity', levelSel),
+      field('log-filter', 'Contains', textInput, true),
+      field('log-buffer', 'Limit', capSel)
     ]);
 
     var sourceSlot = el('div');
-    var tailWrap = el('div', { 'data-log-view': '' }, [
-      el('div.row', [modeBar]),
-      queryBar, queryState, sourceSlot, controls, view.node, counters, echo,
+    var resultActions = [followBtn, jumpBtn, pollingBtn, moreMenu];
+    var resultsCard = ui.card('Log entries', [sourceSlot, queryState, view.node], {
+      counter: 0,
+      actions: resultActions,
+      footer: [counters, echo]
+    });
+    var resultCounter = resultsCard.querySelector('.card-counter');
+    var queryCard = ui.card('Query', [
+      queryBar, controls,
       ui.disclosure('Details', [
         el('p', {
-          text: 'Follow live opens one multiplexed stream for every topic this screen subscribes to, because a ' +
-            'browser allows six connections per origin and a stream that never completes holds one of them ' +
-            'for as long as it is open. Query a range asks Loki once for the newest lines in the window, up to ' +
-            'the buffer size, with the LogQL you give it.'
+          text: 'Live tail opens one multiplexed stream for every topic this screen subscribes to. Time range ' +
+            'asks Loki once for the newest lines in the window, up to the limit, with the LogQL you give it.'
         }),
         el('p', {
-          text: 'The console API logs every read it serves. A line from the console stream that records a ' +
-            'successful GET of an /api/ path is the console polling itself, and is hidden unless "Show the ' +
-            'console\'s own polling" is pressed. Failed reads stay visible.'
+          text: 'A successful GET of an /api/ path logged by the console stream is the console polling itself, ' +
+            'and is hidden unless Show console polling is pressed. Failed reads stay visible.'
         })
       ])
-    ]);
-    host.appendChild(ui.card('Lines', tailWrap));
+    ], { actions: [modeBar] });
+    var tailWrap = el('div.grid', { 'data-log-view': '' }, [queryCard, resultsCard]);
+    host.appendChild(tailWrap);
 
     var healthBody = el('div');
-    host.appendChild(ui.card('Stream health', healthBody));
+    var healthCard = ui.card('Connection', healthBody, { description: 'This browser tab\'s own stream to the console API.' });
+    healthCard.style.setProperty('margin-top', 'var(--s-l)');
+    if (isLive) host.appendChild(healthCard);
 
     function paintHealth() {
       ui.clear(healthBody);
 
-      if (!isLive) {
-        healthBody.appendChild(ui.emptyState(
-          'No stream has been opened',
-          'The console API is not answering, so there is no connection to record.'));
-        return;
-      }
+      if (!isLive) return;
 
       var beats = state.beats;
       var u = ui.uptimeOf(beats, { windowMs: null });
-      healthBody.appendChild(el('div.hbrow', [
-        el('span.hbrow-name', { text: 'Log stream' }),
-        ui.heartbeatBar(beats, {
-          slots: 50,
+      var incidents = ui.incidentsOf(beats);
+      healthBody.appendChild(ui.dl([
+        ['Status', ui.pill(connectionWord(), state.connection === S.OPEN ? 'ok'
+          : state.connection === S.RETRYING ? 'warn' : 'idle')],
+        ['Recent attempts', ui.heartbeatBar(beats, {
+          slots: 30, width: 180, height: 20,
           name: 'The log stream',
           label: ui.heartbeatSentence(beats, { name: 'The log stream' })
-        }),
-        ui.pill(connectionWord(), state.connection === S.OPEN ? 'ok'
-          : state.connection === S.RETRYING ? 'warn' : 'idle')
+        })],
+        ['Opened', u.ratio === null ? '-' : fmt.num(u.up) + ' of ' + fmt.num(u.counted)],
+        ['Interrupted', u.ratio === null ? '-' : fmt.num(u.down)]
       ]));
-
-      healthBody.appendChild(el('div.hbscale', [
-        el('span', { text: 'oldest attempt' }),
-        el('span', { text: 'newest attempt' })
-      ]));
-
-      if (u.ratio === null) {
-        healthBody.appendChild(el('p.hint', { text: 'No connection attempt has completed yet.' }));
-      } else {
-        healthBody.appendChild(ui.dl([
-          ['Attempts recorded', fmt.num(u.counted)],
-          ['Opened', fmt.num(u.up)],
-          ['Interrupted', fmt.num(u.down)],
-          ['Share opened', fmt.pct(u.ratio * 100, 1)],
-          ['History covers', u.coveredMs ? fmt.dur(u.coveredMs / 1000) : 'a single sample']
-        ]));
-        healthBody.appendChild(ui.disclosure('Details', [el('p.hint', {
-          text: 'This is the history of this browser tab\'s own connection, not of the log pipeline. ' +
-            'It is discarded when you leave the screen, so no figure here is offered for a window ' +
-            'longer than it covers.'
-        })]));
-      }
-
-      var incidents = ui.incidentsOf(beats);
-      if (incidents.length) {
-        healthBody.appendChild(el('div.sectiontitle', { text: 'Interruptions' }));
-        healthBody.appendChild(el('div.stack', incidents.slice(-6).reverse().map(function (inc) {
-          return el('div.row', [
-            el('span', {
-              text: 'Went from ' + inc.fromWord + ' to ' + inc.toWord +
-                (inc.heldMs !== null ? ' after ' + fmt.dur(inc.heldMs / 1000) : '') + '.'
-            }),
-            el('span.num', { text: inc.at ? fmt.stamp(new Date(inc.at)) : '-' })
-          ]);
-        })));
-      }
+      var details = [el('p.hint', {
+        text: 'The history of this browser tab\'s own connection, not of the log pipeline. It is discarded when ' +
+          'you leave the screen' + (u.coveredMs ? ' and covers ' + fmt.dur(u.coveredMs / 1000) : '') + '.'
+      })];
+      incidents.slice(-6).reverse().forEach(function (inc) {
+        details.push(el('p.hint', {
+          text: (inc.at ? fmt.stamp(new Date(inc.at)) + ': ' : '') + 'went from ' + inc.fromWord + ' to ' + inc.toWord +
+            (inc.heldMs !== null ? ' after ' + fmt.dur(inc.heldMs / 1000) : '') + '.'
+        }));
+      });
+      healthBody.appendChild(ui.disclosure('Details', details));
     }
 
     function recordBeat(status, note) {
@@ -710,8 +693,7 @@
 
     if (!isLive) {
       sourceSlot.appendChild(ui.stateBlock('sample', {
-        detail: 'The lines below are the bundled sample, not a tail. Start the API with `npm start` in ' +
-          'platform/console/server, with ARGUS_LOKI_URL pointing at the deployed Loki, to follow the real thing.'
+        detail: 'These lines are a bundled sample, not a tail. Run the console API with ARGUS_LOKI_URL set to tail Loki.'
       }));
 
       sample = sampleBuffer();
@@ -732,6 +714,7 @@
         replayBtn.setAttribute('aria-pressed', 'false');
       };
       replayBtn = ui.btn('Replay the bundled sample', {
+        variant: 'link',
         title: 'Appends the bundled lines again, one every two seconds, to exercise the append path.',
         onClick: function () {
           if (replayTimer) {
@@ -761,7 +744,7 @@
       });
       replayBtn.setAttribute('aria-pressed', 'false');
       replayBtn.hidden = state.mode !== 'follow';
-      controls.appendChild(replayBtn);
+      moreMenu.parentNode.insertBefore(replayBtn, moreMenu);
       A.onLeave(function () {
         if (replayTimer) { window.clearInterval(replayTimer); replayTimer = null; }
         view.stop();

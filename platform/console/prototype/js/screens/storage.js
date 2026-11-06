@@ -30,9 +30,28 @@
     return s === null ? el('span.muted', { text: 'not reported' }) : el('span.mono', { text: s });
   }
 
+  function cap(t) { t = String(t); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+  function pill(text, tone, opts) { return ui.status(tone, cap(text), opts); }
+
+  function tile(label, value, opts) {
+    opts = opts || {};
+    return [label, el('div.col', [
+      el('span', { text: String(value) + (opts.unit ? ' ' + opts.unit : '') }),
+      opts.note ? el('span.hint', { text: opts.note }) : null
+    ])];
+  }
+
+  function figures(list) {
+    var node = ui.dl(list);
+    node.style.marginBottom = 'var(--s-m)';
+    return node;
+  }
+
+
   function unknownCell(label, reason) {
-    return el('span', [
-      ui.pill(label || 'unknown', 'idle', reason ? { title: reason } : null),
+    return el('span.muted', { title: reason || null }, [
+      cap(label || 'unknown'),
       reason ? el('span.sr', { text: ' ' + reason }) : null
     ]);
   }
@@ -44,7 +63,7 @@
     return nodes.length ? ui.disclosure('Details', nodes) : document.createDocumentFragment();
   }
 
-  function verdict(text) { return el('p', { text: text }); }
+  function verdict(text) { return el('p', { text: text, style: { 'margin-bottom': 'var(--s-s)' } }); }
 
   var SIZE_NOTE =
     'On disk is summed from volume metadata rather than by listing objects, so it includes volume overhead and ' +
@@ -147,12 +166,12 @@
       ? 'A signed S3 call was accepted and ' + fmt.num(up) + ' of ' + fmt.num(comps.length) + ' components answered.'
       : 'The object store refused a signed S3 call' + (s3.reason ? ' (' + s3.reason + ')' : '') + '. ' + (s3.message || '')));
 
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Signed S3 call', s3.signedCallOk ? 'accepted' : 'refused', { note: 'ListObjectsV2, now' }),
-      ui.statTile('Writable volumes', d.writable ? 'yes' : 'no', {
+    body.appendChild(figures([
+      tile('Signed S3 call', s3.signedCallOk ? 'accepted' : 'refused', { note: 'ListObjectsV2, now' }),
+      tile('Writable volumes', d.writable ? 'yes' : 'no', {
         note: d.writable ? 'At least one collection' : 'Writes will fail'
       }),
-      ui.statTile('Free volume slots',
+      tile('Free volume slots',
         d.freeVolumes === null || d.freeVolumes === undefined ? 'unknown' : fmt.num(d.freeVolumes),
         { note: d.freeVolumes === null || d.freeVolumes === undefined ? 'Topology not reported' : 'Still allocatable' })
     ]));
@@ -167,7 +186,7 @@
       { key: 'name', label: 'Component', render: function (c) { return el('code.mono', { text: c.name }); } },
       {
         key: 'reachable', label: 'State', status: true,
-        render: function (c) { return c.reachable ? ui.pill('reachable', 'ok') : ui.pill('unreachable', 'bad'); }
+        render: function (c) { return c.reachable ? pill('reachable', 'ok') : pill('unreachable', 'bad'); }
       },
       { key: 'version', label: 'Version', render: function (c) { return c.version ? el('span.mono', { text: c.version }) : el('span.muted', { text: 'not reported' }); } },
       { key: 'latencyMs', label: 'Latency', align: 'right', render: function (c) { return fmt.ms(c.latencyMs); } },
@@ -203,18 +222,18 @@
     if (d.partial) line += ' The totals are partial.';
     body.appendChild(verdict(line));
 
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Free on disk', totals ? bytesOr(totals.freeBytes) : 'unknown', {
+    body.appendChild(figures([
+      tile('Free on disk', totals ? bytesOr(totals.freeBytes) : 'unknown', {
         note: totals ? bytesOr(totals.usedBytes) + ' used of ' + bytesOr(totals.allBytes) : 'No volume server answered'
       }),
-      ui.statTile('Free volume slots',
+      tile('Free volume slots',
         slots.free === null || slots.free === undefined ? 'unknown' : fmt.num(slots.free),
         {
           note: slots.max === null || slots.max === undefined
             ? 'Ceiling not reported'
             : 'of ' + fmt.num(slots.max) + ', each ' + fmt.num(slots.volumeSizeMB) + ' MB'
         }),
-      ui.statTile('Room before writes fail',
+      tile('Room before writes fail',
         d.available === null || d.available === undefined ? 'unknown' : bytesOr(d.available),
         { note: d.binding === 'volume-slots' ? 'Slots bind' : d.binding === 'disk' ? 'Disk binds' : 'Binding unknown' })
     ]));
@@ -223,7 +242,7 @@
       { key: 'url', label: 'Volume server', render: function (n) { return el('code.mono', { text: n.url }); } },
       {
         key: 'ok', label: 'State', status: true,
-        render: function (n) { return n.ok ? ui.pill('answered', 'ok') : ui.pill('unreachable', 'bad', { title: n.error || 'No reason was given.' }); }
+        render: function (n) { return n.ok ? pill('answered', 'ok') : pill('unreachable', 'bad', { title: n.error || 'No reason was given.' }); }
       },
       { key: 'dataCenter', label: 'Site', render: function (n) { return (n.dataCenter || '-') + ' / ' + (n.rack || '-'); } },
       {
@@ -275,7 +294,7 @@
     }
 
     body.appendChild(el('div.row', [
-      ui.pill('Object lock: ' + shieldLabel(d.verdict), shieldTone(d.verdict)),
+      pill('Object lock: ' + shieldLabel(d.verdict), shieldTone(d.verdict)),
       el('span.muted', { text: 'probed ' + (stamp(d.probedAt) || 'at an unrecorded time') })
     ]));
 
@@ -323,7 +342,7 @@
         key: 'enforced', label: 'Enforcement', status: true,
         render: function (b) {
           return el('span', [
-            ui.pill(shieldLabel(b.enforced), shieldTone(b.enforced)),
+            pill(shieldLabel(b.enforced), shieldTone(b.enforced)),
             b.probeError ? el('span.muted', { text: ' ' + b.probeError }) : null
           ]);
         }
@@ -372,10 +391,10 @@
   function lockCell(b) {
     if (!b.lock) {
       return b.lockDeclared
-        ? ui.pill('declared, not applied', 'bad')
+        ? pill('declared, not applied', 'bad')
         : el('span.muted', { text: 'none' });
     }
-    return ui.pill(b.lock + ' ' + fmt.num(b.lockDays) + ' d - ' + shieldLabel(b.lockEnforced), shieldTone(b.lockEnforced));
+    return pill(b.lock + ' ' + fmt.num(b.lockDays) + ' d - ' + shieldLabel(b.lockEnforced), shieldTone(b.lockEnforced));
   }
 
   function bucketName(b, can) {
@@ -388,6 +407,8 @@
     return A.link(b.name, ROUTE, null, { bucket: b.name }, 'rlink');
   }
 
+  var bucketTable = null;
+
   function renderBuckets(can) {
     return function (body, d) {
       var list = d.buckets || [];
@@ -396,10 +417,13 @@
       var extra = drift.existsButUndeclared || [];
       var verified = !(d.inventorySource && d.inventorySource.indexOf('storage-init') !== 0);
 
-      var line = fmt.num(list.length) + ' bucket' + (list.length === 1 ? '' : 's') +
-        (verified ? '' : ', from the declared list rather than a verified inventory') +
-        (d.topologyOk === false ? '; no size could be measured' : '') + '.';
-      body.appendChild(verdict(line));
+      var row = body.parentNode && body.parentNode.parentNode ? body.parentNode.parentNode.querySelector('.card-titlerow') : null;
+      if (row && !row.querySelector('.card-counter')) row.appendChild(el('span.card-counter', { text: '(' + fmt.num(list.length) + ')' }));
+      if (!verified || d.topologyOk === false) {
+        body.appendChild(el('div.callout.info', [el('strong', {
+          text: (verified ? '' : 'From the declared list, not a verified inventory. ') + (d.topologyOk === false ? 'No size could be measured.' : '')
+        })]));
+      }
 
       if (d.declaredError) {
         body.appendChild(el('div.callout.warn', [el('strong', { text: 'The declared bucket file could not be read: ' + d.declaredError })]));
@@ -411,7 +435,7 @@
         body.appendChild(el('div.callout.warn', [el('strong', { text: 'Exists but undeclared: ' + extra.join(', ') + '.' })]));
       }
 
-      body.appendChild(ui.table([
+      bucketTable = ui.table([
         { key: 'name', label: 'Bucket', render: function (b) { return bucketName(b, can); } },
         { key: 'diskBytes', label: 'On disk', align: 'right', render: sizeCell, sort: function (b) { return b.unknownSize ? null : b.diskBytes; } },
         { key: 'reclaimableBytes', label: 'Reclaimable', align: 'right', render: reclaimableCell, sort: function (b) { return b.unknownSize ? null : b.reclaimableBytes; } },
@@ -420,7 +444,7 @@
           key: 'versioning', label: 'Versioning',
           render: function (b) {
             if (b.versioning === null || b.versioning === undefined) return unknownCell();
-            return b.versioning ? ui.pill('on', 'info') : el('span.muted', { text: 'off' });
+            return b.versioning ? pill('on', 'info') : el('span.muted', { text: 'Off' });
           }
         },
         { key: 'lock', label: 'Object lock', status: true, render: lockCell },
@@ -435,11 +459,14 @@
           render: function (b) { return b.backup ? b.backup.tool + ' ' + b.backup.schedule : el('span.muted', { text: 'none declared' }); }
         }
       ], list, {
+        id: 'storage.buckets', defaultHidden: ['reclaimableBytes', 'needles', 'lifecycleDays', 'backup'],
         caption: 'Buckets in the object store, with size, lock state and declared intent',
         sortKey: 'name',
         rowKey: function (b) { return b.name; },
+        emptyTitle: 'No buckets',
         empty: 'No bucket was found and none is declared.'
-      }));
+      });
+      body.appendChild(bucketTable);
 
       var notes = [];
       if (!verified) {
@@ -765,13 +792,13 @@
       if (!d.lockReadable) retentionValue = unknownCell('could not be read');
       else if (d.retention) {
         retentionValue = el('span', [
-          ui.pill(d.retention.mode || 'retained', 'info'),
+          pill(d.retention.mode || 'retained', 'info'),
           el('span', { text: ' until ' + (stamp(d.retention.until) || 'an unrecorded date') })
         ]);
       } else retentionValue = el('span.muted', { text: 'none' });
 
       var holdValue;
-      if (d.legalHold === true) holdValue = ui.pill('ON', 'warn');
+      if (d.legalHold === true) holdValue = pill('ON', 'warn');
       else if (d.legalHold === false) holdValue = el('span.muted', { text: 'off' });
       else holdValue = unknownCell('not reported');
 
@@ -884,18 +911,18 @@
           holder.appendChild(ui.notFound('bucket', bucket, ROUTE, 'All buckets'));
           return;
         }
-        holder.appendChild(ui.pageHeader('Object storage', 'One bucket, read from the object store.', [refresh]));
+        holder.appendChild(ui.pageHeader(bucket, 'Bucket', [refresh]));
         paintBrowser(holder, bucket, prefix, key, can);
       });
     }).then(null, function (err) {
       if (!current()) return;
       ui.clear(holder);
-      holder.appendChild(ui.pageHeader('Object storage', 'One bucket, read from the object store.', [refresh]));
+      holder.appendChild(ui.pageHeader(bucket, 'Bucket', [refresh]));
       holder.appendChild(ui.stateBlock('failed', { reason: 'render', detail: String(err && err.message ? err.message : err) }));
     });
   }
 
-  var OVERVIEW_DESC = 'What exists, how much room is left before writes fail, and whether immutability is enforced.';
+  var OVERVIEW_DESC = null;
 
   function buildOverview(mount) {
     var holder = el('div', [ui.skeleton(4)]);
@@ -904,12 +931,17 @@
     listable().then(function (can) {
       if (!current()) return;
       ui.clear(holder);
-      holder.appendChild(A.livePanel('Buckets', BUCKETS, renderBuckets(can), { skeletonRows: 5 }));
-      holder.appendChild(el('div.grid.grid-2', [
-        A.livePanel('Capacity', '/api/storage/capacity', renderCapacity, { ttlMs: 10000 }),
-        A.livePanel('Immutability', '/api/storage/lock-status', renderLocks, {})
+      holder.appendChild(el('div.grid', [
+        A.livePanel('Buckets', BUCKETS, renderBuckets(can), {
+          skeletonRows: 5,
+          card: { actions: [ui.columnsButton(function () { return bucketTable; }, 'buckets'), ui.exportButton(function () { return bucketTable; }, 'buckets')] }
+        }),
+        el('div.grid.grid-2', [
+          A.livePanel('Capacity', '/api/storage/capacity', renderCapacity, { ttlMs: 10000 }),
+          A.livePanel('Immutability', '/api/storage/lock-status', renderLocks, {})
+        ]),
+        A.livePanel('Service health', '/api/storage/health', renderHealth, { ttlMs: 10000 })
       ]));
-      holder.appendChild(A.livePanel('Service health', '/api/storage/health', renderHealth, { ttlMs: 10000 }));
     });
   }
 

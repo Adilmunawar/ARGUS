@@ -113,12 +113,31 @@
   function clipped(text, max) {
     if (text === null || text === undefined) return unknown('The server did not return this text.');
     var s = String(text).replace(/\s+/g, ' ').trim();
-    var cap = max || 110;
-    if (s.length <= cap) return mono(s);
-    return el('span.mono', { text: s.slice(0, cap) + '\u2026', title: s });
+    var limit = max || 110;
+    if (s.length <= limit) return mono(s);
+    return el('span.mono', { text: s.slice(0, limit) + '\u2026', title: s });
   }
 
   function hint(text) { return el('p.hint', { text: text }); }
+
+  function cap(t) { t = String(t); return t.charAt(0).toUpperCase() + t.slice(1); }
+
+  function pill(text, tone, opts) { return ui.status(tone, cap(text), opts); }
+
+  function tile(label, value, opts) {
+    opts = opts || {};
+    return [label, el('div.col', [
+      el('span', { text: String(value) + (opts.unit ? ' ' + opts.unit : '') }),
+      opts.note ? el('span.hint', { text: opts.note }) : null
+    ])];
+  }
+
+  function figures(list) {
+    var node = ui.dl(list);
+    node.style.marginBottom = 'var(--s-m)';
+    return node;
+  }
+
 
   function details(list) {
     var nodes = (list || []).filter(Boolean).map(function (t) {
@@ -128,16 +147,19 @@
   }
 
   function calloutOf(tone, title, text) {
+    var long = tone === 'info' && text && String(text).length > 140;
     return el('div.callout.' + tone, [
       el('strong', { text: title }),
-      text ? el('p', { text: text }) : null
+      text && !long ? el('p', { text: text }) : null,
+      long ? ui.disclosure('Details', [el('p', { text: text })]) : null
     ]);
   }
 
   function livePanel(title, path, render, opts) {
     opts = opts || {};
     return A.livePanel(title, path, render, {
-      ttlMs: opts.ttlMs, flush: opts.flush, actions: opts.actions, skeletonRows: opts.skeletonRows
+      ttlMs: opts.ttlMs, skeletonRows: opts.skeletonRows,
+      card: { flush: opts.flush, actions: opts.actions, description: opts.description }
     });
   }
 
@@ -172,13 +194,13 @@
   }
 
   function renderPgHealth(body, d) {
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Role', tileText(d.role), { note: 'One cluster; see Replication' }),
-      ui.statTile('Version', tileText(d.version), { note: 'Reported by the server' }),
-      ui.statTile('Uptime', isNum(d.uptimeSeconds) ? fmt.dur(d.uptimeSeconds) : 'unknown', {
+    body.appendChild(figures([
+      tile('Role', tileText(d.role), { note: 'One cluster; see Replication' }),
+      tile('Version', tileText(d.version), { note: 'Reported by the server' }),
+      tile('Uptime', isNum(d.uptimeSeconds) ? fmt.dur(d.uptimeSeconds) : 'unknown', {
         note: 'Since postmaster start'
       }),
-      ui.statTile('Round trip', isNum(d.latencyMs) ? fmt.ms(d.latencyMs) : 'unknown', {
+      tile('Round trip', isNum(d.latencyMs) ? fmt.ms(d.latencyMs) : 'unknown', {
         note: 'SELECT 1 from this console'
       })
     ]));
@@ -189,9 +211,9 @@
         key: 'ok', label: 'Verdict', status: true,
         sort: function (r) { return r.ok === false ? 0 : r.ok === true ? 2 : 1; },
         render: function (r) {
-          if (r.ok === true) return ui.pill('ok', 'ok');
-          if (r.ok === false) return ui.pill('attention', 'bad');
-          return ui.pill('not applicable', 'idle', { title: 'This check has no pass or fail here; read the detail.' });
+          if (r.ok === true) return pill('passed', 'ok');
+          if (r.ok === false) return pill('attention', 'bad');
+          return pill('not applicable', 'idle', { title: 'This check has no pass or fail here; read the detail.' });
         }
       },
       { key: 'detail', label: 'Detail', render: function (r) { return el('span', { text: r.detail || '' }); } }
@@ -203,18 +225,16 @@
       empty: 'The health reader returned no components, which should not happen.'
     }));
 
-    body.insertBefore(el('p', {
-      text: (d.degraded ? 'At least one check needs attention.' : 'No check is failing.') +
-        ' Deadlocks since the statistics were last reset: ' +
-        (isNum(d.deadlocksSinceStatsReset) ? fmt.num(d.deadlocksSinceStatsReset) : 'not reported') + '.'
-    }), body.firstChild);
+    body.insertBefore(el('p', { style: { 'margin-bottom': 'var(--s-s)' } }, [
+      d.degraded ? ui.status('bad', 'At least one check needs attention') : ui.status('ok', 'No check is failing'),
+      el('span.muted', { text: ' · Deadlocks since reset: ' + (isNum(d.deadlocksSinceStatsReset) ? fmt.num(d.deadlocksSinceStatsReset) : 'not reported') })
+    ]), body.firstChild);
   }
 
   function renderPgReplication(body, d) {
     if (!d.configured) {
       body.appendChild(el('div.callout.info', [
-        el('strong', { text: 'Not configured. There is one node.' }),
-        el('p', { text: d.message || 'Nothing is replicating this cluster.' })
+        el('strong', { text: 'Not configured. There is one node.' })
       ]));
 
       var c = d.capable || {};
@@ -227,14 +247,14 @@
         ['Logical subscriptions', numNode((d.counts || {}).logicalSubscriptions, 'The reader did not report a subscription count.')],
         ['wal_level', c.walLevel ? mono(c.walLevel) : unknown('wal_level was not reported.')],
         ['Could feed a standby', c.canFeedStandby === true
-          ? ui.pill('yes', 'idle', { title: 'A setting, not an observation.' })
-          : ui.pill('no', 'warn', { title: 'wal_level cannot feed a standby as configured.' })],
+          ? pill('yes', 'idle', { title: 'A setting, not an observation.' })
+          : pill('no', 'warn', { title: 'wal_level cannot feed a standby as configured.' })],
         ['max_wal_senders', numNode(c.maxWalSenders, 'max_wal_senders was not reported.')],
         ['archive_mode', c.archiveMode ? mono(c.archiveMode) : unknown('archive_mode was not reported.')],
         ['synchronous_commit', c.synchronousCommit ? mono(c.synchronousCommit) : unknown('synchronous_commit was not reported.')]
       ]));
 
-      body.appendChild(details([c.note ||
+      body.appendChild(details([d.message || null, c.note ||
         'These are settings, not observations: they say this server could accept a standby, not that one exists.']));
       return;
     }
@@ -246,7 +266,7 @@
 
     body.appendChild(ui.table([
       { key: 'applicationName', label: 'Standby', render: function (r) { return mono(r.applicationName || r.clientAddr || ('pid ' + r.pid)); } },
-      { key: 'state', label: 'State', status: true, render: function (r) { return ui.pill(r.state || 'unknown', r.state === 'streaming' ? 'ok' : 'warn'); } },
+      { key: 'state', label: 'State', status: true, render: function (r) { return pill(r.state || 'unknown', r.state === 'streaming' ? 'ok' : 'warn'); } },
       { key: 'syncState', label: 'Sync', render: function (r) { return el('span', { text: r.syncState || 'unknown' }); } },
       {
         key: 'replayLagBytes', label: 'Replay lag (WAL)', align: 'right',
@@ -267,7 +287,7 @@
       body.appendChild(el('div.sectiontitle', { text: 'Replication slots' }));
       body.appendChild(ui.table([
         { key: 'name', label: 'Slot', render: function (r) { return mono(r.name); } },
-        { key: 'active', label: 'Active', status: true, render: function (r) { return r.active ? ui.pill('active', 'ok') : ui.pill('inactive', 'bad', { title: r.warning || '' }); } },
+        { key: 'active', label: 'Active', status: true, render: function (r) { return r.active ? pill('active', 'ok') : pill('inactive', 'bad', { title: r.warning || '' }); } },
         { key: 'walStatus', label: 'WAL status', render: function (r) { return el('span', { text: r.walStatus || 'unknown' }); } },
         { key: 'retainedWalBytes', label: 'WAL retained', align: 'right', render: function (r) { return bytesNode(r.retainedWalBytes, 'The server did not report retained WAL for this slot.'); } }
       ], d.slots, {
@@ -279,18 +299,19 @@
     }
   }
 
+  var dbTable = null;
+
   function renderPgDatabases(body, d) {
     var list = d.databases || [];
 
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Databases', fmt.num(d.count), { note: 'On this cluster' }),
-      ui.statTile(d.sizesComplete ? 'Total size' : 'Size measured so far',
+    body.appendChild(figures([
+      tile(d.sizesComplete ? 'Total size' : 'Size measured so far',
         tileText(bytesText(d.sizesComplete ? d.totalSizeBytes : d.measuredSizeBytes)), {
           note: d.sizesComplete
             ? 'Every database reported a size'
             : fmt.num(d.measuredCount) + ' of ' + fmt.num(d.count) + ' databases reported a size'
         }),
-      ui.statTile('Block I/O timing', d.ioTimingMeasured ? 'measured' : 'off', {
+      tile('Block I/O timing', d.ioTimingMeasured ? 'measured' : 'off', {
         note: d.ioTimingMeasured ? 'track_io_timing is on' : 'Times are null, not zero'
       })
     ]));
@@ -347,8 +368,8 @@
       {
         key: 'consoleCanConnect', label: 'Console access', status: true,
         render: function (r) {
-          if (r.consoleCanConnect) return ui.pill('can connect', 'ok');
-          return ui.pill('no access', 'idle', {
+          if (r.consoleCanConnect) return pill('can connect', 'ok');
+          return pill('no access', 'idle', {
             title: r.allowsConnections === false
               ? 'This database does not accept connections at all (datallowconn is false), which is normal for template0.'
               : 'The console role was not granted CONNECT on this database. That is a deliberate grant in platform/compose/sql/20-grants.sql, not a fault.'
@@ -357,12 +378,14 @@
       }
     ];
 
-    body.appendChild(ui.table(cols, list, {
+    dbTable = ui.table(cols, list, {
+      id: 'data.databases', defaultHidden: ['backends', 'tempBytes'],
       caption: 'Databases on this cluster, with owner, size, sessions, backends, cache hit ratio, deadlocks, temporary bytes written and whether the console may connect',
       sortKey: 'sizeBytes', sortDir: 'desc',
       rowKey: function (r) { return r.name; },
       empty: 'This cluster reported no databases, which should not happen.'
-    }));
+    });
+    body.appendChild(dbTable);
 
     body.appendChild(details([d.ioTimingNote || null, d.sizeError ? 'Sizes: ' + d.sizeError : null]));
   }
@@ -376,18 +399,18 @@
       ]));
     }
 
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Client backends', tileText(isNum(s.clientBackends) ? fmt.num(s.clientBackends) : null), {
+    body.appendChild(figures([
+      tile('Client backends', tileText(isNum(s.clientBackends) ? fmt.num(s.clientBackends) : null), {
         note: isNum(s.maxConnections) ? 'of ' + fmt.num(s.maxConnections) + ' max_connections' : 'max_connections not reported'
       }),
-      ui.statTile('Active', tileText(isNum(s.active) ? fmt.num(s.active) : null), { note: 'Running a statement now' }),
-      ui.statTile('Idle in transaction', tileText(isNum(s.idleInTransaction) ? fmt.num(s.idleInTransaction) : null), {
+      tile('Active', tileText(isNum(s.active) ? fmt.num(s.active) : null), { note: 'Running a statement now' }),
+      tile('Idle in transaction', tileText(isNum(s.idleInTransaction) ? fmt.num(s.idleInTransaction) : null), {
         note: 'Holds a snapshot and blocks vacuum cluster-wide'
       }),
-      ui.statTile('Waiting on a lock', tileText(isNum(s.waitingOnLock) ? fmt.num(s.waitingOnLock) : null), {
+      tile('Waiting on a lock', tileText(isNum(s.waitingOnLock) ? fmt.num(s.waitingOnLock) : null), {
         note: 'Blocked by another session'
       }),
-      ui.statTile('Longest transaction',
+      tile('Longest transaction',
         isNum(s.longestTransactionSeconds) ? fmt.dur(s.longestTransactionSeconds) : 'none open', {
           note: 'Excludes this console\'s own read'
         })
@@ -409,7 +432,7 @@
         render: function (r) {
           if (!r.state) return el('span.muted', { text: r.backendType || 'background' });
           var tone = r.state === 'active' ? 'ok' : r.state.indexOf('idle in transaction') === 0 ? 'warn' : 'idle';
-          return ui.pill(r.state, tone);
+          return pill(r.state, tone);
         }
       },
       {
@@ -443,7 +466,7 @@
         render: function (r) {
           if (r.blockedBy === null || r.blockedBy === undefined) return el('span.muted', { text: 'n/a' });
           if (!r.blockedBy.length) return el('span.muted', { text: 'cleared' });
-          return ui.pill(r.blockedBy.join(', '), 'bad', { title: 'Process ids holding the lock this session wants.' });
+          return pill(r.blockedBy.join(', '), 'bad', { title: 'Process ids holding the lock this session wants.' });
         }
       }
     ], d.sessions || [], {
@@ -535,17 +558,17 @@
         key: 'predefined', label: 'Kind', status: true,
         render: function (r) {
           return r.predefined
-            ? ui.pill('predefined', 'idle', { title: 'One of PostgreSQL\'s own roles, not created by this platform.' })
-            : ui.pill('local', 'info');
+            ? pill('predefined', 'idle', { title: 'One of PostgreSQL\'s own roles, not created by this platform.' })
+            : pill('local', 'info');
         }
       },
       {
         key: 'superuser', label: 'Superuser', status: true,
-        render: function (r) { return r.superuser ? ui.pill('superuser', 'bad', { title: 'Bypasses every permission check.' }) : el('span.muted', { text: 'no' }); }
+        render: function (r) { return r.superuser ? pill('superuser', 'bad', { title: 'Bypasses every permission check.' }) : el('span.muted', { text: 'no' }); }
       },
       {
         key: 'canLogin', label: 'Login', status: true,
-        render: function (r) { return r.canLogin ? ui.pill('can log in', 'warn') : el('span.muted', { text: 'group only' }); }
+        render: function (r) { return r.canLogin ? pill('can log in', 'warn') : el('span.muted', { text: 'group only' }); }
       },
       {
         key: 'memberOf', label: 'Member of', sortable: false,
@@ -583,29 +606,66 @@
       'Whether a role has a password is in pg_authid, which only a superuser may read, so it is not reported here.']));
   }
 
+  function counted(title, path, render, count, opts) {
+    var card = null;
+    card = livePanel(title, path, function (body, d, env) {
+      var n = count(d);
+      var row = card.querySelector('.card-titlerow');
+      if (row && isNum(n) && !row.querySelector('.card-counter')) row.appendChild(el('span.card-counter', { text: '(' + fmt.num(n) + ')' }));
+      render(body, d, env);
+      if (opts && opts.onDraw) opts.onDraw(card);
+    }, opts);
+    return card;
+  }
+
+  function sampleGate(fn) {
+    return function () {
+      var mode = A.storeMode();
+      if (mode === A.MODE.LIVE) return fn();
+      if (mode === A.MODE.SAMPLE) return sampleBlock();
+      var host = el('div', [ui.skeleton(3)]);
+      A.whenProbed(function (m) {
+        ui.clear(host);
+        host.appendChild(m === A.MODE.LIVE ? fn() : sampleBlock());
+      });
+      return host;
+    };
+  }
+
+  function sampleBlock() {
+    return ui.stateBlock('sample', {
+      reason: 'sample-mode',
+      detail: 'These stores are read live through the console API; there is no sample data for them. Open the console the API serves and sign in.'
+    });
+  }
+
   function databasesTab() {
-    return el('div.stack', [
+    return el('div.grid', [
       el('div.grid.grid-2', [
-        livePanel('Cluster health', API.pgHealth, renderPgHealth, {
-          ttlMs: 10000
-        }),
-        livePanel('Replication', API.pgReplication, renderPgReplication, {
-          ttlMs: 10000
-        })
+        livePanel('Cluster health', API.pgHealth, renderPgHealth, { ttlMs: 10000 }),
+        livePanel('Replication', API.pgReplication, renderPgReplication, { ttlMs: 10000 })
       ]),
-      livePanel('Databases', API.pgDatabases, renderPgDatabases, {
-        ttlMs: 10000
-      }),
-      livePanel('Sessions now', API.pgActivity, renderPgActivity, {
-        ttlMs: 2000
-      }),
-      livePanel('Slowest statements since the counters were reset', API.pgStatements, renderPgStatements, {
-        ttlMs: 15000
-      }),
-      livePanel('Roles', API.pgRoles, renderPgRoles, {
-        ttlMs: 30000
+      counted('Databases', API.pgDatabases, renderPgDatabases, function (d) { return d.count; }, {
+        ttlMs: 10000,
+        onDraw: function (card) {
+          var row = card.querySelector('.card-head');
+          if (!row || row.querySelector('.card-actions')) return;
+          row.appendChild(el('div.card-actions', [ui.columnsButton(function () { return dbTable; }, 'databases'), ui.exportButton(function () { return dbTable; }, 'databases')]));
+        }
       })
     ]);
+  }
+
+  function sessionsTab() {
+    return counted('Sessions', API.pgActivity, renderPgActivity, function (d) { return (d.sessions || []).length; }, { ttlMs: 2000 });
+  }
+
+  function statementsTab() {
+    return counted('Slowest statements', API.pgStatements, renderPgStatements, function (d) { return d.available === false ? null : (d.statements || []).length; }, { ttlMs: 15000 });
+  }
+
+  function rolesTab() {
+    return counted('Roles', API.pgRoles, renderPgRoles, function (d) { return (d.roles || []).length; }, { ttlMs: 30000 });
   }
 
   function renderStorageSummary(body, d) {
@@ -615,19 +675,17 @@
     var locked = list.filter(function (b) { return b.lock; }).length;
     var drift = d.drift || {};
     var off = (drift.declaredButMissing || []).length + (drift.existsButUndeclared || []).length;
-    body.appendChild(el('p', {
-      text: fmt.num(list.length) + ' bucket' + (list.length === 1 ? '' : 's') +
-        (known.length ? ', about ' + fmt.bytes(total) + ' on disk across ' + fmt.num(known.length) + ' measured' : ', none measured') +
-        ', ' + fmt.num(locked) + ' with object lock' +
-        (off ? ', ' + fmt.num(off) + ' out of step with buckets.yaml' : '') + '.'
-    }));
-    body.appendChild(A.link('Open Object storage for buckets, capacity, immutability and browsing', 'storage'));
+    body.appendChild(ui.dl([
+      ['Buckets', fmt.num(list.length)],
+      ['On disk', known.length ? 'About ' + fmt.bytes(total) + ' across ' + fmt.num(known.length) + ' measured' : 'None measured'],
+      ['Object lock', fmt.num(locked)],
+      ['Out of step with buckets.yaml', off ? pill(fmt.num(off), 'warn') : '0']
+    ]));
+    body.appendChild(el('p', { style: { 'margin-top': 'var(--s-s)' } }, A.link('View buckets on Object storage', 'storage')));
   }
 
   function bucketsTab() {
-    return el('div.stack', [
-      livePanel('Object storage', API.storageBuckets, renderStorageSummary, { ttlMs: 15000, skeletonRows: 1 })
-    ]);
+    return livePanel('Object storage', API.storageBuckets, renderStorageSummary, { ttlMs: 15000, skeletonRows: 1 });
   }
 
   var SPILL_WARN = 0.5;
@@ -641,18 +699,18 @@
   function renderCacheServer(body, d) {
     var srv = d.server || {}, tp = d.throughput || {}, id = d.identity || {}, clock = d.clock || {};
 
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Operations', tileText(metricText(tp.opsPerSec)), {
+    body.appendChild(figures([
+      tile('Operations', tileText(metricText(tp.opsPerSec)), {
         unit: isNum(tp.opsPerSec && tp.opsPerSec.value) ? '/s' : null,
         note: isNum(tp.opsPerSec && tp.opsPerSec.value)
           ? 'Sampled by the server'
           : 'The metrics sampling task is off, so nothing is sampling this'
       }),
-      ui.statTile('Commands processed', tileText(metricText(tp.totalCommandsProcessed)), { note: 'Since this server started' }),
-      ui.statTile('Uptime', tileText(metricText(srv.uptimeSeconds, function (v) { return fmt.dur(v); })), {
+      tile('Commands processed', tileText(metricText(tp.totalCommandsProcessed)), { note: 'Since this server started' }),
+      tile('Uptime', tileText(metricText(srv.uptimeSeconds, function (v) { return fmt.dur(v); })), {
         note: 'Garnet starts cold on every boot'
       }),
-      ui.statTile('Probe', tileText(isNum(d.probeMs) ? fmt.ms(d.probeMs) : null), { note: 'One connection, one pass' })
+      tile('Probe', tileText(isNum(d.probeMs) ? fmt.ms(d.probeMs) : null), { note: 'One connection, one pass' })
     ]));
 
     body.appendChild(ui.dl([
@@ -661,7 +719,7 @@
       ['RESP compatibility', textMetricNode(srv.redisCompatVersion)],
       ['Authenticated as', id.user
         ? el('span', [mono(id.user), id.matches === false
-          ? ui.pill('not the expected user', 'warn', { title: 'Expected ' + id.expected + '. The console is holding whatever grants that other rule has.' })
+          ? pill('not the expected user', 'warn', { title: 'Expected ' + id.expected + '. The console is holding whatever grants that other rule has.' })
           : null])
         : unknown(id.unavailable)],
       ['Clock skew', isNum(clock.skewMs)
@@ -685,21 +743,21 @@
   function renderCacheMemory(body, d) {
     var c = d.container || {};
 
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Spill ratio', tileText(isNum(d.spillRatio) ? fmt.ratioPct(d.spillRatio, 1) : null), {
+    body.appendChild(figures([
+      tile('Spill ratio', tileText(isNum(d.spillRatio) ? fmt.ratioPct(d.spillRatio, 1) : null), {
         note: isNum(d.spillRatio)
           ? 'Worst log: ' + (d.spillRatioLog || 'unnamed')
           : (d.spillUnavailable ? 'Not computable on this server' : 'No log has anything in it yet')
       }),
-      ui.statTile('Container memory', tileText(isNum(c.usedRatio) ? fmt.ratioPct(c.usedRatio, 0) : null), {
+      tile('Container memory', tileText(isNum(c.usedRatio) ? fmt.ratioPct(c.usedRatio, 0) : null), {
         note: isNum(c.processBytes)
           ? bytesText(c.processBytes) + (isNum(c.limitBytes) ? ' of ' + bytesText(c.limitBytes) : ', no limit known')
           : 'The process size could not be read'
       }),
-      ui.statTile('Logs reported', tileText(d.logs ? fmt.num(d.logs.length) : null), {
+      tile('Logs reported', tileText(d.logs ? fmt.num(d.logs.length) : null), {
         note: 'Main store and object store are separate logs'
       }),
-      ui.statTile('Spilling to disk', d.spilling === null || d.spilling === undefined ? 'unknown' : (d.spilling ? 'yes' : 'no'), {
+      tile('Spilling to disk', d.spilling === null || d.spilling === undefined ? 'unknown' : (d.spilling ? 'yes' : 'no'), {
         note: d.spillDirectory && d.spillDirectory.value ? 'Directory: ' + d.spillDirectory.value : 'Spill directory not reported'
       })
     ]));
@@ -762,8 +820,8 @@
   }
 
   function renderCacheKeyspace(body, d) {
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Keys', tileText(isNum(d.keys) ? fmt.num(d.keys) : null), {
+    body.appendChild(figures([
+      tile('Keys', tileText(isNum(d.keys) ? fmt.num(d.keys) : null), {
         note: isNum(d.keys) ? 'One logical database' : 'Not readable'
       })
     ]));
@@ -788,8 +846,8 @@
           : d.status === 'not-configured' ? 'idle' : 'bad';
 
     body.appendChild(el('div.row', [
-      ui.pill(d.status || 'unknown', tone),
-      ui.pill(d.reachable ? 'reachable' : 'not reachable', d.reachable ? 'ok' : 'bad'),
+      pill(d.status || 'unknown', tone),
+      pill(d.reachable ? 'reachable' : 'not reachable', d.reachable ? 'ok' : 'bad'),
       el('span.muted', { text: d.endpoint || '' })
     ]));
 
@@ -875,7 +933,7 @@
         render: function (r) {
           var n = (r.config || {}).replicas;
           if (!isNum(n)) return unknown('The server did not report a replica count for this stream.');
-          return n > 1 ? ui.pill('R' + n, 'ok') : ui.pill('R1', 'warn', { title: 'One replica, no redundancy: if this node\'s volume is lost, every message in this stream is lost with it.' });
+          return n > 1 ? pill('R' + n, 'ok') : pill('R1', 'warn', { title: 'One replica, no redundancy: if this node\'s volume is lost, every message in this stream is lost with it.' });
         }
       },
       {
@@ -890,7 +948,7 @@
           if (!r.attention || !r.attention.length) return el('span.muted', { text: 'nothing' });
           var worst = 'info';
           r.attention.forEach(function (a) { if (a.severity === 'bad') worst = 'bad'; else if (a.severity === 'warn' && worst !== 'bad') worst = 'warn'; });
-          return ui.pill(fmt.num(r.attention.length) + ' to read', worst, {
+          return pill(fmt.num(r.attention.length) + ' to read', worst, {
             title: r.attention.map(function (a) { return a.message; }).join('\n\n')
           });
         }
@@ -941,7 +999,7 @@
           if (!r.attention || !r.attention.length) return el('span.muted', { text: 'nothing' });
           var worst = 'info';
           r.attention.forEach(function (a) { if (a.severity === 'bad') worst = 'bad'; else if (a.severity === 'warn' && worst !== 'bad') worst = 'warn'; });
-          return ui.pill(fmt.num(r.attention.length) + ' to read', worst, {
+          return pill(fmt.num(r.attention.length) + ' to read', worst, {
             title: r.attention.map(function (a) { return a.message; }).join('\n\n')
           });
         }
@@ -1001,17 +1059,17 @@
     if (!db) { body.appendChild(goneSince('database', name)); return; }
 
     var conns = db.connections || {};
-    body.appendChild(el('div.tiles', [
-      ui.statTile('Size', tileText(bytesText(db.sizeBytes)), {
+    body.appendChild(figures([
+      tile('Size', tileText(bytesText(db.sizeBytes)), {
         note: isNum(db.sizeBytes) ? 'Measured by the server' : (db.sizeUnknownReason || 'Not measured')
       }),
-      ui.statTile('Sessions', tileText(isNum(conns.total) ? fmt.num(conns.total) : null), {
+      tile('Sessions', tileText(isNum(conns.total) ? fmt.num(conns.total) : null), {
         note: fmt.num(conns.active) + ' active, ' + fmt.num(conns.idleInTransaction) + ' idle in transaction'
       }),
-      ui.statTile('Cache hit ratio', tileText(isNum((db.cache || {}).hitRatio) ? fmt.ratioPct(db.cache.hitRatio, 1) : null), {
+      tile('Cache hit ratio', tileText(isNum((db.cache || {}).hitRatio) ? fmt.ratioPct(db.cache.hitRatio, 1) : null), {
         note: (db.cache || {}).window || 'No window reported'
       }),
-      ui.statTile('Deadlocks', tileText(isNum(db.deadlocks) ? fmt.num(db.deadlocks) : null), {
+      tile('Deadlocks', tileText(isNum(db.deadlocks) ? fmt.num(db.deadlocks) : null), {
         note: db.statsResetAt ? 'Since ' + stampOf(db.statsResetAt) : 'Since the statistics were initialised'
       })
     ]));
@@ -1019,10 +1077,10 @@
     body.appendChild(ui.dl([
       ['Owner', mono(db.owner || 'unknown')],
       ['Encoding', el('span', { text: (db.encoding || '?') + ' / ' + (db.collate || '?') })],
-      ['Accepts connections', db.allowsConnections ? ui.pill('yes', 'ok') : ui.pill('no', 'idle', { title: 'datallowconn is false, which is normal for template0.' })],
+      ['Accepts connections', db.allowsConnections ? pill('yes', 'ok') : pill('no', 'idle', { title: 'datallowconn is false, which is normal for template0.' })],
       ['Console may connect', db.consoleCanConnect
-        ? ui.pill('yes', 'ok')
-        : ui.pill('no', 'idle', { title: 'A deliberate grant in platform/compose/sql/20-grants.sql, not a fault.' })],
+        ? pill('yes', 'ok')
+        : pill('no', 'idle', { title: 'A deliberate grant in platform/compose/sql/20-grants.sql, not a fault.' })],
       ['Connection limit', isNum(db.connectionLimit) ? el('span.num', { text: fmt.num(db.connectionLimit) }) : el('span.muted', { text: 'none' })],
       ['Backends (statistics collector)', numNode(db.backends, 'pg_stat_database reported no backend count.')],
       ['Temporary bytes written', bytesNode(db.tempBytes, 'No temporary-file total was reported.')],
@@ -1050,7 +1108,7 @@
         key: 'state', label: 'State', status: true,
         render: function (r) {
           if (!r.state) return el('span.muted', { text: r.backendType || 'background' });
-          return ui.pill(r.state, r.state === 'active' ? 'ok' : r.state.indexOf('idle in transaction') === 0 ? 'warn' : 'idle');
+          return pill(r.state, r.state === 'active' ? 'ok' : r.state.indexOf('idle in transaction') === 0 ? 'warn' : 'idle');
         }
       },
       { key: 'querySeconds', label: 'Running', align: 'right', render: function (r) { return secondsNode(r.querySeconds, 'Nothing is running in this session.'); } },
@@ -1207,69 +1265,77 @@
 
   function databaseDetail(mount, name) {
     whenItExists(mount, API.pgDatabases, 'databases', 'database', name, function () {
-      mount.appendChild(ui.pageHeader(
-        name,
-        'One database on the PostgreSQL cluster this console reads.',
-        [refreshButton(['database', name])]));
+      mount.appendChild(ui.pageHeader(name, 'PostgreSQL database', [refreshButton(['database', name])]));
 
-      mount.appendChild(livePanel('Database', API.pgDatabases, function (body, d) {
-        renderOneDatabase(body, d, name);
-      }, { ttlMs: 15000 }));
-
-      mount.appendChild(livePanel('Sessions on ' + name + ' now', API.pgActivity, function (body, d) {
-        renderDatabaseSessions(body, d, name);
-      }, { ttlMs: 2000 }));
-
-      mount.appendChild(livePanel('Slowest statements on ' + name + ' since the counters were reset', API.pgStatements, function (body, d) {
-        renderDatabaseStatements(body, d, name);
-      }, { ttlMs: 15000 }));
-
-      mount.appendChild(queryEditor(name));
+      if (A.storeMode() === A.MODE.SAMPLE) {
+        mount.appendChild(el('div.grid', [sampleBlock(), queryEditor(name)]));
+        return;
+      }
+      mount.appendChild(el('div.grid', [
+        livePanel('Details', API.pgDatabases, function (body, d) {
+          renderOneDatabase(body, d, name);
+        }, { ttlMs: 15000 }),
+        livePanel('Sessions', API.pgActivity, function (body, d) {
+          renderDatabaseSessions(body, d, name);
+        }, { ttlMs: 2000 }),
+        livePanel('Slowest statements', API.pgStatements, function (body, d) {
+          renderDatabaseStatements(body, d, name);
+        }, { ttlMs: 15000, description: 'Since the counters were reset.' }),
+        queryEditor(name)
+      ]));
     });
   }
 
   function renderOneBucket(body, d, name) {
     var b = findByName(d.buckets, name);
     if (!b) { body.appendChild(goneSince('bucket', name)); return; }
-    body.appendChild(el('p', {
-      text: (b.unknownSize || !isNum(b.diskBytes) ? 'Size not measured' : 'About ' + fmt.bytes(b.diskBytes) + ' on disk') +
-        ', object lock ' + (b.lock ? b.lock + ' for ' + fmt.num(b.lockDays) + ' days' : 'none') +
-        ', versioning ' + (b.versioning ? 'on' : 'off') + '.'
-    }));
+    body.appendChild(ui.dl([
+      ['Size on disk', b.unknownSize || !isNum(b.diskBytes) ? unknown('Not measured.') : 'About ' + fmt.bytes(b.diskBytes)],
+      ['Object lock', b.lock ? b.lock + ' for ' + fmt.num(b.lockDays) + ' days' : 'None'],
+      ['Versioning', b.versioning ? pill('on', 'ok') : pill('off', 'idle')]
+    ]));
   }
 
   function bucketDetail(mount, name) {
     whenItExists(mount, API.storageBuckets, 'buckets', 'bucket', name, function () {
-      mount.appendChild(ui.pageHeader(
-        name,
-        'One bucket in the object store. The Object storage screen owns buckets.',
-        [refreshButton(['bucket', name])]));
+      mount.appendChild(ui.pageHeader(name, 'Bucket', [refreshButton(['bucket', name])]));
+      if (A.storeMode() === A.MODE.SAMPLE) { mount.appendChild(sampleBlock()); return; }
       mount.appendChild(livePanel('Bucket', API.storageBuckets, function (body, d) {
         renderOneBucket(body, d, name);
-        body.appendChild(A.link('Browse ' + name + ' on the Object storage screen', 'storage', null, { bucket: name }));
+        body.appendChild(el('p', { style: { 'margin-top': 'var(--s-s)' } }, A.link('Browse ' + name + ' on Object storage', 'storage', null, { bucket: name })));
       }, { ttlMs: 15000, skeletonRows: 1 }));
     });
+  }
+
+  var CRUMB = { databases: 'Databases', sessions: 'Sessions', statements: 'Statements', roles: 'Roles', buckets: 'Object storage', cache: 'Cache', queues: 'Queues' };
+
+  function dataCrumbs(rest) {
+    if (rest[0] === 'database' && rest[1]) return [{ label: 'Databases', href: A.href('data', ['databases']) }, rest[1]];
+    if (rest[0] === 'bucket' && rest[1]) return [{ label: 'Buckets', href: A.href('data', ['buckets']) }, rest[1]];
+    return rest.slice(0, 1).map(function (r) { return Object.prototype.hasOwnProperty.call(CRUMB, r) ? CRUMB[r] : r; });
   }
 
   A.screen('data', {
     title: 'Data',
     crumb: 'Data',
+    crumbs: dataCrumbs,
+    liveCrumbs: dataCrumbs,
     render: function (mount, ctx) {
       var rest = (ctx && ctx.rest) || [];
 
       if (rest[0] === 'database' && rest[1]) { databaseDetail(mount, rest[1]); return; }
       if (rest[0] === 'bucket' && rest[1]) { bucketDetail(mount, rest[1]); return; }
 
-      mount.appendChild(ui.pageHeader(
-        'Data',
-        'The databases, object store, cache and queues this platform runs, read live through the console API.',
-        [refreshButton(rest)]));
+      mount.appendChild(ui.pageHeader('Data', null, [refreshButton(rest)]));
 
       mount.appendChild(ui.tabs([
-        { id: 'databases', label: 'Databases', render: databasesTab },
-        { id: 'buckets', label: 'Object storage', render: bucketsTab },
-        { id: 'cache', label: 'Cache', render: cacheTab },
-        { id: 'queues', label: 'Queues', render: queuesTab }
+        { id: 'databases', label: 'Databases', render: sampleGate(databasesTab) },
+        { id: 'sessions', label: 'Sessions', render: sampleGate(sessionsTab) },
+        { id: 'statements', label: 'Statements', render: sampleGate(statementsTab) },
+        { id: 'roles', label: 'Roles', render: sampleGate(rolesTab) },
+        { id: 'buckets', label: 'Object storage', render: sampleGate(bucketsTab) },
+        { id: 'cache', label: 'Cache', render: sampleGate(cacheTab) },
+        { id: 'queues', label: 'Queues', render: sampleGate(queuesTab) }
       ], {
         label: 'Data stores',
         initial: rest[0] || null,

@@ -695,17 +695,20 @@ async function axeOn(page, label, suite, opts) {
       await goto(page, r);
       const found = await page.evaluate((route) => {
         const bad = [];
-        const GLYPHS = ['●', '▲', '■', '◆', '○'];
+        const SHAPES = { ok: 'success', warn: 'warning', bad: 'error', info: 'info' };
         document.querySelectorAll('.callout').forEach(n => {
-          const raw = getComputedStyle(n, '::before').content;
-          if (!raw || raw === 'none' || raw === 'normal') {
-            bad.push(route + ': callout with no glyph');
+          const b = getComputedStyle(n, '::before');
+          const raw = b.content;
+          const mask = b.webkitMaskImage || b.maskImage || 'none';
+          if (!raw || raw === 'none' || raw === 'normal' || mask === 'none' || parseFloat(b.width) < 12) {
+            bad.push(route + ': callout with no status icon');
             return;
           }
-          const g = raw.replace(/^["']|["']$/g, '');
-          if (g.length !== 1 || GLYPHS.indexOf(g) === -1) {
-            bad.push(route + ': callout glyph is ' + JSON.stringify(raw) + ', not one of the pill shapes');
-          }
+          const tone = ['ok', 'warn', 'bad', 'info'].find(t => n.classList.contains(t)) || 'info';
+          const svgText = decodeURIComponent(mask);
+          const shape = /M8 1\.9/.test(svgText) ? 'warning' : /M5\.2 8\.2/.test(svgText) ? 'success'
+            : /M5\.9 5\.9/.test(svgText) ? 'error' : /M8 7\.4/.test(svgText) ? 'info' : 'unknown';
+          if (shape !== SHAPES[tone]) bad.push(route + ': a ' + tone + ' callout carries the ' + shape + ' icon');
         });
         document.querySelectorAll('.bar-fill.warn, .bar-fill.bad, .meter-fill.warn, .meter-fill.bad').forEach(n => {
           if (getComputedStyle(n).backgroundImage === 'none') bad.push(route + ': toned bar with no texture');
@@ -1108,10 +1111,10 @@ async function axeOn(page, label, suite, opts) {
 
   const shadowInk = await page.evaluate(() => {
     const v = getComputedStyle(document.documentElement);
-    return { shadow: v.getPropertyValue('--shadow-rgb').trim(), ink: v.getPropertyValue('--ink-rgb').trim() };
+    return { shadow: v.getPropertyValue('--shadow-rgb').trim(), ink: v.getPropertyValue('--text-rgb').trim() };
   });
   rec('THEME', 'shadows do not invert with the text colour',
-    shadowInk.shadow !== shadowInk.ink, JSON.stringify(shadowInk));
+    !!shadowInk.shadow && !!shadowInk.ink && shadowInk.shadow !== shadowInk.ink, JSON.stringify(shadowInk));
 
   await page.reload({ waitUntil: 'load' });
   await page.evaluate(AXE);
@@ -1910,9 +1913,11 @@ async function axeOn(page, label, suite, opts) {
     ['ok', 'warn', 'bad', 'info', 'idle'].forEach(t => {
       const p = window.ARGUS.ui.pill(t, t);
       host.appendChild(p);
-      const s = getComputedStyle(p);
-      sig[t] = [s.borderTopStyle, s.borderTopWidth, s.borderTopColor, s.color].join(' ');
-      glyphs[t] = (p.querySelector('.pill-glyph') || {}).textContent || '';
+      const icon = p.querySelector('.pill-glyph svg');
+      const r = icon ? icon.getBoundingClientRect() : { width: 0 };
+      const ink = icon ? getComputedStyle(icon).stroke : 'none';
+      sig[t] = icon && r.width >= 12 && ink !== 'none' ? new window.XMLSerializer().serializeToString(icon).replace(/ class="[^"]*"/, '') : 'no visible icon';
+      glyphs[t] = (p.querySelector('.pill-glyph') || { getAttribute: () => '' }).getAttribute('data-icon') || '';
     });
     const card = document.querySelector('#main .card');
     const cs = card ? getComputedStyle(card) : null;
@@ -2140,7 +2145,7 @@ async function axeOn(page, label, suite, opts) {
     return { head: lines[0], rows: lines.length - 1, shown: document.querySelectorAll('#main tbody tr[data-key]').length };
   });
   rec('ACT', 'any table exports exactly the rows it shows as CSV, without its action column',
-    exported.head === 'Severity,Source,Rule,Host,First seen,Last seen,Count,State' && exported.rows === exported.shown && exported.rows === 2,
+    exported.head === 'Severity,Rule,Host,Last seen,Count,State' && exported.rows === exported.shown && exported.rows === 2,
     JSON.stringify(exported));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(80);
@@ -2416,7 +2421,7 @@ async function axeOn(page, label, suite, opts) {
     await new Promise(r => setTimeout(r, 120));
     [...document.querySelectorAll('.dialog-foot button')].find(b => /Simulate/.test(b.textContent)).click();
     await new Promise(r => setTimeout(r, 350));
-    const btn = document.querySelector('#main .pagehead-actions button');
+    const btn = [...document.querySelectorAll('#main .pagehead-actions button')].find(b => /^Approve/.test(b.textContent));
     const out = { notice, state: dep.state, approvals: dep.approvals.slice(), label: btn.textContent, disabled: btn.getAttribute('aria-disabled'), audit: d.audit[0].target };
     d.deployments.shift();
     d.audit.splice(0, 2);
@@ -2611,18 +2616,18 @@ async function axeOn(page, label, suite, opts) {
     linkedTiles: document.querySelectorAll('#main a.tile.is-link').length,
     tiles: document.querySelectorAll('#main .tile').length,
     recent: !![...document.querySelectorAll('#main .card-title')].find(t => /Recently visited/.test(t.textContent)),
-    health: document.querySelectorAll('#main .healthrow').length,
+    health: document.querySelectorAll('#main [data-panel="health"] tbody tr[data-key]').length,
     apps: window.ARGUS.data.apps.length,
-    bars: [...document.querySelectorAll('#main .healthrow svg')].every(s => s.getBoundingClientRect().width <= 200)
+    bars: [...document.querySelectorAll('#main [data-panel="health"] tbody svg.hbbar')].every(s => s.getBoundingClientRect().width <= 200)
   }));
   rec('ACT', 'every Overview tile is a link to its screen, and the home carries recent items and 30-day service health',
-    home.linkedTiles === home.tiles && home.tiles === 6 && home.recent && home.health === home.apps && home.bars, JSON.stringify(home));
+    home.linkedTiles === home.tiles && home.tiles === 4 && home.recent && home.health === home.apps && home.bars, JSON.stringify(home));
 
   await goto(page, 'compute/vm/runner-01');
   const vmActions = await page.evaluate(async () => {
     const d = window.ARGUS.data;
     const vm = d.vmByName('runner-01');
-    const crumb = document.getElementById('crumb').textContent;
+    const crumb = [...document.querySelectorAll('#crumb li')].map(li => li.textContent).join(' / ');
     const trigger = document.querySelector('#main .pagehead-actions .menubtn');
     trigger.click();
     await new Promise(r => setTimeout(r, 80));
@@ -2639,7 +2644,7 @@ async function axeOn(page, label, suite, opts) {
     input.value = 'runner-01'; input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await new Promise(r => setTimeout(r, 300));
-    const afterStop = { state: vm.state, tile: document.querySelector('#main .tile-value').textContent.trim() };
+    const afterStop = { state: vm.state, tile: document.querySelector('#main .pagehead-status').textContent.trim() };
     document.querySelector('#main .pagehead-actions .menubtn').click();
     await new Promise(r => setTimeout(r, 80));
     const startLabel = [...document.querySelectorAll('.menu .menuitem')].map(m => m.querySelector('.menuitem-label').textContent).find(t => /^Start|^Stop/.test(t));
@@ -2765,8 +2770,11 @@ async function axeOn(page, label, suite, opts) {
   const phoneBar = await page.evaluate(async () => {
     const top = document.querySelector('.top');
     const kbar = document.getElementById('kbar');
+    document.getElementById('flashes').textContent = '';
+    window.scrollTo(0, 0);
+    await new Promise(r => setTimeout(r, 40));
     const before = document.getElementById('main').getBoundingClientRect().top;
-    window.ARGUS.flash('bad', 'Layout check', 'This must not move the page.');
+    window.ARGUS.flash('bad', 'Layout check', 'This sits in the flow under the breadcrumbs.');
     await new Promise(r => setTimeout(r, 40));
     const after = document.getElementById('main').getBoundingClientRect().top;
     const f = document.querySelector('#flashes .flash').getBoundingClientRect();
@@ -2778,14 +2786,15 @@ async function axeOn(page, label, suite, opts) {
     document.getElementById('flashes').textContent = '';
     return {
       position: getComputedStyle(top).position, height: bar.height, pinned,
-      search: /Search or jump to/.test(kbar.textContent), kbarHeight: kbar.getBoundingClientRect().height,
-      moved: after - before, clearOfBar: f.top >= bar.bottom, inside: f.left >= 0 && f.right <= window.innerWidth
+      search: /Search resources/.test(kbar.textContent), kbarHeight: kbar.getBoundingClientRect().height,
+      moved: after - before, flashHeight: Math.round(f.height), clearOfBar: f.top >= bar.bottom, inside: f.left >= 0 && f.right <= window.innerWidth,
+      underCrumbs: f.top >= document.querySelector('.crumbs').getBoundingClientRect().bottom - 1
     };
   });
   rec('RESP', 'on a phone the top bar is one pinned row and search keeps its name',
     phoneBar.position === 'sticky' && phoneBar.height <= 64 && phoneBar.pinned === 0 && phoneBar.search && phoneBar.kbarHeight >= 44, JSON.stringify(phoneBar));
-  rec('RESP', 'a flash does not move the page and clears the top bar',
-    phoneBar.moved === 0 && phoneBar.clearOfBar && phoneBar.inside, JSON.stringify(phoneBar));
+  rec('RESP', 'a flash sits in the page flow under the breadcrumbs, pushes the content down by its own height and clears the top bar',
+    phoneBar.moved > 0 && Math.abs(phoneBar.moved - phoneBar.flashHeight) <= 16 && phoneBar.underCrumbs && phoneBar.clearOfBar && phoneBar.inside, JSON.stringify(phoneBar));
   await page.setViewportSize({ width: 320, height: 256 });
   await page.waitForTimeout(40);
   const shortScreen = await page.evaluate(() => ({ top: getComputedStyle(document.querySelector('.top')).position, flash: getComputedStyle(document.getElementById('flashes')).position }));
@@ -2801,8 +2810,8 @@ async function axeOn(page, label, suite, opts) {
     document.querySelectorAll('body *').forEach(n => { if (n.getClientRects().length && n.textContent.trim()) sizes.add(parseFloat(getComputedStyle(n).fontSize)); });
     return { h1, tile, card, sizes: [...sizes].sort((a, b) => a - b) };
   });
-  rec('TXT', 'the page title is the largest type and every size comes from the scale',
-    scale.h1 > scale.tile && scale.tile > scale.card && scale.sizes.every(s => [11, 12, 13, 15, 20, 22, 25].indexOf(s) !== -1), JSON.stringify(scale));
+  rec('TXT', 'the key figure, page title and container title keep their order and every size comes from the scale',
+    scale.tile > scale.h1 && scale.h1 > scale.card && scale.sizes.every(s => [12, 14, 16, 18, 24, 32].indexOf(s) !== -1), JSON.stringify(scale));
 
   const codec = await page.evaluate(() => {
     const ui = window.ARGUS.ui;

@@ -76,7 +76,8 @@
   A.flash = function (kind, title, detail, opts) {
     opts = opts || {};
     var node = el('div.flash.' + kind, { role: kind === 'bad' ? 'alert' : 'status' }, [
-      el('span.flash-glyph', { 'aria-hidden': 'true', text: { ok: '✓', warn: '!', bad: '✕', info: 'i' }[kind] || 'i' }),
+      el('span.flash-glyph', { 'aria-hidden': 'true' },
+        ui.icon({ ok: 'status-positive', warn: 'status-warning', bad: 'status-negative', info: 'status-info' }[kind] || 'status-info')),
       el('div.flash-text', [
         el('strong', { text: title }),
         detail ? el('span', { text: ' ' + detail }) : null
@@ -85,7 +86,7 @@
       el('button.x', {
         type: 'button', 'aria-label': 'Dismiss: ' + title,
         on: { click: function () { drop(node); } }
-      }, '×')
+      }, ui.icon('close'))
     ]);
 
     function drop(n) {
@@ -157,7 +158,7 @@
     }, [
       el('div.dialog-head', [
         el('h2', { id: titleId, tabindex: '-1', text: opts.title }),
-        opts.locked ? null : el('button.x', { type: 'button', 'aria-label': 'Close dialog', on: { click: close } }, '×')
+        opts.locked ? null : el('button.x', { type: 'button', 'aria-label': 'Close dialog', on: { click: close } }, ui.icon('close'))
       ]),
       el('div.dialog-body', opts.body ? opts.body(opts.locked ? unlockClose : close) : null),
       el('div.dialog-foot', opts.actions ? opts.actions(opts.locked ? unlockClose : close) : ui.btn('Close', { onClick: close }))
@@ -243,8 +244,7 @@
       body: function () {
         return [
           el('p', { text: reason }),
-          el('div.callout.info', { text: 'Touch your security key. The console never sees a password, and this prototype performs no authentication at all.' }),
-          el('div.stepup-key', { 'aria-hidden': 'true', text: '🔑' })
+          el('div.callout.info', { text: 'Touch your security key. The console never sees a password, and this prototype performs no authentication at all.' })
         ];
       },
       actions: function (close) {
@@ -650,7 +650,10 @@
     bell.setAttribute('aria-label', word);
     bell.title = 'Open inbox';
     var dot = bell.querySelector('.dot');
-    if (dot) dot.hidden = !needs;
+    if (dot) {
+      dot.textContent = needs ? (needs > 99 ? '99+' : String(needs)) : '';
+      dot.hidden = !needs;
+    }
   }
 
   var badgeGen = 0;
@@ -773,19 +776,34 @@
 
   var mount, crumbHost;
 
-  function paintCrumb(r, def) {
+  function crumbItems(items) {
     clear(crumbHost);
-    crumbHost.appendChild(el('a.crumb-link', { href: A.href(r.route), text: def.crumb || def.title }));
+    items.forEach(function (it, i) {
+      var last = i === items.length - 1;
+      if (last) crumbHost.appendChild(el('li', el('span', { 'aria-current': 'page', text: it.label })));
+      else if (it.href) crumbHost.appendChild(el('li', el('a.crumb-link', { href: it.href, text: it.label })));
+      else crumbHost.appendChild(el('li', el('span.crumb-text', { text: it.label })));
+    });
+  }
+
+  function paintCrumb(r, def) {
     var labels = r.rest.slice();
     var crumbsFn = shellMode() === 'sample' ? def.crumbs : def.liveCrumbs;
     if (r.rest.length && typeof crumbsFn === 'function') {
       try { labels = crumbsFn(r.rest) || labels; } catch (e) { labels = r.rest.slice(); }
     }
-    if (labels.length) {
-      crumbHost.appendChild(el('span.sep', { 'aria-hidden': 'true', text: '/' }));
-      crumbHost.appendChild(el('b', { text: labels.join(' / ') }));
-    }
-    var pageTitle = (labels.length ? labels[labels.length - 1] + ' - ' : '') + (def.title || r.route);
+    var items = [{ label: 'Argus', href: A.href('overview') }];
+    if (r.route !== 'overview' || labels.length) items.push({ label: def.crumb || def.title, href: A.href(r.route) });
+    else items.push({ label: def.crumb || def.title });
+    var words = labels.map(function (l) {
+      var isItem = l && typeof l === 'object';
+      var label = String(isItem ? (l.label === undefined || l.label === null ? '' : l.label) : l);
+      var href = isItem && typeof l.href === 'string' && /^#\//.test(l.href) ? l.href : null;
+      items.push({ label: label, href: href });
+      return label;
+    });
+    crumbItems(items);
+    var pageTitle = (words.length ? words[words.length - 1] + ' - ' : '') + (def.title || r.route);
     document.title = pageTitle + ' - Argus Console';
     return pageTitle;
   }
@@ -820,8 +838,7 @@
 
     clear(mount);
     if (!def) {
-      clear(crumbHost);
-      crumbHost.appendChild(el('b', { text: 'Not found' }));
+      crumbItems([{ label: 'Argus', href: A.href('overview') }, { label: 'Not found' }]);
       mount.appendChild(ui.emptyState(
         'That screen does not exist',
         'The link may be from an older version of the console.',
@@ -1123,7 +1140,7 @@
     var dlg = A.dialog({
       title: 'Command palette',
       wide: true,
-      body: function () { return el('div.pal', [input, count, source, list]); },
+      body: function () { return el('div.pal', [el('div.pal-search', input), count, source, list]); },
       actions: function (close) {
         return el('div.pal-foot', [
           el('span.kbdhint', [el('kbd', '↑'), el('kbd', '↓'), ' to move ']),
@@ -1201,9 +1218,9 @@
     clear(pill);
     pill.classList.toggle('is-staging', env === 'staging');
     pill.classList.toggle('is-frozen', frozen);
-    pill.appendChild(el('span.env-dot', { 'aria-hidden': 'true' }));
     pill.appendChild(el('span', { text: env === 'production' ? 'Production' : 'Staging' }));
     if (frozen) pill.appendChild(el('span.env-freeze', { text: 'Freeze' }));
+    pill.appendChild(ui.icon('chevron-down'));
     pill.setAttribute('aria-label', 'Environment: ' + env + (frozen ? '. A change freeze is in force: ' + A.freeze().reason : '') + '. Activate to switch.');
     pill.title = frozen ? 'Change freeze until ' + ui.fmt.stamp(A.freeze().until) + ': ' + A.freeze().reason : 'Switch between production and staging';
   }
@@ -1298,7 +1315,7 @@
       });
     }
 
-    host.appendChild(el('span.elev-glyph', { 'aria-hidden': 'true', text: '▲' }));
+    host.appendChild(el('span.elev-glyph', { 'aria-hidden': 'true' }));
     host.appendChild(el('span', [el('strong', { text: e.group }), ' · ', e.reason]));
     host.appendChild(el('span.elev-time', { text: '', 'aria-hidden': 'true' }));
     host.appendChild(ui.btn('Extend 1 h', { variant: 'ghost', title: 'Add an hour, up to four in total, with a second factor', onClick: extend }));
@@ -1570,6 +1587,7 @@
     if (first) first.focus();
   }
 
+  var MODE_ICON = { live: 'status-positive', sample: 'status-info', stale: 'status-warning', down: 'status-negative', unknown: 'status-pending', signedout: 'status-warning', unreachable: 'status-negative' };
   var MODE_WORD = { live: 'Live', sample: 'Sample data', stale: 'Stale', down: 'API down', unknown: 'Connecting', signedout: 'Signed out', unreachable: 'API unreachable' };
 
   function paintMode(snap) {
@@ -1602,7 +1620,7 @@
     }
     pill.className = 'modepill is-' + key;
     clear(pill);
-    pill.appendChild(el('span.mode-dot', { 'aria-hidden': 'true' }));
+    pill.appendChild(el('span.mode-icon', { 'aria-hidden': 'true' }, ui.icon(MODE_ICON[key] || 'status-pending')));
     pill.appendChild(el('span', { text: MODE_WORD[key] }));
     pill.title = detail;
     pill.setAttribute('aria-label', 'Data source: ' + MODE_WORD[key] + '. ' + detail + ' Activate for the detail.');
@@ -2140,7 +2158,6 @@
       locked: true,
       body: function () {
         return [
-          el('div.stepup-key', { 'aria-hidden': 'true', text: '🔒' }),
           el('p', { text: 'Locked ' + (why || 'by hand') + ' at ' + ui.fmt.stamp(sinceAt) + '. Nothing behind this dialog can be read or pressed until you resume with your security key.' }),
           el('p.hint', { text: 'The session itself has not ended: an elevation keeps counting down, and a deployment in flight keeps rolling.' })
         ];

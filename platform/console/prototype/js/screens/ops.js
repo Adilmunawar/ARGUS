@@ -172,19 +172,19 @@
       }
     ];
 
-    return el('div.stack', [
-      el('div.callout.info', {
-        text: 'A runbook is a parameterised script with an owner, an approval level and a transcript. '
-          + 'If an operation is not in here, it is being done by hand at three in the morning by whoever is awake.'
-      }),
+    return ui.card('Runbooks', [
       ui.table(cols, d.runbooks, {
         caption: 'Operational runbooks with their tier, approval requirement and last run',
+        emptyTitle: 'No runbooks',
         empty: 'No runbook is defined.',
         sortKey: 'tier', sortDir: 'asc',
         rowKey: function (rb) { return rb.id; },
         onRow: function (rb) { A.go('ops', ['runbook', rb.id]); }
       })
-    ]);
+    ], {
+      counter: d.runbooks.length,
+      description: 'Parameterised scripts with an owner, an approval level and a transcript.'
+    });
   }
 
   function runbookDetail(mount, id) {
@@ -196,9 +196,9 @@
       return;
     }
 
-    mount.appendChild(ui.pageHeader(rb.title, rb.id, [
+    mount.appendChild(ui.pageHeader(rb.title, null, [
       ui.btn('Back to runbooks', { variant: 'ghost', onClick: function () { A.go('ops'); } })
-    ]));
+    ], { status: { tone: APPROVAL_TONE[rb.approval] || 'idle', text: APPROVAL_TEXT[rb.approval] || rb.approval } }));
 
     var fields = {};
     var form = el('form.runbookform', {
@@ -288,37 +288,37 @@
     };
     runBtn = ui.btn('Run ' + rb.id, runOpts);
 
-    mount.appendChild(ui.card('Parameters', [
+    var headActions = mount.querySelector('.pagehead-actions');
+    if (headActions) headActions.appendChild(runBtn);
+
+    var layout = el('div.grid');
+    mount.appendChild(layout);
+    layout.appendChild(ui.card('Details', [ui.dl([
+      ['Runbook', el('span.mono', { text: rb.id })],
+      ['Tier', 'Tier ' + fmt.num(rb.tier)],
+      ['Approval required', ui.pill(APPROVAL_TEXT[rb.approval] || rb.approval, APPROVAL_TONE[rb.approval] || 'idle')],
+      ['Last run', fmt.time(rb.lastRun)]
+    ])]));
+
+    layout.appendChild(ui.card('Parameters', [
       rb.approval === 'approver' || rb.approval === 'security' ? el('div.callout.warn', [
         el('strong', {
           text: rb.approval === 'security'
             ? 'Security on-call has to approve this run'
             : 'A second person has to approve this run'
         }),
-        el('p', {
-          text: 'A real deployment holds the run until a second person agrees, and records both names in the '
-            + 'audit next to the transcript. This prototype has no second party, so it runs after the step-up '
-            + 'alone. The gate is specified, not built.'
-        })
+        el('p', { text: 'Specified, not built: this prototype runs after the step-up alone.' })
       ]) : null,
-      form,
-      el('div.row', [runBtn])
-    ]));
+      form
+    ], { counter: rb.params.length }));
 
-    mount.appendChild(ui.card('Transcript', [
-      logview,
-      el('div.row', [
-        ui.btn('Announce result', {
-          variant: 'ghost',
-          title: 'Read the last transcript line to a screen reader',
-          onClick: announceResult
-        })
-      ]),
-      el('p.hint', {
-        text: 'The transcript is not a live region. A streaming log announced line by line makes a screen reader '
-          + 'unusable, so the result is announced on request instead.'
-      })
-    ]));
+    layout.appendChild(ui.card('Transcript', [logview], {
+      actions: [ui.btn('Announce result', {
+        variant: 'ghost',
+        title: 'Read the last transcript line to a screen reader',
+        onClick: announceResult
+      })]
+    }));
   }
 
   function backupsTab() {
@@ -359,6 +359,8 @@
       rowKey: function (b) { return b.store + ' ' + b.kind; }
     });
     var drillTable = ui.table(drillCols, d.drills, {
+      id: 'ops.drills',
+      defaultHidden: ['by'],
       caption: 'Restore and disaster recovery drills with measured duration against the RTO target',
       empty: 'No drill has been run.',
       sortKey: 'ran', sortDir: 'desc',
@@ -379,8 +381,8 @@
         }),
         ui.statTile('Worst RPO', fmt.num(worstRpo), { unit: 'min', note: 'Across every database in the estate' })
       ]),
-      ui.card('Backup stores', backupTable, { actions: [ui.exportButton(backupTable, 'backup stores')] }),
-      ui.card('Restore and DR drills', drillTable, { actions: [ui.exportButton(drillTable, 'drills')] })
+      ui.card('Backup stores', backupTable, { counter: d.backups.length, actions: [ui.exportButton(backupTable, 'backup stores')] }),
+      ui.card('Restore and DR drills', drillTable, { counter: d.drills.length, actions: [ui.columnsButton(drillTable, 'drills'), ui.exportButton(drillTable, 'drills')] })
     ]);
   }
 
@@ -452,11 +454,13 @@
       ]);
     }
     return el('div.callout.info', [
-      el('strong', { text: 'No change freeze is in force.' }),
-      el('p', { text: 'Deployments into production need the approvals their tier requires and nothing more. A freeze adds security sign-off with a written reason to every production approval until it lifts.' }),
+      el('strong', { text: 'No change freeze is in force' }),
+      el('p', { text: 'A freeze adds security sign-off to every production approval until it lifts.' }),
       el('div.row', [ui.btn('Declare a change freeze', { variant: 'ghost', onClick: declareFreeze })])
     ]);
   }
+
+  var CHIP_FIT = { 'max-width': '100%', overflow: 'hidden', 'white-space': 'nowrap' };
 
   function maintenanceTab() {
     var d = A.data;
@@ -471,11 +475,11 @@
       var chips = [];
 
       if (isPatch) {
-        chips.push(el('span.chip', { text: 'Patch 22:00-02:00' }));
+        chips.push(el('span.chip', { text: 'Patch', title: 'Patch window 22:00 to 02:00 UTC', style: CHIP_FIT }));
         windows.push({ day: day, kind: 'Patch window', detail: '22:00 to 02:00 UTC, one fault domain at a time' });
       }
       if (isFreeze) {
-        chips.push(el('span.chip', { text: 'Change freeze' }));
+        chips.push(el('span.chip', { text: 'Freeze', title: 'Change freeze', style: CHIP_FIT }));
         windows.push({ day: day, kind: 'Change freeze', detail: 'No deployment to production without security sign-off' });
       }
 
@@ -491,7 +495,7 @@
       { key: 'detail', label: 'Detail' }
     ];
 
-    return el('div.stack', [
+    return el('div.grid', [
       freezeCard(),
       ui.card('Next four weeks', [
         el('div.calendar', {
@@ -499,17 +503,13 @@
           'aria-label': 'Four week maintenance calendar from ' + dayLabel(start)
             + '. Patch windows every Tuesday, change freeze on the last three days. '
             + 'The table below lists every window in full.'
-        }, cells),
-        el('p.hint', {
-          text: 'The calendar is a picture. The table underneath is the same information in words, which is what '
-            + 'a screen reader, a printout and a copy-paste into a change ticket all need.'
-        })
+        }, cells)
       ]),
       ui.card('Windows in this period', ui.table(windowCols, windows, {
         caption: 'Patch windows and change freezes in the next four weeks, the text equivalent of the calendar',
         empty: 'No maintenance window falls in the next four weeks.',
         sortKey: 'day', sortDir: 'asc'
-      }))
+      }), { counter: windows.length })
     ]);
   }
 
@@ -646,23 +646,24 @@
     });
     if (wanted) ui.revealRow(table, wanted, { label: 'Alarm ' + wanted + ' is highlighted' });
 
-    return el('div.stack', [
-      el('div.tiles', [
-        ui.statTile('Alarms', fmt.num(list.length), { note: 'rules evaluated against the current values' }),
-        ui.statTile('In alarm', fmt.num(inAlarm), { note: inAlarm ? 'each one is in the inbox' : 'nothing is firing' }),
-        ui.statTile('OK', fmt.num(list.length - inAlarm - list.filter(function (a) { return A.evaluateAlarm(a).state === 'INSUFFICIENT'; }).length), { note: 'within their thresholds' })
-      ]),
-      el('div.callout.info', [
-        el('strong', { text: 'An alarm here is a PrometheusRule in Git.' }),
-        el('p', { text: 'Creating or editing one opens the change in the next pull request, the same way a deployment does. The state column is evaluated against the values this console holds right now, so the preview in the editor is exact.' })
-      ]),
-      el('div.row', [
-        ui.btn('Create alarm', { variant: 'primary', onClick: function () { alarmDialog(null, function (a) { A.replaceHash(A.href('ops', ['alarms'], { id: a.id })); A.refresh(); }); } }),
-        el('span.spacer'),
-        ui.columnsButton(table, 'alarms'),
-        ui.exportButton(table, 'alarms')
-      ]),
-      table
+    var okCount = list.length - inAlarm - list.filter(function (a) { return A.evaluateAlarm(a).state === 'INSUFFICIENT'; }).length;
+    var tiles = el('div.tiles', [
+      ui.statTile('Alarms', fmt.num(list.length), { note: 'Rules evaluated against the current values' }),
+      ui.statTile('In alarm', fmt.num(inAlarm), { status: inAlarm ? { tone: 'bad', text: 'In the inbox' } : { tone: 'ok', text: 'Nothing firing' } }),
+      ui.statTile('OK', fmt.num(okCount), { status: { tone: 'ok', text: 'Within thresholds' } })
+    ]);
+    tiles.style.setProperty('margin-bottom', '0');
+    return el('div.grid', [
+      tiles,
+      ui.card('Alarms', [table], {
+        counter: list.length,
+        description: 'Each alarm is a PrometheusRule in Git; a change opens in the next pull request.',
+        actions: [
+          ui.columnsButton(table, 'alarms'),
+          ui.exportButton(table, 'alarms'),
+          ui.btn('Create alarm', { variant: 'primary', onClick: function () { alarmDialog(null, function (a) { A.replaceHash(A.href('ops', ['alarms'], { id: a.id })); A.refresh(); }); } })
+        ]
+      })
     ]);
   }
 
@@ -718,49 +719,47 @@
       }
     ];
 
-    return el('div.stack', [
-      el('div.tiles', [
-        ui.statTile('Monthly total', '$' + fmt.num(c.monthlyTotalUsd), { unit: 'USD', note: 'Amortised hardware plus power' }),
-        ui.statTile('AWS baseline', '$' + fmt.num(c.awsBaselineUsd), { unit: 'USD', note: 'The same workloads, on-demand, priced from the calculator' }),
-        ui.statTile('Difference', '$' + fmt.num(diff), {
-          unit: 'USD',
-          delta: { value: fmt.ratioPct(diff / c.awsBaselineUsd, 0) + ' lower', dir: 'down', good: true },
-          note: 'Per month, before counting the staff time either option costs'
-        })
-      ]),
-      el('div.callout.info', [
-        el('strong', { text: 'These are amortised owned-hardware costs, not a bill.' }),
-        el('p', {
-          text: 'Capital cost from docs/07 spread over 36 months, plus measured power, attributed to workloads by '
-            + 'CPU, storage and GPU share. No cloud vendor gives you this number, because no cloud vendor can tell '
-            + 'you what a workload would have cost you to own.'
-        })
-      ]),
-      ui.card('Cost by cost-centre tag', [
-        el('p.hint', { text: 'Allocation follows the cost-centre tag on each workload, the way a cost allocation tag does on a cloud bill. Change the tag on an application and its cost moves here next month.' }),
-        ui.table(centreCols, centreRows, {
-          caption: 'Monthly amortised cost by cost-centre tag, with share of the total and the workloads under each',
-          sortKey: 'total', sortDir: 'desc',
-          rowKey: function (r) { return r.centre; }
-        })
-      ]),
-      ui.card('Six-month trend', [
-        el('div.row', [
-          ui.sparkline(history, { width: 320, height: 44, label: 'Monthly total over the last ' + history.length + ' months, from $' + fmt.num(Math.min.apply(null, history)) + ' to $' + fmt.num(Math.max.apply(null, history)) }),
-          el('span.num', { text: (trend >= 0 ? '+' : '-') + '$' + fmt.num(Math.abs(trend)) + ' over ' + history.length + ' months' })
-        ]),
-        el('p.hint', { text: 'Owned hardware barely moves month to month; what moves is power and the GPU share. A step up here is a new machine, not a surprise.' })
+    var tiles = el('div.tiles', [
+      ui.statTile('Monthly total', '$' + fmt.num(c.monthlyTotalUsd), { unit: 'USD', note: 'Amortised hardware plus power' }),
+      ui.statTile('AWS baseline', '$' + fmt.num(c.awsBaselineUsd), { unit: 'USD', note: 'The same workloads, on-demand' }),
+      ui.statTile('Difference', '$' + fmt.num(diff), {
+        unit: 'USD',
+        delta: { value: fmt.ratioPct(diff / c.awsBaselineUsd, 0) + ' lower', dir: 'down', good: true },
+        note: 'Per month, before staff time'
+      })
+    ]);
+    tiles.style.setProperty('margin-bottom', '0');
+    return el('div.grid', [
+      tiles,
+      el('div.grid.grid-2', [
+        ui.card('Cost by cost-centre tag', [
+          ui.table(centreCols, centreRows, {
+            caption: 'Monthly amortised cost by cost-centre tag, with share of the total and the workloads under each',
+            sortKey: 'total', sortDir: 'desc',
+            rowKey: function (r) { return r.centre; }
+          })
+        ], { counter: centreRows.length, description: 'Allocated by the cost-centre tag on each workload.' }),
+        ui.card('Six-month trend', [
+          el('div.row', [
+            ui.sparkline(history, { width: 320, height: 44, label: 'Monthly total over the last ' + history.length + ' months, from $' + fmt.num(Math.min.apply(null, history)) + ' to $' + fmt.num(Math.max.apply(null, history)) }),
+            el('span.num', { text: (trend >= 0 ? '+' : '-') + '$' + fmt.num(Math.abs(trend)) + ' over ' + history.length + ' months' })
+          ])
+        ], { description: 'Monthly amortised total.' })
       ]),
       ui.card('Cost by workload', ui.table(breakdownCols, c.breakdown, {
         caption: 'Monthly amortised cost by workload, split into CPU, storage and GPU, with share of the total',
         empty: 'No cost has been attributed.',
         sortKey: 'total', sortDir: 'desc'
-      })),
+      }), { counter: c.breakdown.length }),
       ui.card('Capacity forecast', ui.table(forecastCols, c.forecast, {
         caption: 'Resources projected to run out of headroom, with the month they fill',
         empty: 'Nothing is projected to fill.',
         sortKey: 'full', sortDir: 'asc'
-      }))
+      }), { counter: c.forecast.length }),
+      ui.disclosure('Details', [el('p', {
+        text: 'These are amortised owned-hardware costs, not a bill: capital cost from docs/07 spread over 36 months, '
+          + 'plus measured power, attributed to workloads by CPU, storage and GPU share.'
+      })])
     ]);
   }
 
@@ -895,9 +894,12 @@
       A.livePanel('Runbooks', '/api/runbooks', function (body, data) {
         var rows = orderedRunbooks(data.runbooks);
         body.appendChild(el('div.callout.info', [
-          el('strong', { text: 'Runbooks are documents here, not scripts the console can run.' }),
+          el('strong', { text: 'Runbooks are documents here, not scripts the console can run' }),
           el('p', { text: (data.note || 'The endpoint that would execute a runbook does not exist yet.') + ' Source: ' + (data.source || 'unknown') + '.' })
         ]));
+        var card = body.closest ? body.closest('.card') : null;
+        var titleRow = card ? card.querySelector('.card-titlerow') : null;
+        if (titleRow && !titleRow.querySelector('.card-counter')) titleRow.appendChild(el('span.card-counter', { text: '(' + fmt.num(rows.length) + ')' }));
         body.appendChild(ui.table(cols, rows, {
           caption: 'Runbooks read from the runbooks directory, with their tier, approval, step count and sections',
           empty: 'The runbooks directory holds no markdown file.',
@@ -909,7 +911,7 @@
   }
 
   function liveRunbookDetail(mount, id) {
-    var box = el('div.stack', [ui.skeleton(4)]);
+    var box = el('div.grid', [ui.skeleton(4)]);
     mount.appendChild(box);
     var alive = true;
     A.onLeave(function () { alive = false; });
@@ -945,7 +947,7 @@
         return;
       }
 
-      box.appendChild(ui.pageHeader(rb.title, rb.id, [backButton()]));
+      box.appendChild(ui.pageHeader(rb.title, null, [backButton()], { status: rb.approval ? approvalPill(rb.approval) : null }));
 
       var meta = ui.dl([
         ['Path', el('span.mono', { text: rb.path })],
@@ -967,14 +969,12 @@
         ], params, { caption: 'Parameters the runbook declares in its front matter', rowKey: function (p) { return p.name; } })
         : el('p.muted', { text: 'This runbook declares no parameters.' });
 
-      box.appendChild(ui.card('About this runbook', [
-        meta,
-        el('div.callout.info', [
-          el('strong', { text: env.data.executable === false ? 'This runbook cannot be run from the console.' : 'Running is not available from this screen.' }),
-          el('p', { text: (env.data.note || 'The endpoint that would execute it does not exist yet.') + ' Reading it here records nothing, because the console has no write path.' })
-        ]),
-        paramsNode
+      box.appendChild(el('div.callout.info', [
+        el('strong', { text: env.data.executable === false ? 'This runbook cannot be run from the console.' : 'Running is not available from this screen.' }),
+        el('p', { text: (env.data.note || 'The endpoint that would execute it does not exist yet.') + ' Reading it here records nothing.' })
       ]));
+      box.appendChild(ui.card('Details', [meta]));
+      box.appendChild(ui.card('Parameters', [paramsNode], { counter: params.length }));
 
       box.appendChild(A.livePanel('Runbook', '/api/runbooks/body?path=' + encodeURIComponent(rb.path), function (body, data) {
         var nodes = markdownNodes(data.body);
@@ -1032,14 +1032,13 @@
       { key: 'summary', label: 'Summary', sortable: false, render: function (g) { return g.summary || el('span.muted', { text: 'none given' }); } }
     ];
 
-    return el('div.stack', [
-      el('p.hint', { text: 'An alarm here is a Prometheus rule in Git. The console reads what Prometheus and Alertmanager hold and has no write path: a rule changes through a pull request.' }),
+    return el('div.grid', [
       A.livePanel('Open alerts', '/api/alerts/active', function (body, data, env) {
         var open = A.openAlerts(env) || { total: 0, groups: [], pagingCount: 0 };
         body.appendChild(el('div.tiles', [
-          ui.statTile('Open alerts', fmt.num(open.total), { note: 'now: firing, not silenced or inhibited' }),
-          ui.statTile('Paging', fmt.num(open.pagingCount), { note: 'severity page or critical' }),
-          ui.statTile('Alert names', fmt.num(open.groups.length), { note: 'open alerts grouped by name' })
+          ui.statTile('Open alerts', fmt.num(open.total), { note: 'Firing, not silenced or inhibited' }),
+          ui.statTile('Paging', fmt.num(open.pagingCount), { status: open.pagingCount ? { tone: 'bad', text: 'Page or critical' } : { tone: 'ok', text: 'None paging' } }),
+          ui.statTile('Alert names', fmt.num(open.groups.length), { note: 'Open alerts grouped by name' })
         ]));
         body.appendChild(ui.table(alertCols, open.groups, {
           caption: 'Open alerts grouped by name, worst severity first',
@@ -1069,7 +1068,7 @@
           empty: 'Prometheus answered and has no rule loaded.',
           rowKey: function (r) { return r.group + '/' + r.name; }
         }));
-      }, { skeletonRows: 4 }),
+      }, { skeletonRows: 4, card: { description: 'Rules live in Git and change through a pull request. The console has no write path.' } }),
       A.livePanel('Silences', '/api/alerts/silences', function (body, data) {
         body.appendChild(ui.table(silenceCols, data.silences || [], {
           caption: 'Active silences held by Alertmanager',
@@ -1090,7 +1089,7 @@
   }
 
   function liveBackupsTab() {
-    return el('div.stack', [
+    return el('div.grid', [
       A.notInStack('Backups and restore drills', 'have no source here: no Kopia, no wal-g and no drill record run in this stack, so no backup age, drill outcome or RPO is shown.'),
       A.livePanel('Buckets named for backups', '/api/storage/buckets', function (body, data) {
         var rows = (data.buckets || []).filter(function (b) { return /backup/i.test(b.name || ''); })
@@ -1119,7 +1118,7 @@
   }
 
   function opsCrumbs(rest) {
-    if (rest[0] === 'runbook' && rest[1]) return ['Runbooks', rest[1]];
+    if (rest[0] === 'runbook' && rest[1]) return [{ label: 'Runbooks', href: A.href('ops', ['runbooks']) }, rest[1]];
     return rest.map(function (s) { return s.charAt(0).toUpperCase() + s.slice(1); });
   }
 
@@ -1140,8 +1139,8 @@
       }
 
       mount.appendChild(ui.pageHeader('Operations', A.storeMode() === A.MODE.LIVE
-        ? 'The runbooks this stack holds, the rules Prometheus has loaded, and a plain statement of what has no source here.'
-        : 'Runbooks you can actually run, backups somebody has actually restored, and what the estate costs to own.'));
+        ? 'Runbooks, alerting rules and silences read from this stack.'
+        : 'Runbooks, backups and drills, maintenance, alarms and cost.'));
       mount.appendChild(ui.tabs([
         { id: 'runbooks', label: 'Runbooks', render: function () { return liveOnly(runbooksTab, liveRunbooksTab); } },
         { id: 'backups', label: 'Backups and drills', render: function () { return liveOnly(backupsTab, liveBackupsTab); } },

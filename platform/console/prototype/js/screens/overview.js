@@ -3,6 +3,10 @@
 
   var A = window.ARGUS, ui = A.ui, el = ui.el, fmt = ui.fmt, d = A.data;
 
+  var SHOW = 5;
+  var SHOW_LIVE = 8;
+  var NEED_WORD = { bad: 'Urgent', warn: 'Attention', info: 'Review' };
+
   function countBy(list, test) {
     return list.filter(test).length;
   }
@@ -25,157 +29,106 @@
     return d.deployments.filter(function (p) { return p.state === 'awaiting'; });
   }
 
-  function auditSentence(row) {
-    var who = A.personName(row.actor);
-    var pr = row.pr ? ' ' + row.pr : '';
-    switch (row.action) {
-      case 'deployment.open': return who + ' opened deployment' + pr + ' for ' + row.target + '.';
-      case 'deployment.approve': return who + ' approved deployment' + pr + ' for ' + row.target + '.';
-      case 'deployment.reject': return who + ' rejected deployment' + pr + ' for ' + row.target + '.';
-      case 'session.start': return who + ' started a recorded session on ' + row.target + '.';
-      case 'grant.approve': return who + ' approved an elevation: ' + row.target + '.';
-      case 'reconcile.apply': return who + ' applied ' + row.target + (row.pr ? ', deployment ' + row.pr : '') + '.';
-      case 'reconcile.rollback': return who + ' rolled back ' + row.target + (row.pr ? ', deployment ' + row.pr : '') + '.';
-      case 'secret.rotate': return who + ' rotated the secret ' + row.target + '.';
-      case 'alert.raise': return who + ' raised an alert: ' + row.target + '.';
-      case 'alert.acknowledge': return who + ' acknowledged alert ' + row.target + '.';
-      case 'reconciler.pause': return who + ' paused the reconciler: ' + row.target + '.';
-      case 'deployment.rollback': return who + ' asked for a roll back of ' + row.target + (row.pr ? ', deployment ' + row.pr : '') + '.';
-      case 'grant.deny': return who + ' declined an elevation: ' + row.target + '.';
-      case 'grant.revoke': return who + ' revoked ' + row.target + '.';
-      case 'elevation.request': return who + ' elevated ' + row.target + '.';
-      case 'elevation.release': return who + ' released the elevation of ' + row.target + '.';
-      case 'elevation.extend': return who + ' extended an elevation: ' + row.target + '.';
-      case 'incident.open': return who + ' opened incident ' + row.target + '.';
-      case 'incident.note': return who + ' wrote on incident ' + row.target + '.';
-      case 'incident.mitigated': return who + ' marked incident ' + row.target + ' mitigated.';
-      case 'incident.resolved': return who + ' resolved incident ' + row.target + '.';
-      case 'incident.reopen': return who + ' reopened incident ' + row.target + '.';
-      case 'session.lock': return 'The console locked, ' + row.target + '.';
-      case 'session.end': return who + ' ended a recorded session on ' + row.target + '.';
-      case 'alert.silence': return who + ' silenced alert ' + row.target + '.';
-      case 'alert.unsilence': return who + ' lifted the silence on ' + row.target + '.';
-      case 'freeze.declare': return who + ' declared a change freeze: ' + row.target + '.';
-      case 'freeze.lift': return who + ' lifted the change freeze: ' + row.target + '.';
-      case 'freeze.override': return who + ' signed off a deployment during the freeze: ' + row.target + '.';
-      case 'audit.verify': return who + ' verified the audit chain: ' + row.target + '.';
-      case 'tags.update': return who + ' changed tags on ' + row.target + '.';
-      case 'advisor.accept': return who + ' accepted an advisor finding: ' + row.target + '.';
-      case 'advisor.reopen': return who + ' reopened advisor finding ' + row.target + '.';
-      case 'alarm.create': return who + ' created alarm ' + row.target + '.';
-      case 'alarm.update': return who + ' changed alarm ' + row.target + '.';
-      case 'alarm.delete': return who + ' deleted alarm ' + row.target + '.';
-      case 'vm.stop': return who + ' stopped ' + row.target + '.';
-      case 'vm.start': return who + ' started ' + row.target + '.';
-      case 'vm.restart': return who + ' restarted ' + row.target + '.';
-      case 'vm.resize': return who + ' resized ' + row.target + '.';
-      case 'vm.checkpoint': return who + ' took a checkpoint of ' + row.target + '.';
-      case 'vm.protect': return who + ' enabled replication for ' + row.target + '.';
-      case 'host.patch': return who + ' patched ' + row.target + '.';
-      case 'session.unlock': return who + ' unlocked the console.';
-      case 'secret.revoke-leases': return who + ' revoked every lease on ' + row.target + '.';
-      case 'vuln.waive': return who + ' waived ' + row.target + '.';
-      case 'model.promote': return who + ' promoted model ' + row.target + '.';
-      case 'canary.set': return who + ' set the canary on ' + row.target + '.';
-      case 'asset.materialise': return who + ' queued a materialisation of ' + row.target + '.';
-      case 'runbook.run': return who + ' ran runbook ' + row.target + '.';
-      case 'app.restart': return who + ' asked for a restart of ' + row.target + '.';
-      case 'instance.restart': return who + ' restarted ' + row.target + '.';
-      case 'host.drain': return who + ' asked to drain ' + row.target + '.';
-      case 'host.quarantine': return who + ' quarantined ' + row.target + '.';
-      case 'person.offboard': return who + ' offboarded ' + row.target + '.';
-      case 'evidence.generate': return who + ' generated the ' + row.target + '.';
-      default: return who + ' ran ' + row.action.split('.').join(' ') + ' on ' + row.target + '.';
-    }
+  function mono(text) { return el('span.mono', { text: String(text) }); }
+
+  function plural(n, one, many) { return fmt.num(n) + ' ' + (n === 1 ? one : (many || one + 's')); }
+
+  function nb(t) { return String(t).replace(/ /g, '\u00a0'); }
+
+  function sentence(t) { return t.charAt(0).toUpperCase() + t.slice(1) + '.'; }
+
+  function grid() {
+    return el('div.grid', Array.prototype.slice.call(arguments));
   }
 
-  function needsYouRow(text, link) {
-    return el('div.feed-row', [el('span', { text: text }), link]);
+  function setCounter(card, n) {
+    var row = card.querySelector('.card-titlerow');
+    if (!row) return;
+    var c = row.querySelector('.card-counter');
+    if (!c) { c = el('span.card-counter'); row.appendChild(c); }
+    c.textContent = '(' + fmt.num(n) + ')';
+  }
+
+  function heroLine(tone, kind, title, rest, link) {
+    return el('div.callout.' + tone, { 'data-hero': kind }, [
+      el('span', [el('b', { text: title }), rest ? ' ' + rest : null]),
+      link ? ' ' : null,
+      link || null
+    ]);
   }
 
   function heroBand() {
     var critical = openAlerts().filter(function (a) { return a.severity === 'critical'; });
-    if (critical.length) {
-      var a = critical[0];
-      var more = critical.length > 1
-        ? ' ' + fmt.num(critical.length - 1) + ' other critical alert' + (critical.length === 2 ? ' is' : 's are') + ' also open.'
-        : '';
-      return el('div.callout.bad', [
-        el('strong', { text: 'A critical alert is open on ' + a.host + '.' }),
-        el('p', {
-          text: a.source + ' reported "' + a.rule + '" on ' + a.host + '. It has fired ' +
-            fmt.num(a.count) + ' time' + (a.count === 1 ? '' : 's') + ', most recently ' + fmt.ago(a.last) +
-            ', and nobody has acknowledged it.' + more
-        }),
-        A.link('Open alert ' + a.id + ' in Security', 'security', ['alerts'], { id: a.id })
-      ]);
-    }
-
-    var degraded = d.apps.filter(function (app) { return app.health !== 'ok'; });
-    var back = oldestBackup();
-    return el('div.callout.ok', [
-      el('strong', { text: 'Nothing critical is open.' }),
-      el('p', {
-        text: fmt.num(d.apps.length - degraded.length) + ' of ' + fmt.num(d.apps.length) +
-          ' applications are healthy, the reconciler last synchronised ' + fmt.ago(d.reconciler.lastSync) +
-          ', and the oldest backup, ' + back.store + ', is ' + fmt.ago(back.last) + '.'
-      })
-    ]);
+    if (!critical.length) return null;
+    var a = critical[0];
+    return heroLine('bad', 'critical', 'Critical alert: ' + a.rule,
+      'on ' + a.host + ', fired ' + plural(a.count, 'time') + (critical.length > 1 ? ', ' + fmt.num(critical.length - 1) + ' more critical' : '') + '.',
+      A.link('View alerts', 'security', ['alerts'], { id: a.id }));
   }
 
   function tiles() {
     var healthy = countBy(d.apps, function (app) { return app.health === 'ok'; });
-    var degraded = d.apps.filter(function (app) { return app.health !== 'ok'; });
-    var worstSlo = d.apps.slice().sort(function (a, b) { return a.slo - b.slo; })[0];
+    var degraded = d.apps.length - healthy;
     var back = oldestBackup();
     var open = openAlerts().slice().sort(bySeverity);
+    var critical = countBy(open, function (a) { return a.severity === 'critical'; });
     var awaiting = awaitingDeployments();
-
-    var findings = typeof A.advisorFindings === 'function' ? A.advisorFindings().filter(function (f) { return !f.suppressed; }) : [];
-    var urgent = findings.filter(function (f) { return f.severity === 'critical' || f.severity === 'high'; }).length;
+    var oldest = awaiting.slice().sort(function (a, b) { return a.opened - b.opened; })[0];
 
     return el('div.tiles', [
-      ui.statTile('Applications healthy', fmt.num(healthy) + ' of ' + fmt.num(d.apps.length), {
-        note: degraded.length
-          ? degraded.map(function (app) { return app.display; }).join(', ') + ' not healthy'
-          : 'Every application is serving normally',
-        href: A.href('apps'), title: 'Open Applications'
-      }),
-      ui.statTile('Lowest SLO this month', fmt.pct(worstSlo.slo, 2), {
-        note: worstSlo.display + ' is the worst of ' + fmt.num(d.apps.length),
-        href: A.href('apps', [worstSlo.name, 'budget']), title: 'Open the error budget of ' + worstSlo.display
-      }),
-      ui.statTile('Oldest backup', fmt.ago(back.last), {
-        note: back.store + ', ' + back.kind + ', ' + back.cadence,
-        href: A.href('ops', ['backups']), title: 'Open backups and drills'
+      ui.statTile('Applications', fmt.num(healthy) + ' of ' + fmt.num(d.apps.length), {
+        status: degraded ? { tone: 'warn', text: plural(degraded, 'degraded', 'degraded') } : { tone: 'ok', text: 'All healthy' },
+        link: 'View applications', href: A.href('apps'), title: 'Open Applications'
       }),
       ui.statTile('Open alerts', fmt.num(open.length), {
-        note: open.length ? 'Worst severity: ' + open[0].severity : 'Nothing open',
-        href: A.href('security', ['alerts']), title: 'Open the alerts'
+        status: critical ? { tone: 'bad', text: fmt.num(critical) + ' critical' } : open.length ? { tone: 'warn', text: 'Worst: ' + open[0].severity } : { tone: 'ok', text: 'None open' },
+        link: 'View alerts', href: A.href('security', ['alerts']), title: 'Open the alerts'
       }),
-      ui.statTile('Deployments awaiting approval', fmt.num(awaiting.length), {
-        note: awaiting.length
-          ? 'Oldest opened ' + fmt.ago(awaiting.slice().sort(function (a, b) { return a.opened - b.opened; })[0].opened)
-          : 'The queue is empty',
-        href: A.href('deploys'), title: 'Open the deployment queue'
+      ui.statTile('Awaiting approval', fmt.num(awaiting.length), {
+        status: awaiting.length ? { tone: 'pending', text: 'Oldest ' + fmt.ago(oldest.opened) } : { tone: 'ok', text: 'Queue empty' },
+        link: 'View deployments', href: A.href('deploys'), title: 'Open the deployment queue'
       }),
-      ui.statTile('Advisor findings', fmt.num(findings.length), {
-        note: urgent ? fmt.num(urgent) + ' critical or high' : 'none critical or high',
-        href: A.href('advisor'), title: 'Open the Advisor'
+      ui.statTile('Oldest backup', fmt.ago(back.last), {
+        note: back.store + ', ' + back.cadence,
+        link: 'View backups', href: A.href('ops', ['backups']), title: 'Open backups and drills'
       })
     ]);
   }
 
-  function recentCard() {
-    var items = typeof A.recents === 'function' ? A.recents().slice(0, 6) : [];
-    return ui.card('Recently visited', items.length
-      ? el('div.stack', items.map(function (r) {
-        return el('div.row', [
-          el('a.rlink', { href: r.hash, text: r.label }),
-          el('span.muted', { text: r.kind })
-        ]);
-      }))
-      : ui.emptyState('Nothing yet', 'The screens and resources you open appear here, newest first, and in the palette.'));
+  function needsTable(items, caption) {
+    return ui.table([
+      { key: 'text', label: 'Item', sortable: false, render: function (r) { return el('a.rlink', { href: A.href(r.route, r.rest, r.params), title: r.label, 'data-action': r.label, text: r.text.replace(/.$/, '') }); } },
+      { key: 'tone', label: 'Severity', status: true, sortable: false, render: function (r) { return ui.status(r.tone, NEED_WORD[r.tone] || 'Review'); } },
+      { key: 'kind', label: 'Source', sortable: false }
+    ], items, {
+      caption: caption,
+      rowKey: function (r) { return r.kind + ':' + r.text; },
+      emptyTitle: 'Nothing needs attention',
+      empty: 'No incident, approval, alert or expiry is waiting.'
+    });
+  }
+
+  function inboxFooter(total) {
+    if (total <= SHOW) return null;
+    return [ui.btn('View all ' + fmt.num(total) + ' in the inbox', { variant: 'link', onClick: function () { A.inbox(); } })];
+  }
+
+  function needsCard() {
+    var items = typeof A.needsYou === 'function' ? A.needsYou() : [];
+    var shown = openAlerts().filter(function (a) { return a.severity === 'critical'; })[0];
+    if (shown) {
+      var skipped = false;
+      items = items.filter(function (it) {
+        if (!skipped && it.kind === 'Alert' && it.label === 'Open ' + shown.id) { skipped = true; return false; }
+        return true;
+      });
+    }
+    items = dedupe(items);
+    var card = ui.card('Needs attention', needsTable(items.slice(0, SHOW), 'Items that need an operator, most urgent first'), {
+      counter: items.length, footer: inboxFooter(items.length)
+    });
+    card.setAttribute('data-panel', 'needs');
+    return card;
   }
 
   function appBeats(app) {
@@ -196,167 +149,109 @@
   function healthCard() {
     var rows = d.apps.slice().sort(function (a, b) { return a.slo - b.slo; }).map(function (app) {
       var beats = appBeats(app);
-      var u = ui.uptimeOf(beats, {});
-      return el('div.healthrow', [
-        A.link(app.display, 'apps', [app.name]),
-        ui.heartbeatBar(beats, { slots: 30, width: 200, height: 16, label: app.display + ': ' + ui.heartbeatSentence(beats, { windowWord: 'the last 30 days' }) }),
-        el('span.num', { text: fmt.pct(u.ratio * 100, 1) })
-      ]);
+      return { app: app, beats: beats, uptime: ui.uptimeOf(beats, {}).ratio };
     });
-    return ui.card('Service health, 30 days', [
-      el('div.stack', rows),
-      el('p.hint', { text: 'One slot per day, oldest left. Full is up, short is a retry, notched is an outage. Worst at the top.' })
-    ]);
-  }
-
-  function needsYouCard() {
-    var items = typeof A.needsYou === 'function' ? A.needsYou() : [];
-    var shown = openAlerts().filter(function (a) { return a.severity === 'critical'; })[0];
-    if (shown) {
-      var skipped = false;
-      items = items.filter(function (it) {
-        if (!skipped && it.kind === 'Alert' && it.label === 'Open ' + shown.id) { skipped = true; return false; }
-        return true;
-      });
-    }
-    var SHOW = 6;
-    var rows = items.slice(0, SHOW).map(function (it) {
-      return needsYouRow(it.kind + ': ' + it.text, A.link(it.label, it.route, it.rest, it.params));
-    });
-    if (items.length > SHOW) {
-      rows.push(el('div.row', [
-        el('span.muted', { text: fmt.num(items.length - SHOW) + ' more in the inbox.' }),
-        ui.btn('Open the inbox', { variant: 'ghost', onClick: function () { A.inbox(); } })
-      ]));
-    }
-
-    return ui.card('Needs you', rows.length
-      ? el('div.stack', rows)
-      : ui.emptyState(
-        'Nothing is waiting for you',
-        'No incident is open, no deployment needs an approver, no elevation has been requested, no waiver has expired, no secret is past its policy and no critical or high alert is open. This list fills itself, so there is nothing to refresh.',
-        A.link('Look at the deployment queue anyway', 'deploys')));
+    var card = ui.card('Service health', ui.table([
+      { key: 'name', label: 'Name', sortable: false, render: function (r) { return A.link(r.app.display, 'apps', [r.app.name]); } },
+      { key: 'health', label: 'Status', status: true, sortable: false, render: function (r) { return ui.status(r.app.health === 'ok' ? 'ok' : 'warn', r.app.health === 'ok' ? 'Healthy' : 'Degraded'); } },
+      { key: 'beats', label: 'Last 30 days', sortable: false, render: function (r) { return ui.heartbeatBar(r.beats, { slots: 30, width: 150, height: 16, label: r.app.display + ': ' + ui.heartbeatSentence(r.beats, { windowWord: 'the last 30 days' }) }); } },
+      { key: 'uptime', label: 'Uptime', align: 'right', sortable: false, render: function (r) { return fmt.pct(r.uptime * 100, 1); } },
+      { key: 'rps', label: 'Req/s', align: 'right', sortable: false, render: function (r) { return fmt.num(r.app.rps); } }
+    ], rows, {
+      caption: 'Service health over 30 days, worst first',
+      rowKey: function (r) { return r.app.name; }
+    }), { counter: rows.length, footer: [A.link('View applications', 'apps')] });
+    card.setAttribute('data-panel', 'health');
+    return card;
   }
 
   function activityCard() {
-    var rows = d.audit.slice(0, 8).map(function (row) {
-      return el('div.feed-row', [
-        el('span', { text: auditSentence(row) }),
-        fmt.time(row.at)
-      ]);
-    });
-    return ui.card('Recent activity', [
-      el('div.stack', rows),
-      el('div.row', A.link('All audit events', 'audit'))
-    ]);
+    var rows = d.audit.slice(0, 4);
+    var card = ui.card('Recent activity', ui.table([
+      { key: 'at', label: 'Time', sortable: false, render: function (r) { return el('time', { datetime: r.at.toISOString(), title: fmt.stamp(r.at), text: nb(fmt.ago(r.at)) }); } },
+      { key: 'actor', label: 'Operator', sortable: false, render: function (r) { return A.personName(r.actor); } },
+      { key: 'action', label: 'Event', sortable: false, render: function (r) { return el('div.col', [eventNode(r.action), el('span.muted', { text: r.target + (r.pr ? ' (' + r.pr + ')' : '') })]); } }
+    ], rows, {
+      caption: 'The four most recent audit events',
+      rowKey: function (r) { return String(r.at.getTime()) + r.action + r.target; },
+      emptyTitle: 'No events'
+    }), { footer: [A.link('View audit log', 'audit')] });
+    card.setAttribute('data-panel', 'activity');
+    return card;
   }
 
-  function linkHistory(site) {
-    var beats = site.checks || [];
-    var day = ui.uptimeOf(beats, { windowMs: 86400000, now: d.now.getTime() });
-    var sentence = ui.heartbeatSentence(beats, {
-      name: site.name + ' link',
-      windowMs: 86400000,
-      windowWord: 'the last 24 hours',
-      now: d.now.getTime()
-    });
-    var incidents = ui.incidentsOf(beats).filter(function (i) { return i.to === 0; });
-    return el('div.stack', [
-      ui.heartbeatBar(beats, { slots: beats.length || 48, width: 240, label: sentence }),
-      el('div.hbscale', [
-        el('span', { text: '24 h ago' }),
-        el('span', { text: 'now' })
-      ]),
-      el('span', {
-        text: day.ratio === null
-          ? 'No link check has been recorded.'
-          : fmt.pct(day.ratio * 100, 1) + ' of ' + fmt.num(day.counted) + ' checks up' +
-            (incidents.length
-              ? ', ' + fmt.num(incidents.length) + ' drop' + (incidents.length === 1 ? '' : 's') +
-                ', last ' + fmt.ago(new Date(incidents[incidents.length - 1].at))
-              : ', no drop')
-      })
-    ]);
+  function platformCard() {
+    var r = d.reconciler;
+    var worstSlo = d.apps.slice().sort(function (a, b) { return a.slo - b.slo; })[0];
+    var findings = typeof A.advisorFindings === 'function' ? A.advisorFindings().filter(function (f) { return !f.suppressed; }) : [];
+    var urgent = countBy(findings, function (f) { return f.severity === 'critical' || f.severity === 'high'; });
+    var card = ui.card('Platform', ui.dl([
+      ['Reconciler', ui.status(r.state === 'running' ? 'ok' : 'warn', r.state === 'running' ? 'Running' : r.state)],
+      ['Last sync', fmt.time(r.lastSync)],
+      ['Drift', r.drift > 0 ? ui.status('warn', plural(r.drift, 'resource') + ' adrift') : ui.status('ok', 'None')],
+      ['Pending plans', fmt.num(r.pendingPlans)],
+      ['Lowest SLO', A.link(fmt.pct(worstSlo.slo, 2) + ', ' + worstSlo.display, 'apps', [worstSlo.name, 'budget'])],
+      ['Advisor findings', A.link(fmt.num(findings.length) + (urgent ? ', ' + fmt.num(urgent) + ' critical or high' : ''), 'advisor')]
+    ]));
+    card.setAttribute('data-panel', 'platform');
+    return card;
+  }
+
+  function linkUptime(site) {
+    var day = ui.uptimeOf(site.checks || [], { windowMs: 86400000, now: d.now.getTime() });
+    return day.ratio === null ? null : day.ratio;
   }
 
   function sitesCard() {
-    return ui.card('Sites', [
-      el('div.sitemap', d.sites.map(function (s) {
-        return el('div.site', [
-          el('h3', { text: s.name }),
-          ui.dl([
-            ['Location', s.location],
-            ['Role', s.role],
-            ['Link', ui.pill(s.link === 'up' ? 'Up' : 'Down', s.link === 'up' ? 'ok' : 'bad')],
-            ['Latency', fmt.ms(s.latencyMs)],
-            ['Replication lag', fmt.dur(s.replicationLagS)],
-            ['Link checks', linkHistory(s)]
-          ])
+    var card = ui.card('Sites', ui.table([
+      { key: 'name', label: 'Name', sortable: false, render: function (s) { return el('span', { title: s.location + ', ' + s.role, text: s.name }); } },
+      { key: 'link', label: 'Link', status: true, sortable: false, render: function (s) { return ui.status(s.link === 'up' ? 'ok' : 'bad', s.link === 'up' ? 'Up' : 'Down'); } },
+      { key: 'latencyMs', label: 'Latency', align: 'right', sortable: false, render: function (s) { return fmt.ms(s.latencyMs); } },
+      { key: 'replicationLagS', label: 'Lag', align: 'right', sortable: false, render: function (s) { return fmt.dur(s.replicationLagS); } },
+      {
+        key: 'checks', label: 'Link, 24 h', align: 'right', sortable: false,
+        render: function (s) {
+          var beats = s.checks || [];
+          var up = linkUptime(s);
+          return el('span.num', { title: ui.heartbeatSentence(beats, { name: s.name + ' link', windowMs: 86400000, windowWord: 'the last 24 hours', now: d.now.getTime() }), text: up === null ? '-' : fmt.pct(up * 100, 1) });
+        }
+      }
+    ], d.sites, {
+      caption: 'Sites, their link and replication lag',
+      rowKey: function (s) { return s.id; }
+    }), { counter: d.sites.length });
+    card.setAttribute('data-panel', 'sites');
+    return card;
+  }
+
+  function recentCard() {
+    var here = window.location.hash;
+    var items = typeof A.recents === 'function' ? A.recents().filter(function (r) { return r.hash !== here && r.hash !== '#/overview'; }).slice(0, 4) : [];
+    var card = ui.card('Recently visited', items.length
+      ? el('div.stack', items.map(function (r) {
+        return el('div.row', [
+          el('a.rlink', { href: r.hash, text: r.label }),
+          el('span.muted', { text: r.kind })
         ]);
       }))
-    ]);
-  }
-
-  function trafficCard() {
-    var top = d.apps.slice().sort(function (a, b) { return b.rps - a.rps; }).slice(0, 4);
-    var rows = top.map(function (app) {
-      return el('div.row', [
-        A.link(app.display, 'apps', [app.name]),
-        el('span.num', { text: fmt.num(app.rps) + ' req/s' }),
-        ui.sparkline(app.trend.rps, { label: app.display + ' request rate, last 24 hours' })
-      ]);
-    });
-    return ui.card('Traffic, last 24 hours', [
-      el('p.hint', { text: 'The four busiest applications by request rate. Each line covers 24 hourly samples; the figure beside it is the rate right now.' }),
-      el('div.stack', rows)
-    ]);
-  }
-
-  function reconcilerCard() {
-    var r = d.reconciler;
-    var drifted = r.drift > 0;
-    return ui.card('Reconciler', [
-      ui.dl([
-        ['State', ui.pill(r.state === 'running' ? 'Running' : r.state, r.state === 'running' ? 'ok' : 'warn')],
-        ['Last sync', fmt.time(r.lastSync)],
-        ['Head', el('code', { text: r.head })],
-        ['Drift', drifted
-          ? ui.pill(fmt.num(r.drift) + ' resources adrift', 'warn')
-          : ui.pill('None', 'ok')],
-        ['Pending plans', fmt.num(r.pendingPlans)],
-        ['Apply lag', fmt.dur(r.applyLagS)]
-      ]),
-      el('p.hint', {
-        text: drifted
-          ? 'Drift means the cluster no longer matches Git. The reconciler will not close the gap on its own while a plan is pending.'
-          : 'The cluster matches the desired state in Git. Nothing has been changed by hand.'
-      })
-    ]);
+      : el('p.muted', { text: 'Nothing yet.' }));
+    card.setAttribute('data-panel', 'recent');
+    return card;
   }
 
   function renderSample(mount) {
-    var summary = 'Figures as of ' + fmt.stamp(new Date(d.now)) + '. The tiles below link to each screen.';
-
-    mount.appendChild(ui.pageHeader('Overview', summary, [
-      ui.btn('Open runbooks', {
-        variant: 'ghost',
-        onClick: function () { A.go('ops'); }
-      })
-    ]));
-
-    mount.appendChild(heroBand());
+    mount.appendChild(ui.pageHeader('Overview'));
+    var hero = heroBand();
+    if (hero) mount.appendChild(hero);
     mount.appendChild(tiles());
-    mount.appendChild(el('div.grid.grid-3', [needsYouCard(), activityCard(), sitesCard()]));
-    mount.appendChild(el('div.grid.grid-4', [trafficCard(), reconcilerCard(), healthCard(), recentCard()]));
+    mount.appendChild(grid(
+      needsCard(),
+      el('div.grid.grid-2', [healthCard(), grid(activityCard(), recentCard())]),
+      el('div.grid.grid-2', [platformCard(), sitesCard()])));
   }
 
   function readWord(env) {
-    return env && env.at ? 'read ' + fmt.stamp(new Date(env.at)).slice(11) : 'not read';
-  }
-
-  function readSentence(env) {
-    var w = readWord(env);
-    return w.charAt(0).toUpperCase() + w.slice(1) + '.';
+    return env && env.at ? 'Read ' + fmt.clock(new Date(env.at)) : 'Not read';
   }
 
   function agoLive(iso) {
@@ -387,7 +282,7 @@
 
   function liveTile(label, paths, build, opts) {
     opts = opts || {};
-    var node = ui.statTile(label, '…', { note: 'Reading the console API', href: opts.href, title: opts.title });
+    var node = ui.statTile(label, '-', { note: 'Reading', href: opts.href, title: opts.title, link: opts.link });
     var alive = stillHere();
     node.setAttribute('data-state', 'loading');
     A.settling(readAll(paths).then(function (envs) {
@@ -399,18 +294,20 @@
         var e = failed.error || {};
         var st = A.envelopeState(failed);
         spec = st === 'notConfigured'
-          ? { value: 'not configured', note: opts.notConfigured || e.message || 'This reader has no upstream in this stack.' }
+          ? { value: '-', status: { tone: 'idle', text: 'Not configured', title: opts.notConfigured || e.message || '' } }
           : st === 'forbidden'
-            ? { value: 'no access', note: 'Your role cannot read this' }
-            : { value: '-', note: 'Could not be read: ' + (e.message || 'the request failed.') };
+            ? { value: '-', status: { tone: 'warn', text: 'No access' } }
+            : { value: '-', status: { tone: 'bad', text: 'Read failed', title: e.message || '' } };
       } else {
         spec = build(envs.map(function (env) { return env.data || {}; }), envs);
       }
       var fresh = ui.statTile(label, spec.value, {
         unit: spec.unit,
-        note: (spec.note ? spec.note + '. ' : '') + readWord(failed || envs[0]),
+        status: spec.status,
+        note: (spec.note ? spec.note + ' · ' : '') + readWord(failed || envs[0]),
         href: opts.href,
-        title: opts.title
+        title: opts.title,
+        link: opts.link
       });
       fresh.setAttribute('data-state', failed ? A.envelopeState(failed) : 'ok');
       node.parentNode.replaceChild(fresh, node);
@@ -429,64 +326,128 @@
     if (status === 2) return 'warn';
     return 'idle';
   }
+  function monitorWord(m) {
+    var w = m.statusName || 'unknown';
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }
+  function exitOf(c) {
+    if (c && typeof c.exitCode === 'number') return c.exitCode;
+    var m = /Exited \((-?\d+)\)/i.exec((c && c.status) || '');
+    return m ? Number(m[1]) : null;
+  }
+
+  var TONE_RANK = { bad: 0, warn: 1, info: 2 };
+
+  function subjectOf(it) {
+    var t = String(it.text || '');
+    var at = t.indexOf(':');
+    return (at > 0 ? t.slice(0, at) : t).trim().toLowerCase();
+  }
+
+  function dedupe(items) {
+    var out = [];
+    var bySubject = {};
+    items.forEach(function (it) {
+      var key = subjectOf(it);
+      var have = Object.prototype.hasOwnProperty.call(bySubject, key) ? bySubject[key] : null;
+      if (have === null) { bySubject[key] = out.length; out.push(it); return; }
+      var cur = out[have];
+      var keep = (TONE_RANK[it.tone] === undefined ? 3 : TONE_RANK[it.tone]) < (TONE_RANK[cur.tone] === undefined ? 3 : TONE_RANK[cur.tone]) ? it : cur;
+      var other = keep === it ? cur : it;
+      out[have] = Object.assign({}, keep, { kind: keep.kind === other.kind ? keep.kind : keep.kind + ', ' + other.kind });
+    });
+    return out;
+  }
+
+  var EVENT_LABEL = {
+    'auth.login.succeeded': 'Signed in',
+    'auth.login.failed': 'Sign-in failed',
+    'auth.login.throttled': 'Sign-in throttled',
+    'auth.logout': 'Signed out',
+    'auth.account.locked': 'Account locked',
+    'auth.denied': 'Request refused',
+    'auth.csrf.rejected': 'Request rejected',
+    'auth.session.expired.idle': 'Session expired, idle',
+    'auth.session.expired.absolute': 'Session expired',
+    'auth.session.renewed': 'Session renewed',
+    'auth.session.evicted': 'Session evicted',
+    'auth.session.rejected': 'Session rejected',
+    'auth.session.anomaly': 'Session anomaly',
+    'auth.config.rejected': 'Configuration rejected'
+  };
+
+  var VERB = {
+    approve: 'approved', open: 'opened', reject: 'rejected', start: 'started', end: 'ended', apply: 'applied',
+    rollback: 'rolled back', rotate: 'rotated', raise: 'raised', acknowledge: 'acknowledged', pause: 'paused',
+    deny: 'denied', revoke: 'revoked', request: 'requested', release: 'released', extend: 'extended', note: 'noted',
+    mitigated: 'mitigated', resolved: 'resolved', reopen: 'reopened', lock: 'locked', unlock: 'unlocked',
+    silence: 'silenced', unsilence: 'unsilenced', declare: 'declared', lift: 'lifted', override: 'overridden',
+    verify: 'verified', update: 'updated', accept: 'accepted', create: 'created', delete: 'deleted', stop: 'stopped',
+    restart: 'restarted', resize: 'resized', checkpoint: 'checkpointed', protect: 'protected', patch: 'patched',
+    promote: 'promoted', set: 'set', materialise: 'materialised', run: 'run', drain: 'drained', quarantine: 'quarantined',
+    offboard: 'offboarded', generate: 'generated'
+  };
+
+  function eventLabel(raw) {
+    var name = String(raw || 'event');
+    if (Object.prototype.hasOwnProperty.call(EVENT_LABEL, name)) return EVENT_LABEL[name];
+    var parts = name.split('.');
+    if (parts.length !== 2) return name;
+    var noun = parts[0].replace(/-/g, ' ');
+    var verb = Object.prototype.hasOwnProperty.call(VERB, parts[1]) ? VERB[parts[1]] : parts[1].replace(/-/g, ' ');
+    return noun.charAt(0).toUpperCase() + noun.slice(1) + ' ' + verb;
+  }
+
+  function eventNode(raw) { return el('span', { title: String(raw || ''), 'data-event': String(raw || ''), text: eventLabel(raw) }); }
+
   function monitorsOf(data) { return (data && data.monitors) || []; }
   function monitorsDown(data) { return monitorsOf(data).filter(function (m) { return m.status === 0; }); }
   function names(list) { return list.map(function (m) { return m.label || m.id; }).join(', '); }
 
   function liveTiles() {
     return el('div.tiles', [
-      liveTile('Services working', ['/api/heartbeats'], function (datas) {
+      liveTile('Services', ['/api/heartbeats'], function (datas) {
         var all = monitorsOf(datas[0]);
         var up = all.filter(function (m) { return m.status === 1 || m.status === 3; });
         var down = monitorsDown(datas[0]);
         var pending = all.filter(function (m) { return m.status === 2; });
-        var unknown = all.filter(function (m) { return m.status === null || m.status === undefined; });
-        var parts = [];
-        if (down.length) parts.push('down: ' + names(down));
-        if (pending.length) parts.push('retrying: ' + names(pending));
-        if (unknown.length) parts.push(fmt.num(unknown.length) + ' not yet checked');
-        return { value: fmt.num(up.length) + ' of ' + fmt.num(all.length), note: parts.length ? parts.join('; ') : 'Every monitored service answered' };
-      }, { href: A.href('stack'), title: 'Open the Services heartbeats' }),
+        var status = down.length ? { tone: 'bad', text: fmt.num(down.length) + ' down', title: names(down) }
+          : pending.length ? { tone: 'warn', text: fmt.num(pending.length) + ' retrying', title: names(pending) }
+            : up.length === all.length ? { tone: 'ok', text: 'All up' } : { tone: 'idle', text: fmt.num(all.length - up.length) + ' not checked' };
+        return { value: fmt.num(up.length) + ' of ' + fmt.num(all.length), status: status };
+      }, { href: A.href('stack'), title: 'Open the Services heartbeats', link: 'View services' }),
       liveTile('Open alerts', ['/api/alerts/active'], function (datas) {
         var open = A.openAlerts(datas[0]) || { total: 0, groups: [], pagingCount: 0 };
         var worst = open.groups[0];
         return {
           value: fmt.num(open.total),
-          note: !worst ? 'Alertmanager reports nothing firing'
-            : (open.pagingCount ? fmt.num(open.pagingCount) + ' paging; ' : '') + 'worst: ' + worst.name + ', ' + (worst.severity || 'unlabelled') +
-              (open.groups.length > 1 ? '; ' + fmt.num(open.groups.length) + ' alert names' : '')
+          status: !worst ? { tone: 'ok', text: 'None firing' }
+            : open.pagingCount ? { tone: 'bad', text: fmt.num(open.pagingCount) + ' paging' } : { tone: 'warn', text: fmt.num(open.total) + ' firing' },
+          note: worst ? 'Worst: ' + worst.name : null
         };
-      }, { href: A.href('security', ['alerts']), title: 'Open the alerts', notConfigured: 'Alertmanager is not configured for this console' }),
-      liveTile('Declared applications', ['/api/gitops/apps'], function (datas) {
-        var apps = datas[0].apps || [];
-        var tiers = {};
-        apps.forEach(function (a) { var t = a.tier === null || a.tier === undefined ? 'untiered' : 'tier ' + a.tier; tiers[t] = (tiers[t] || 0) + 1; });
-        var breakdown = Object.keys(tiers).sort().map(function (t) { return t + ': ' + fmt.num(tiers[t]); }).join(', ');
-        var problems = (datas[0].problems || []).length;
-        return { value: fmt.num(datas[0].count === undefined ? apps.length : datas[0].count), note: (breakdown || 'no tiers declared') + (problems ? '; ' + fmt.num(problems) + ' directory without a spec' : '') };
-      }, { href: A.href('apps'), title: 'Open Applications', notConfigured: 'No GitOps directory is configured for this console' }),
-      liveTile('Containers running', ['/api/containers'], function (datas) {
-        return { value: fmt.num(datas[0].running) + ' of ' + fmt.num(datas[0].count), note: 'Read through the Docker socket proxy' };
-      }, { href: A.href('stack'), title: 'Open Services', notConfigured: 'The Docker socket proxy is not configured for this console' }),
-      liveTile('Host CPU now', ['/api/host'], function (datas) {
+      }, { href: A.href('security', ['alerts']), title: 'Open the alerts', link: 'View alerts', notConfigured: 'Alertmanager is not configured for this console' }),
+      liveTile('Containers', ['/api/containers'], function (datas) {
+        var list = datas[0].containers || [];
+        var running = datas[0].running === undefined ? list.filter(function (c) { return c.state === 'running'; }).length : datas[0].running;
+        var done = list.filter(function (c) { return c.state === 'exited' && exitOf(c) === 0; }).length;
+        var failed = list.filter(function (c) { return c.state !== 'running' && !(c.state === 'exited' && exitOf(c) === 0); }).length;
+        return {
+          value: fmt.num(running), unit: 'running',
+          status: failed ? { tone: 'bad', text: fmt.num(failed) + ' stopped or failed' } : { tone: 'ok', text: 'None failed' },
+          note: done ? fmt.num(done) + ' completed' : null
+        };
+      }, { href: A.href('stack'), title: 'Open Services', link: 'View containers', notConfigured: 'The Docker socket proxy is not configured for this console' }),
+      liveTile('Host CPU', ['/api/host'], function (datas) {
         var c = datas[0].cpu || {};
-        return { value: fmt.pct((c.usageRatio || 0) * 100, 0), note: fmt.num(c.cores) + ' cores on ' + (datas[0].hostname || 'this host') };
-      }, { href: A.href('system'), title: 'Open the host' }),
-      liveTile('Host memory now', ['/api/host'], function (datas) {
         var m = datas[0].memory || {};
-        return { value: fmt.pct((m.usageRatio || 0) * 100, 0), note: gb(m.usedBytes) + ' of ' + gb(m.totalBytes) + ' in use' };
-      }, { href: A.href('system'), title: 'Open the host' }),
-      liveTile('Console API up for', ['/api/health', '/api/capabilities'], function (datas) {
-        var caps = datas[1] || {};
-        return { value: fmt.dur(datas[0].uptimeSeconds || 0), note: caps.writesAllowed ? 'Writes are allowed' : 'Read-only: writes are refused' };
-      }, { href: A.href('system'), title: 'Open the host and console' })
+        var ratio = c.usageRatio || 0;
+        return {
+          value: fmt.pct(ratio * 100, 0),
+          status: ratio >= 0.9 ? { tone: 'bad', text: 'Saturated' } : ratio >= 0.75 ? { tone: 'warn', text: 'Busy' } : null,
+          note: 'Memory ' + fmt.pct((m.usageRatio || 0) * 100, 0) + ' on ' + (datas[0].hostname || 'this host')
+        };
+      }, { href: A.href('system'), title: 'Open the host', link: 'View host' })
     ]);
-  }
-
-  function alertSentence(a) {
-    var where = (a.labels || {}).host || (a.labels || {}).instance;
-    return (a.name || 'an unnamed alert') + (a.summary ? ': ' + a.summary : '') + (where ? ' (' + where + ')' : '') +
-      (a.startsAt ? ', firing since ' + agoLive(a.startsAt) : '');
   }
 
   function liveHero() {
@@ -502,180 +463,148 @@
       var out;
       function groupWord(g) { return g.name + (g.count > 1 ? ' (' + fmt.num(g.count) + ' firing)' : ''); }
       if (paging.length) {
-        var g = paging[0];
-        out = el('div.callout.bad', { 'data-hero': 'paging' }, [
-          el('strong', { text: 'A paging alert is firing: ' + groupWord(g) + '.' }),
-          el('p', { text: 'Alertmanager reports ' + alertSentence(g.alerts[0]) + ', severity ' + g.severity + '.' +
-            (paging.length > 1 ? ' Also paging: ' + paging.slice(1).map(groupWord).join(', ') + '.' : '') +
-            (down.length ? ' Down: ' + names(down) + '.' : '') + ' Alerts ' + readWord(alerts) + '.' }),
-          A.link('Open the alerts in Security', 'security', ['alerts'], { alert: g.name })
-        ]);
+        var parts = [];
+        if (paging.length > 1) parts.push(fmt.num(paging.length - 1) + ' more paging');
+        if (down.length) parts.push(plural(down.length, 'service') + ' down');
+        out = heroLine('bad', 'paging', 'Paging: ' + groupWord(paging[0]), parts.length ? sentence(parts.join(', ')) : null,
+          A.link('View alerts', 'security', ['alerts'], { alert: paging[0].name }));
       } else if (down.length) {
         var m = down[0];
-        out = el('div.callout.bad', [
-          el('strong', { text: (m.label || m.id) + ' is down.' }),
-          el('p', { text: 'The console heartbeat for ' + (m.label || m.id) + ' has failed ' + fmt.num(m.consecutiveFailures) + ' time' + (m.consecutiveFailures === 1 ? '' : 's') + ' in a row' + (m.message ? ': ' + m.message : '.') + (down.length > 1 ? ' Also down: ' + names(down.slice(1)) + '.' : '') + ' Heartbeats ' + readWord(beats) + '.' }),
-          A.link('Open the Services heartbeats', 'stack')
-        ]);
+        out = heroLine('bad', 'down', (m.label || m.id) + ' is down', down.length > 1 ? fmt.num(down.length - 1) + ' more down.' : null, A.link('View services', 'stack'));
       } else if (firing.length) {
-        var w = firing[0];
-        out = el('div.callout.warn', { 'data-hero': 'firing' }, [
-          el('strong', { text: fmt.num(open.total) + ' alert' + (open.total === 1 ? ' is' : 's are') + ' firing, none paging. Worst: ' + groupWord(w) + '.' }),
-          el('p', { text: 'Alertmanager reports ' + firing.map(function (x) { return groupWord(x) + ', ' + (x.severity || 'unlabelled'); }).join('; ') + '. Alerts ' + readWord(alerts) + '.' }),
-          A.link('Open the alerts in Security', 'security', ['alerts'], { alert: w.name })
-        ]);
+        out = heroLine('warn', 'firing', 'Firing: ' + groupWord(firing[0]), firing.length > 1 ? fmt.num(firing.length - 1) + ' more, none paging.' : 'Not paging.',
+          A.link('View alerts', 'security', ['alerts'], { alert: firing[0].name }));
       } else if (!beats.ok && !alerts.ok) {
-        out = el('div.callout.warn', [
-          el('strong', { text: 'Nothing could be checked.' }),
-          el('p', { text: 'Neither the heartbeats nor Alertmanager answered: ' + ((beats.error || {}).message || 'no reason given') + ' ' + ((alerts.error || {}).message || '') })
-        ]);
-      } else {
-        var all = beats.ok ? monitorsOf(beats.data) : [];
-        var pending = all.filter(function (x) { return x.status === 2; });
-        var checked = beats.ok ? fmt.num(all.length) + ' service monitor' + (all.length === 1 ? '' : 's') + (all.length ? ' (' + names(all) + ')' : '') + (pending.length ? ', of which ' + fmt.num(pending.length) + (pending.length === 1 ? ' is' : ' are') + ' still retrying' : '') : 'no heartbeat monitor (' + ((beats.error || {}).message || 'unreadable') + ')';
+        out = heroLine('warn', 'unchecked', 'Nothing could be checked', 'Neither the heartbeats nor Alertmanager answered.', null);
+      } else if (!open) {
         var astate = A.envelopeState(alerts);
-        var alertWord = open
-          ? 'Alertmanager, which reports nothing firing'
-          : 'not Alertmanager, which is ' + (astate === 'notConfigured' ? 'not configured' : astate === 'forbidden' ? 'closed to your role' : 'unreadable');
-        out = el('div.callout.' + (open ? 'ok' : 'info'), { 'data-hero': open ? 'ok' : 'unchecked' }, [
-          el('strong', { text: open ? 'Nothing is failing.' : 'No monitor is down, but alerts were not checked.' }),
-          el('p', { text: 'Checked ' + checked + ' and ' + alertWord + '. ' + readSentence(beats.ok ? beats : alerts) })
-        ]);
+        out = heroLine('info', 'unchecked', 'No monitor is down, but alerts were not checked',
+          'Alertmanager is ' + (astate === 'notConfigured' ? 'not configured' : astate === 'forbidden' ? 'closed to your role' : 'unreadable') + '.', null);
+      } else {
+        out = heroLine('ok', 'ok', 'Nothing is failing', fmt.num(monitorsOf(beats.data).length) + ' services up, no alert firing.', null);
       }
       ui.clear(box);
       box.appendChild(out);
     }));
-    box.appendChild(ui.skeleton(2));
     return box;
   }
 
   function liveNeedsYou() {
-    var body = el('div', [ui.skeleton(3)]);
+    var card = ui.card('Needs attention', ui.skeleton(3));
+    var body = card.querySelector('.card-body');
+    card.setAttribute('data-panel', 'needs');
     var alive = stillHere();
     A.settling(A.liveNeedsYou().then(function (r) {
       if (!alive()) return;
-      var rows = r.items.map(function (it) {
-        return needsYouRow(it.kind + ': ' + it.text, A.link(it.label, it.route, it.rest, it.params));
-      });
-      var SHOW = 8;
       ui.clear(body);
-      if (rows.length) {
-        body.appendChild(el('div.stack', rows.slice(0, SHOW)));
-        if (rows.length > SHOW) {
-          body.appendChild(el('div.row', [
-            el('span.muted', { text: fmt.num(rows.length - SHOW) + ' more in the inbox.' }),
-            ui.btn('Open the inbox', { variant: 'ghost', onClick: function () { A.inbox(); } })
-          ]));
-        }
-      } else {
-        body.appendChild(ui.emptyState('Nothing is waiting for you', 'Checked ' + (r.checked.length ? r.checked.join(', ') : 'nothing') + ': no firing alert, no monitor down, no sandbox seal and no declaration without a spec.'));
-      }
-      body.appendChild(el('p.hint', {
-        text: readSentence(r.envs.filter(function (e) { return e.ok; })[0] || r.envs[0]) +
-          (r.unchecked.length ? ' Not checked: ' + r.unchecked.join('; ') + '.' : '')
-      }));
+      var items = dedupe(r.items);
+      setCounter(card, items.length);
+      body.appendChild(needsTable(items.slice(0, SHOW_LIVE), 'Items that need an operator, most urgent first'));
+      var foot = el('div.card-foot', [
+        el('span.readstamp', { text: readWord(r.envs.filter(function (e) { return e.ok; })[0] || r.envs[0]) }),
+        r.unchecked.length ? el('span.muted', { 'data-unchecked': r.unchecked.join('; '), text: ' · Not checked: ' + r.unchecked.join('; ') }) : null,
+        items.length > SHOW_LIVE ? el('span', [' ', ui.btn('View all ' + fmt.num(items.length) + ' in the inbox', { variant: 'link', onClick: function () { A.inbox(); } })]) : null
+      ]);
+      card.appendChild(foot);
     }));
-    return ui.card('Needs you', body);
-  }
-
-  function auditWho(ev) {
-    return ev.subject ? ev.subject : 'Somebody';
-  }
-
-  function liveAuditSentence(ev) {
-    var who = auditWho(ev);
-    var from = ev.sourceAddress ? ' from ' + ev.sourceAddress : '';
-    var why = ev.reason ? ' (' + ev.reason + ')' : '';
-    switch (ev.event) {
-      case 'auth.login.succeeded': return who + ' signed in' + from + '.';
-      case 'auth.login.failed': return 'A sign-in as ' + who + from + ' failed' + why + '.';
-      case 'auth.login.throttled': return 'A sign-in as ' + who + from + ' was throttled' + why + '.';
-      case 'auth.logout': return who + ' signed out' + from + '.';
-      case 'auth.account.locked': return 'The account ' + who + ' was locked' + why + '.';
-      case 'auth.denied': return 'A request' + (ev.path ? ' to ' + ev.path : '') + from + ' was refused' + why + '.';
-      case 'auth.csrf.rejected': return 'A request' + (ev.path ? ' to ' + ev.path : '') + from + ' was rejected without the console header.';
-      case 'auth.session.expired.idle': return 'The session of ' + who + ' expired after idling.';
-      case 'auth.session.expired.absolute': return 'The session of ' + who + ' reached its absolute limit.';
-      case 'auth.session.renewed': return 'The session of ' + who + ' was renewed.';
-      case 'auth.session.evicted': return 'A session of ' + who + ' was evicted' + why + '.';
-      case 'auth.session.rejected': return 'A session cookie' + from + ' was rejected' + why + '.';
-      case 'auth.session.anomaly': return 'A session of ' + who + ' changed address or agent' + why + '.';
-      case 'auth.config.rejected': return 'The console started with ' + (ev.detail ? ev.detail : 'an auth configuration it would not accept') + '';
-      default: return who + ': ' + String(ev.event || 'event').split('.').join(' ') + (ev.outcome ? ', ' + ev.outcome : '') + '.';
-    }
+    return card;
   }
 
   function liveActivity() {
-    return A.livePanel('Recent activity', '/api/audit/recent?limit=8', function (body, data) {
+    var card = A.livePanel('Recent activity', '/api/audit/recent?limit=8', function (body, data) {
       var events = data.events || [];
-      if (!events.length) {
-        body.appendChild(ui.emptyState('No event yet', 'The console API has recorded nothing since it started.'));
-      } else {
-        body.appendChild(el('div.stack', events.map(function (ev) {
-          return el('div.feed-row', [
-            el('span', { text: liveAuditSentence(ev) }),
-            el('time', { datetime: ev.ts, title: ev.ts, text: agoLive(ev.ts) })
-          ]);
-        })));
-      }
-      body.appendChild(el('p.hint', {
-        text: 'Held in memory since the API started ' + (data.since ? agoLive(data.since) : '') + ': ' + fmt.num(data.total || events.length) + ' event' + (data.total === 1 ? '' : 's') +
-          (data.dropped ? ', ' + fmt.num(data.dropped) + ' dropped' : '') + '.'
+      setCounter(card, data.total || events.length);
+      body.appendChild(ui.table([
+        { key: 'ts', label: 'Time', sortable: false, render: function (ev) { return el('time', { datetime: ev.ts, title: ev.ts, text: nb(agoLive(ev.ts)) }); } },
+        { key: 'subject', label: 'Operator', sortable: false, render: function (ev) { return ev.subject || el('span.muted', { text: 'none' }); } },
+        { key: 'event', label: 'Event', sortable: false, render: function (ev) { return eventNode(ev.event); } },
+        { key: 'sourceAddress', label: 'Source', sortable: false, render: function (ev) { return ev.sourceAddress ? mono(ev.sourceAddress) : el('span.muted', { text: '-' }); } }
+      ], events, {
+        caption: 'The eight most recent audit events',
+        rowKey: function (ev) { return String(ev.ts) + ev.event; },
+        emptyTitle: 'No events',
+        empty: 'Nothing has been recorded since the API started.'
       }));
-      body.appendChild(el('div.row', A.link('All audit events', 'audit')));
-    }, { ttlMs: 5000, skeletonRows: 8, errorTitle: 'The audit ring could not be read' });
+      body.appendChild(el('p.hint', {
+        text: 'In memory since the API started ' + (data.since ? agoLive(data.since) : '') + (data.dropped ? ', ' + fmt.num(data.dropped) + ' dropped' : '') + '.'
+      }));
+    }, { ttlMs: 5000, skeletonRows: 8, errorTitle: 'The audit ring could not be read', card: { footer: [A.link('View audit log', 'audit')] } });
+    card.setAttribute('data-panel', 'activity');
+    return card;
   }
 
   function liveHealth() {
-    return A.livePanel('Service health', '/api/heartbeats', function (body, data) {
+    var card = A.livePanel('Service health', '/api/heartbeats', function (body, data) {
       var monitors = monitorsOf(data).slice().sort(function (a, b) { return monitorRank(a) - monitorRank(b); });
-      if (!monitors.length) {
-        body.appendChild(ui.emptyState('No monitor is being recorded', 'The console API is watching nothing.'));
-        return;
-      }
-      body.appendChild(el('div.stack', monitors.map(function (m) {
-        var beats = m.beats || [];
-        return el('div.healthrow', [
-          A.link(m.label || m.id, 'stack'),
-          ui.heartbeatBar(beats, { slots: 30, width: 200, height: 16, label: ui.heartbeatSentence(beats, { name: m.label || m.id }) }),
-          ui.pill(m.statusName || 'unknown', monitorTone(m.status))
-        ]);
-      })));
-      body.appendChild(el('p.hint', {
-        text: 'One slot per check, oldest left, worst at the top. Held in memory since ' + (data.startedAt ? agoLive(data.startedAt) : 'the API started') + '.'
+      setCounter(card, monitors.length);
+      body.appendChild(ui.table([
+        { key: 'label', label: 'Name', sortable: false, render: function (m) { return A.link(m.label || m.id, 'stack'); } },
+        { key: 'status', label: 'Status', status: true, sortable: false, render: function (m) { return ui.status(monitorTone(m.status), monitorWord(m)); } },
+        { key: 'beats', label: 'Recent checks', sortable: false, render: function (m) { var beats = m.beats || []; return ui.heartbeatBar(beats, { slots: 30, width: 150, height: 16, label: ui.heartbeatSentence(beats, { name: m.label || m.id }) }); } }
+      ], monitors, {
+        caption: 'Service heartbeats, worst first',
+        rowKey: function (m) { return String(m.id); },
+        emptyTitle: 'No monitors',
+        empty: 'The console API is watching nothing.'
       }));
-    }, { ttlMs: 5000, skeletonRows: 5, errorTitle: 'The heartbeats could not be read' });
+    }, { ttlMs: 5000, skeletonRows: 5, errorTitle: 'The heartbeats could not be read', card: { footer: [A.link('View services', 'stack')] } });
+    card.setAttribute('data-panel', 'health');
+    return card;
   }
 
-  function liveSites() {
-    return ui.card('Sites', [
-      A.notInStack('The two-site topology', 'does not exist here. This stack is one machine, so there is no second site, no link check and no replication lag to show.')
-    ]);
+  function livePlatform() {
+    var card = ui.card('Platform', ui.skeleton(4));
+    var body = card.querySelector('.card-body');
+    card.setAttribute('data-panel', 'platform');
+    var alive = stillHere();
+    var paths = ['/api/gitops/apps', '/api/host', '/api/health', '/api/capabilities'];
+    A.settling(readAll(paths).then(function (envs) {
+      if (!alive()) return;
+      var apps = envs[0], host = envs[1], health = envs[2], caps = envs[3];
+      function unread(env) {
+        var st = A.envelopeState(env);
+        return ui.status(st === 'notConfigured' ? 'idle' : st === 'forbidden' ? 'warn' : 'bad', st === 'notConfigured' ? 'Not configured' : st === 'forbidden' ? 'No access' : 'Read failed');
+      }
+      var appList = apps.ok ? (apps.data.apps || []) : [];
+      var tiers = {};
+      appList.forEach(function (a) { var t = a.tier === null || a.tier === undefined ? 'untiered' : 'tier ' + a.tier; tiers[t] = (tiers[t] || 0) + 1; });
+      var breakdown = Object.keys(tiers).sort().map(function (t) { return t + ': ' + fmt.num(tiers[t]); }).join(', ');
+      var count = apps.ok ? (apps.data.count === undefined ? appList.length : apps.data.count) : null;
+      var problems = apps.ok ? (apps.data.problems || []).length : 0;
+      var h = host.ok ? host.data : {};
+      var mem = h.memory || {};
+      ui.clear(body);
+      body.appendChild(ui.dl([
+        ['Declared applications', apps.ok ? el('span', { 'data-count': String(count) }, [A.link(fmt.num(count), 'apps'), breakdown ? ' (' + breakdown + ')' : null]) : unread(apps)],
+        ['Specs missing', apps.ok ? (problems ? ui.status('warn', fmt.num(problems)) : '0') : unread(apps)],
+        ['Host', host.ok ? mono(h.hostname || 'this host') : unread(host)],
+        ['CPU cores', host.ok ? fmt.num((h.cpu || {}).cores) : unread(host)],
+        ['Memory', host.ok ? gb(mem.usedBytes) + ' of ' + gb(mem.totalBytes) : unread(host)],
+        ['Console API uptime', health.ok ? fmt.dur(health.data.uptimeSeconds || 0) : unread(health)],
+        ['Writes', caps.ok ? (caps.data.writesAllowed ? ui.status('ok', 'Allowed') : ui.status('idle', 'Read-only')) : unread(caps)]
+      ]));
+      body.appendChild(el('p.readstamp', { text: readWord(envs.filter(function (e) { return e.ok; })[0] || envs[0]) }));
+    }));
+    return card;
   }
 
-  function liveTraffic() {
-    return ui.card('Traffic, last 24 hours', [
-      A.notInStack('Per-application request rates', 'are not measured: the declared applications are not deployed in this stack.')
-    ]);
-  }
-
-  function liveReconciler() {
-    return ui.card('Reconciler', [
-      A.notInStack('The reconciler', 'does not run in this stack. The GitOps directory holds declarations that nothing has applied.')
+  function liveAbsent() {
+    return ui.notInStackStrip([
+      { what: 'Sites.', detail: 'This stack is one machine: no second site, link check or replication lag.' },
+      { what: 'Traffic.', detail: 'Per-application request rates are not measured; the declared applications are not deployed here.' },
+      { what: 'Reconciler.', detail: 'Nothing applies the GitOps declarations in this stack.' }
     ]);
   }
 
   function renderLive(mount) {
-    mount.appendChild(ui.pageHeader('Overview', 'Every panel reads the console API and says when it was read. A panel whose source does not exist in this stack says so instead of showing a figure.', [
-      ui.btn('Open runbooks', {
-        variant: 'ghost',
-        onClick: function () { A.go('ops'); }
-      })
-    ]));
+    mount.appendChild(ui.pageHeader('Overview'));
     mount.appendChild(liveHero());
     mount.appendChild(liveTiles());
-    mount.appendChild(el('div.grid.grid-3', [liveNeedsYou(), liveActivity(), liveSites()]));
-    mount.appendChild(el('div.grid.grid-4', [liveTraffic(), liveReconciler(), liveHealth(), recentCard()]));
+    mount.appendChild(grid(
+      liveNeedsYou(),
+      el('div.grid.grid-2', [liveHealth(), liveActivity()]),
+      el('div.grid.grid-2', [livePlatform(), recentCard()]),
+      liveAbsent()));
   }
 
   var screen = {

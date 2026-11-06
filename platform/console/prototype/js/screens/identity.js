@@ -8,6 +8,9 @@
 
   function mono(text) { return el('span.mono', { text: text }); }
 
+
+  function named(label, suffix) { return [label, el('span.sr', { text: ' ' + suffix })]; }
+
   function chips(list, empty) {
     if (!list || !list.length) return el('span.muted', { text: empty || 'none' });
     return el('span.chips', list.map(function (t) { return el('span.chip', { text: t }); }));
@@ -46,12 +49,19 @@
     var peopleTable = null;
     function peopleCard() {
       peopleTable = ui.table(cols, d.people, {
+        id: 'identity.people', defaultHidden: ['groups'],
         caption: 'People with a console account, with tier, MFA method, last sign-in, group membership and whether they are elevated right now',
         sortKey: 'name',
         rowKey: function (r) { return r.upn; },
-        empty: 'No people have a console account in this environment.'
+        emptyTitle: 'No people',
+        empty: 'Nobody has a console account in this environment.'
       });
-      return ui.card('People', peopleTable, { flush: true, actions: [ui.exportButton(function () { return peopleTable; }, 'people')] });
+      return ui.card('People', peopleTable, {
+        counter: total,
+        description: 'MFA ' + fmt.pct((withMfa / total) * 100, 0) + ', ' + fmt.num(phishResistant) + ' on FIDO2 keys · ' +
+          fmt.num(elevated.length) + ' elevated now · ' + (tier0.length ? fmt.num(tier0.length) + ' standing Tier 0' : 'no standing Tier 0'),
+        actions: [ui.columnsButton(function () { return peopleTable; }, 'people'), ui.exportButton(function () { return peopleTable; }, 'people')]
+      });
     }
     var total = d.people.length;
     var withMfa = d.people.filter(function (p) { return !!p.mfa; }).length;
@@ -60,7 +70,7 @@
     var tier0 = d.people.filter(function (p) { return p.tier === 0; });
 
     var cols = [
-      { key: 'name', label: 'Name', width: '18%' },
+      { key: 'name', label: 'Name' },
       { key: 'upn', label: 'Sign-in name', render: function (r) { return mono(r.upn); } },
       {
         key: 'tier', label: 'Tier', align: 'right',
@@ -80,40 +90,26 @@
         key: 'elevated', label: 'Elevated now', status: true,
         render: function (r) {
           return r.elevated
-            ? ui.pill('elevated', 'bad', {
+            ? ui.status('warn', 'Elevated', {
               title: 'Holding privilege beyond their standing role right now' +
                 (r.elevationExpires ? ', until ' + fmt.stamp(r.elevationExpires) : '') + '.'
             })
-            : ui.pill('standing role', 'idle');
+            : ui.status('idle', 'Standing role');
         }
       },
       {
-        label: 'Actions', sortable: false, status: true,
+        key: 'actions', label: 'Actions', sortable: false, status: true,
         render: function (r) {
-          return ui.btn('Offboard ' + r.upn, {
+          return ui.btn(named('Offboard', r.upn), {
             variant: 'danger',
+            title: 'Offboard ' + r.upn,
             onClick: function () { offboard(r); }
           });
         }
       }
     ];
 
-    return el('div.stack', [
-      el('div.tiles', [
-        ui.statTile('People', fmt.num(total), { note: 'With a console account' }),
-        ui.statTile('MFA coverage', fmt.pct((withMfa / total) * 100, 0), {
-          note: phishResistant + ' of ' + total + ' on a phishing-resistant FIDO2 key'
-        }),
-        ui.statTile('Elevated now', fmt.num(elevated.length), {
-          note: elevated.length ? elevated.map(function (p) { return p.upn; }).join(', ') : 'Nobody holds extra privilege'
-        }),
-        ui.statTile('Tier 0 holders', fmt.num(tier0.length), {
-          note: tier0.length ? tier0.map(function (p) { return p.upn; }).join(', ')
-            : 'No standing Tier 0: it is reached only through a time-boxed grant'
-        })
-      ]),
-      peopleCard()
-    ]);
+    return peopleCard();
   }
 
   function gmsaTab() {
@@ -136,33 +132,28 @@
         key: 'rotatedDays', label: 'Password age', align: 'right', status: true,
         render: function (r) {
           return r.rotatedDays > 30
-            ? ui.pill(fmt.num(r.rotatedDays) + ' d', 'warn', {
+            ? ui.status('warn', fmt.num(r.rotatedDays) + ' d', {
               title: 'Older than the 30-day gMSA rotation interval, which means Active Directory has not rotated this password on schedule.'
             })
-            : ui.pill(fmt.num(r.rotatedDays) + ' d', 'ok', { title: 'Within the 30-day gMSA rotation interval.' });
+            : ui.status('ok', fmt.num(r.rotatedDays) + ' d', { title: 'Within the 30-day gMSA rotation interval.' });
         }
       }
     ];
 
-    return el('div.stack', [
-      el('div.callout.info', [
-        el('strong', { text: 'No human ever knows a gMSA password.' }),
-        el('p', {
-          text: 'Active Directory generates a 240-character password for each group managed service account and rotates it every 30 days. It is never typed, never stored in a vault, never pasted into a runbook, and cannot be shown here, because the domain controller only releases it to the hosts on the account allow list. Compromising one of these accounts means compromising a host, not stealing a string.'
-        }),
-        el('p', {
-          text: 'The grants below are therefore the whole story: what an account can reach is the only thing worth reviewing, since there is no password to rotate by hand.'
-        })
-      ]),
+    return el('div.grid', [
       ui.card('Service accounts', ui.table(cols, d.gmsas, {
         caption: 'Group managed service accounts, with the hosts allowed to retrieve the password, tier, SQL database access, S3 bucket grants and password age',
         sortKey: 'name',
-        empty: 'No service accounts are defined.'
-      }), { flush: true })
+        rowKey: function (r) { return r.name; },
+        emptyTitle: 'No service accounts'
+      }), { counter: d.gmsas.length, description: 'Group managed service accounts. Passwords rotate every 30 days and are never shown.' }),
+      ui.disclosure('Details', [
+        el('p', { text: 'Active Directory generates a 240-character password for each account and releases it only to the hosts on its allow list. What an account can reach is the thing to review.' })
+      ])
     ]);
   }
 
-  var GRANT_TONE = { active: 'warn', expired: 'idle', requested: 'info', denied: 'idle', revoked: 'idle' };
+  var GRANT_TONE = { active: 'warn', expired: 'idle', requested: 'pending', denied: 'idle', revoked: 'idle' };
   var GRANT_TITLE = {
     active: 'Live standing privilege. Every minute this grant is open is a minute the blast radius of a stolen session is larger, which is why it is amber and not green.',
     expired: 'The grant has lapsed and the group membership has been removed.',
@@ -346,77 +337,60 @@
     });
   }
 
-  function grantCard(g) {
+  function grantActions(g) {
     var isSelf = g.principal === ME;
-    var body = [
-      el('div.row', [
-        el('strong', { text: g.principal }),
-        el('span.muted', { text: 'into' }),
-        mono(g.group),
-        ui.pill(g.state, GRANT_TONE[g.state] || 'idle', { title: GRANT_TITLE[g.state] })
-      ]),
-      ui.dl([
-        ['Reason', g.reason],
-        ['Approver', g.approver ? mono(g.approver) : el('span.muted', { text: 'not yet approved' })],
-        ['Granted', g.granted ? fmt.time(g.granted) : el('span.muted', { text: 'not yet granted' })],
-        ['Expires', g.expires ? fmt.time(g.expires) : el('span.muted', { text: 'not yet granted' })]
-      ])
-    ];
-
     if (g.state === 'requested') {
-      body.push(el('div.row', [
-        ui.btn('Approve ' + g.principal + ' into ' + g.group, {
-          variant: 'primary',
+      return el('div.row', [
+        ui.btn(named('Approve', g.principal + ' into ' + g.group), {
           disabled: isSelf,
           title: isSelf
-            ? 'You cannot approve your own elevation. Separation of duties means a second person has to agree, so ask another approver.'
-            : null,
+            ? 'You cannot approve your own elevation. Ask another approver.'
+            : 'Approve ' + g.principal + ' into ' + g.group,
           onClick: function () { approveGrant(g); }
         }),
-        ui.btn('Deny ' + g.principal + ' into ' + g.group, {
-          variant: 'ghost',
+        ui.btn(named('Deny', g.principal + ' into ' + g.group), {
+          title: 'Deny ' + g.principal + ' into ' + g.group,
           onClick: function () { denyGrant(g); }
         })
-      ]));
-    } else if (g.state === 'active') {
-      body.push(el('div.row', [
-        el('span.muted', { text: 'Time remaining:' }),
-        countdown(g.expires),
-        ui.btn('Revoke ' + g.group + ' from ' + g.principal + ' now', {
-          variant: 'danger',
-          onClick: function () { revokeGrant(g); }
-        })
-      ]));
-    } else {
-      body.push(el('p.hint', {
-        text: GRANT_CLOSED_TEXT[g.state] || 'This grant is closed. Nothing to do.'
-      }));
+      ]);
     }
-
-    return el('div.grantcard', { data: { key: g.id } }, body);
+    if (g.state === 'active') {
+      return ui.btn(named('Revoke', g.group + ' from ' + g.principal + ' now'), {
+        variant: 'danger',
+        title: 'Revoke ' + g.group + ' from ' + g.principal + ' now',
+        onClick: function () { revokeGrant(g); }
+      });
+    }
+    return el('span.muted', { text: '-', title: GRANT_CLOSED_TEXT[g.state] || 'Closed' });
   }
 
   function grantsTab() {
     var active = d.grants.filter(function (g) { return g.state === 'active'; });
     var requested = d.grants.filter(function (g) { return g.state === 'requested'; });
-
-    return el('div.stack', [
-      el('div.tiles', [
-        ui.statTile('Awaiting approval', fmt.num(requested.length), { note: 'Nothing is granted until an approver agrees' }),
-        ui.statTile('Active grants', fmt.num(active.length), { note: 'Standing privilege live right now' }),
-        ui.statTile('Maximum duration', '4', { unit: 'h', note: 'Longer defeats time-boxing' })
-      ]),
-      el('div.callout.info', [
-        el('strong', { text: 'Nobody holds standing privilege here.' }),
-        el('p', {
-          text: 'Every route to Tier 0 and Tier 1 is a time-boxed grant with a named approver and a written reason, and every grant expires on its own. An active grant is shown in amber rather than green on purpose: it is privilege that is live right now, not a healthy state.'
-        })
-      ]),
-      ui.card('Grants', el('div.stack', d.grants.map(grantCard)), { flush: false })
-    ]);
+    var t = ui.table([
+      { key: 'principal', label: 'Principal', render: function (g) { return mono(g.principal); } },
+      { key: 'group', label: 'Group', render: function (g) { return mono(g.group); } },
+      { key: 'state', label: 'Status', status: true, render: function (g) { return ui.status(GRANT_TONE[g.state] || 'idle', g.state.charAt(0).toUpperCase() + g.state.slice(1), { title: GRANT_TITLE[g.state] }); } },
+      { key: 'reason', label: 'Reason' },
+      { key: 'approver', label: 'Approver', render: function (g) { return g.approver ? mono(g.approver) : el('span.muted', { text: '-' }); } },
+      {
+        key: 'expires', label: 'Expires',
+        sort: function (g) { return g.expires ? g.expires.getTime() : null; },
+        render: function (g) { return g.state === 'active' && g.expires ? countdown(g.expires) : g.expires ? fmt.time(g.expires) : el('span.muted', { text: '-' }); }
+      },
+      { key: 'actions', label: 'Actions', sortable: false, status: true, render: grantActions }
+    ], d.grants, {
+      caption: 'Just-in-time access grants, with principal, group, state, reason, approver and expiry',
+      rowKey: function (g) { return g.id; },
+      emptyTitle: 'No grants'
+    });
+    return ui.card('Grants', t, {
+      counter: d.grants.length,
+      description: fmt.num(requested.length) + ' awaiting approval · ' + fmt.num(active.length) + ' active · at most 4 h each, with a named approver.'
+    });
   }
 
-  var READ_ACTORS = ['gmsa-orders$', 'gmsa-console$', 'reconciler', 'gmsa-ci$', 'gmsa-billing$'];
+    var READ_ACTORS = ['gmsa-orders$', 'gmsa-console$', 'reconciler', 'gmsa-ci$', 'gmsa-billing$'];
 
   function recentReads(s) {
     var n = Math.min(4, Math.max(2, s.leases));
@@ -496,19 +470,19 @@
 
   function rotationPill(s) {
     if (s.rotatedDays > s.policyDays) {
-      return ui.pill(fmt.num(s.rotatedDays) + ' d', 'bad', {
+      return ui.status('bad', fmt.num(s.rotatedDays) + ' d', {
         title: 'Overdue: the rotation policy is ' + s.policyDays + ' days and this version is ' +
           s.rotatedDays + ' days old.'
       });
     }
     var soon = Math.max(1, Math.round(s.policyDays * 0.1));
     if (s.rotatedDays > s.policyDays - soon) {
-      return ui.pill(fmt.num(s.rotatedDays) + ' d', 'warn', {
+      return ui.status('warn', fmt.num(s.rotatedDays) + ' d', {
         title: 'Within ' + soon + (soon === 1 ? ' day' : ' days') + ' of the ' +
           s.policyDays + '-day rotation policy.'
       });
     }
-    return ui.pill(fmt.num(s.rotatedDays) + ' d', 'ok', {
+    return ui.status('ok', fmt.num(s.rotatedDays) + ' d', {
       title: 'Inside the ' + s.policyDays + '-day rotation policy.'
     });
   }
@@ -521,13 +495,24 @@
         caption: 'Secret paths in OpenBao, with active leases, rotation age against policy and reads in the last 24 hours. Values are never shown.',
         sortKey: 'path',
         rowKey: function (r) { return r.path; },
-        empty: 'No secret paths are readable by your role.'
+        emptyTitle: 'No secret paths',
+        empty: 'No secret path is readable by your role.'
       });
-      return ui.card('Secret paths', secretsTable, { flush: true, actions: [ui.exportButton(function () { return secretsTable; }, 'secret paths')] });
+      return ui.card('Secret paths', secretsTable, {
+        counter: d.secrets.length,
+        description: 'Paths and metadata only. The console never shows a secret value.',
+        actions: [
+          ui.btn('Request value', {
+            disabled: true,
+            title: 'Admin role only, with a written reason; it pages the security channel. You are signed in as ' + d.me.role + '.'
+          }),
+          ui.exportButton(function () { return secretsTable; }, 'secret paths')
+        ]
+      });
     }
 
     var cols = [
-      { key: 'path', label: 'Path', width: '22%', render: function (r) { return mono(r.path); } },
+      { key: 'path', label: 'Path', render: function (r) { return mono(r.path); } },
       { key: 'leases', label: 'Active leases', align: 'right', render: function (r) { return fmt.num(r.leases); } },
       { key: 'rotatedDays', label: 'Rotation age', align: 'right', status: true, render: function (r) { return rotationPill(r); } },
       {
@@ -536,50 +521,30 @@
       },
       { key: 'reads24h', label: 'Reads, 24 h', align: 'right', render: function (r) { return fmt.num(r.reads24h); } },
       {
-        label: 'Actions', sortable: false, status: true,
+        key: 'actions', label: 'Actions', align: 'right', sortable: false,
         render: function (r) {
-          return el('div.row', [
-            ui.btn('Rotate ' + r.path, { variant: 'ghost', onClick: function () { rotateSecret(r); } }),
-            ui.btn('Revoke leases on ' + r.path, { variant: 'danger', onClick: function () { revokeLeases(r); } }),
-            ui.btn('Who read ' + r.path, { variant: 'ghost', onClick: function () { whoReadThis(r); } })
-          ]);
+          return ui.menu([
+            { label: 'Who read this', onSelect: function () { whoReadThis(r); } },
+            { label: 'Rotate', hint: 'second factor', onSelect: function () { rotateSecret(r); } },
+            'divider',
+            { label: 'Revoke leases', danger: true, onSelect: function () { revokeLeases(r); } }
+          ], { label: 'Actions for ' + r.path });
         }
       }
     ];
 
-    return el('div.stack', [
-      el('div.callout.info', [
-        el('strong', { text: 'The console shows paths and metadata only. It never shows a secret value.' }),
-        el('p', {
-          text: 'A value is never proxied through this console, never held in the page, and never written to a log or a screenshot. Workloads read their own secrets directly from OpenBao using their machine identity, so an operator browser is never on the path a secret travels.'
-        }),
-        el('p', {
-          text: 'A separate Request value action exists for the Admin role only. It requires a written reason, shows the value exactly once, and pages the security channel as it does so, because the only safe way to read a secret by hand is one that somebody else notices.'
-        }),
-        el('div.row', [
-          ui.btn('Request value (Admin only)', {
-            variant: 'ghost',
-            disabled: true,
-            title: 'Unavailable to your role. You are signed in as ' + d.me.role +
-              '; reading a secret value requires the Admin role, a written reason, and it pages the security channel. Request elevation on the Access grants tab if you genuinely need it.'
-          }),
-          el('span.hint', { text: 'You are signed in as ' + d.me.role + '.' })
-        ])
-      ]),
+    return el('div.grid', [
       overdue.length ? el('div.callout.warn', [
         el('strong', {
-          text: overdue.length + ' path' + (overdue.length === 1 ? ' is' : 's are') + ' past the rotation policy: ' +
-            overdue.map(function (s) { return s.path; }).join(', ') + '.'
-        }),
-        el('p', {
-          text: 'A secret older than its policy has been valid for longer than anyone agreed it should be, which widens the window in which a copy taken months ago still works.'
+          text: fmt.num(overdue.length) + ' path' + (overdue.length === 1 ? ' is' : 's are') + ' past the rotation policy: ' +
+            overdue.map(function (x) { return x.path; }).join(', ') + '.'
         })
       ]) : null,
       secretsCard()
     ]);
   }
 
-  function isLive() { return A.storeMode() === A.MODE.LIVE; }
+    function isLive() { return A.storeMode() === A.MODE.LIVE; }
 
   function gate(sampleFn, liveFn) {
     return function () {
@@ -686,23 +651,21 @@
 
   function principalsLive() {
     var path = '/api/identity/principals';
-    return el('div.stack', [
-      el('div.callout.info', [
-        el('strong', { text: 'Principals this stack can actually name.' }),
-        ui.disclosure('Details', [el('p', { text: 'There is no Active Directory here. Identity is console operators, PostgreSQL roles, object store identities and the service accounts the GitOps tree declares. Each panel says when it was read and what it could not reach.' })])
-      ]),
+    return el('div.grid', [
       A.livePanel('Console operators', path, operatorsPanel, { skeletonRows: 2 }),
       A.livePanel('PostgreSQL roles', path, pgPanel, { skeletonRows: 2 }),
       A.livePanel('Object store identities', path, objectStorePanel, { skeletonRows: 2 }),
-      A.livePanel('Declared service accounts', path, declaredAccountsPanel, { skeletonRows: 2 })
+      A.livePanel('Declared service accounts', path, declaredAccountsPanel, { skeletonRows: 2 }),
+      A.notInStack('Active Directory',
+        'does not exist here: identity is console operators, PostgreSQL roles, object store identities and declared service accounts.')
     ]);
   }
 
   function gmsaLive() {
-    return el('div.stack', [
+    return el('div.grid', [
       el('div.callout.info', [
         el('strong', { text: 'Rotation age is not known.' }),
-        el('p.state-detail', { text: 'There is no directory to ask when a service account password was last rotated, so no age is shown. What is shown is what the GitOps tree declares each account may reach.' })
+        ui.disclosure('Details', [el('p', { text: 'There is no directory to ask when a service account password was last rotated. What is shown is what the GitOps tree declares each account may reach.' })])
       ]),
       A.livePanel('Service accounts', '/api/gitops/service-accounts', function (body, data) {
         body.appendChild(accountsTable(data.accounts || []));
@@ -716,7 +679,7 @@
   }
 
   function grantsLive() {
-    return el('div.stack', [
+    return el('div.grid', [
       A.notInStack('Just-in-time group membership',
         'needs a directory with groups and an approval workflow, and this stack has neither. There are no grants to approve, deny or revoke here.')
     ]);
@@ -747,20 +710,32 @@
   }
 
   function secretsLive() {
-    return el('div.stack', [
+    return el('div.grid', [
       A.livePanel('OpenBao seal status', '/api/secrets/seal-status', sealRender, { skeletonRows: 2 }),
       A.notInStack('Secret lease counts and rotation ages',
         'are not read: the console holds no OpenBao token that may list paths or leases, so it shows seal status only and never a path, lease or secret value. There is nothing to rotate or revoke from here.')
     ]);
   }
 
+  var CRUMB = { people: 'People', gmsas: 'Service accounts', grants: 'Access grants', secrets: 'Secrets' };
+
+  function identityCrumbs(rest) {
+    return rest.slice(0, 1).map(function (r) { return Object.prototype.hasOwnProperty.call(CRUMB, r) ? CRUMB[r] : r; });
+  }
+
   A.screen('identity', {
-    title: 'Identity & secrets',
-    crumb: 'Identity & secrets',
+    title: 'Identity and secrets',
+    crumb: 'Identity and secrets',
+    crumbs: identityCrumbs,
+    liveCrumbs: function (rest) {
+      var out = identityCrumbs(rest);
+      if (rest[0] === 'people') out[0] = 'Principals';
+      return out;
+    },
     render: function (mount, ctx) {
       mount.appendChild(ui.pageHeader(
-        'Identity & secrets',
-        'Who can reach what, for how long, and on whose approval.',
+        'Identity and secrets',
+        null,
         isLive() ? [] : [
           ui.btn('Request elevation', {
             variant: 'primary',

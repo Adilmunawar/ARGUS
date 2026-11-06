@@ -20,7 +20,7 @@ module.exports = async function (ctx) {
   await ctx.goto(page, 'overview');
   const settled = await ctx.waitFor(page, () => {
     const main = document.getElementById('main');
-    return main && !main.querySelector('.skel') && !/…/.test(main.textContent) && main.querySelectorAll('.tile').length >= 7;
+    return main && !main.querySelector('.skel') && !main.querySelector('.tile[data-state="loading"]') && main.querySelectorAll('.tile').length >= 4;
   }, null, 8000);
   rec('every live panel settled', settled, settled ? 'no skeleton or placeholder left' : 'a panel never settled');
 
@@ -37,39 +37,40 @@ module.exports = async function (ctx) {
     label: t.querySelector('.tile-label').textContent,
     value: t.querySelector('.tile-value').textContent.trim(),
     note: (t.querySelector('.tile-note') || {}).textContent || '',
+    status: (t.querySelector('.tile-status') || {}).textContent || '',
     href: t.getAttribute('href') || '',
     state: t.getAttribute('data-state') || ''
   })));
-  const tile = (label) => tiles.filter((t) => t.label === label)[0] || { value: '', note: '', href: '', state: '' };
+  const tile = (label) => tiles.filter((t) => t.label === label)[0] || { value: '', note: '', status: '', href: '', state: '' };
 
   const monitors = (api.beats.data && api.beats.data.monitors) || [];
   const up = monitors.filter((m) => m.status === 1 || m.status === 3).length;
-  const services = tile('Services working');
+  const services = tile('Services');
   rec('the services tile carries the heartbeat numbers the API returns',
     services.value === up + ' of ' + monitors.length, 'tile ' + services.value + ', API ' + up + ' of ' + monitors.length);
 
   const appsCount = api.apps.ok ? api.apps.data.count : null;
-  const declared = tile('Declared applications');
-  rec('the applications tile carries the gitops count the API returns',
-    api.apps.ok && declared.value === String(appsCount), 'tile ' + declared.value + ', API ' + appsCount);
+  const declared = await page.evaluate(() => { const n = document.querySelector('#main [data-panel="platform"] [data-count]'); return n ? n.getAttribute('data-count') : ''; });
+  rec('the Platform container carries the gitops count the API returns',
+    api.apps.ok && declared === String(appsCount), 'platform ' + declared + ', API ' + appsCount);
 
   const alertsTile = tile('Open alerts');
   const alertsState = await page.evaluate((env) => window.ARGUS.envelopeState(env), api.alerts);
   if (alertsState === 'notConfigured') {
-    rec('the alerts tile says not configured without Alertmanager', alertsTile.value === 'not configured' && alertsTile.state === 'notConfigured', 'tile ' + alertsTile.value + ' / ' + alertsTile.state);
+    rec('the alerts tile says not configured without Alertmanager', alertsTile.status === 'Not configured' && alertsTile.state === 'notConfigured', 'tile ' + alertsTile.status + ' / ' + alertsTile.state);
   } else {
     const open = await page.evaluate((env) => window.ARGUS.openAlerts(env), api.alerts);
     rec('the alerts tile carries the open-alert count from the shared definition', open && alertsTile.value === String(open.total), 'tile ' + alertsTile.value + ', open ' + (open && open.total));
   }
 
-  const containersTile = tile('Containers running');
+  const containersTile = tile('Containers');
   rec('the containers tile says not configured without the Docker proxy, or counts containers',
-    api.containers.ok ? /\d+ of \d+/.test(containersTile.value) : containersTile.value === 'not configured', 'tile ' + containersTile.value);
+    api.containers.ok ? containersTile.value.split(' ')[0] === String(api.containers.data.running) : containersTile.status === 'Not configured', 'tile ' + containersTile.value + ', API ' + (api.containers.ok ? api.containers.data.running : '-'));
 
-  const hostTile = tile('Host CPU now');
+  const hostTile = tile('Host CPU');
   rec('the host tiles carry the host read', api.host.ok && /%$/.test(hostTile.value) && hostTile.note.indexOf(api.host.data.hostname) !== -1, hostTile.value + ' / ' + hostTile.note);
 
-  const stamped = tiles.filter((t) => /read \d\d:\d\d/.test(t.note)).length;
+  const stamped = tiles.filter((t) => /Read \d\d:\d\d/.test(t.note)).length;
   rec('every tile notes the time it was read', stamped === tiles.length, stamped + ' of ' + tiles.length);
 
   const text = await page.evaluate(() => document.getElementById('main').textContent);
@@ -81,6 +82,13 @@ module.exports = async function (ctx) {
     });
     return out;
   });
+  const needRows = () => page.evaluate(() => Array.from(document.querySelectorAll('#main [data-panel="needs"] tbody tr[data-key]')).map((tr) => {
+    const td = tr.querySelectorAll('td');
+    const a = td[0].querySelector('a');
+    return { item: td[0].textContent, severity: td[1].textContent, source: td[2].textContent, href: a ? a.getAttribute('href') : '' };
+  }));
+  const rows = await needRows();
+  const hasRow = (list, source, start) => list.some((r) => r.source === source && r.item.indexOf(start) === 0);
 
   const hero = await page.evaluate(() => { const c = document.querySelector('#main [data-hero]'); return c ? { text: c.textContent, kind: c.getAttribute('data-hero') } : { text: '', kind: '' }; });
   const down = monitors.filter((m) => m.status === 0);
@@ -91,27 +99,30 @@ module.exports = async function (ctx) {
     : (alertsState === 'ok' ? hero.kind === heroWant : hero.kind === 'unchecked' && /alerts were not checked/.test(hero.text));
   rec('the hero names the worst monitor down, or says honestly what it checked', heroOk, hero.kind + ': ' + hero.text.slice(0, 90));
 
-  const needs = cardText['Needs you'] || '';
+  const needs = cardText['Needs attention'] || '';
   const sealConfigured = api.seal.ok && api.seal.data.configured !== false;
   const sealOk = sealConfigured
-    ? (api.seal.data.sandbox && api.seal.data.sandbox.verdict === true ? /Sandbox unseal/.test(needs) : true)
-    : /the OpenBao seal \(not configured\)/.test(needs) && !/Secrets:/.test(needs);
-  rec('Needs you lists the sandbox seal or says the seal was not checked', sealOk, needs.replace(/\s+/g, ' ').slice(0, 160));
-  rec('Needs you lists each monitor down with a link to the stack',
-    down.every((m) => needs.indexOf('Service: ' + (m.label || m.id) + ' is down') !== -1) && (down.length === 0 || /Open Services/.test(needs)),
+    ? (api.seal.data.sandbox && api.seal.data.sandbox.verdict === true ? rows.some((r) => /Sandbox unseal/.test(r.item)) : true)
+    : /the OpenBao seal \(not configured\)/.test(needs) && !rows.some((r) => r.source === 'Secrets');
+  rec('Needs attention lists the sandbox seal or says the seal was not checked', sealOk, needs.replace(/\s+/g, ' ').slice(0, 160));
+  rec('Needs attention lists each monitor down with a link to the stack',
+    down.every((m) => rows.some((r) => r.source === 'Service' && r.item.indexOf((m.label || m.id) + ' is down') === 0 && r.href === '#/stack')),
     down.length + ' down');
   if (openNow && openNow.total) {
-    const shown = openNow.groups.slice(0, 8).filter((g) => needs.indexOf('Alert: ' + g.name) !== -1).length;
-    rec('Needs you leads with the worst firing Alertmanager group, by name', needs.indexOf('Alert: ' + openNow.groups[0].name) !== -1 && shown >= 1, shown + ' of ' + openNow.groups.length + ' groups');
+    const shown = openNow.groups.slice(0, 8).filter((g) => hasRow(rows, 'Alert', g.name)).length;
+    rec('Needs attention leads with the worst firing Alertmanager group, by name', hasRow(rows, 'Alert', openNow.groups[0].name) && shown >= 1, shown + ' of ' + openNow.groups.length + ' groups');
   } else {
-    rec('Needs you lists no alert when Alertmanager reports none or is not configured', !/Alert: /.test(needs), needs.slice(0, 120));
+    rec('Needs attention lists no alert when Alertmanager reports none or is not configured', !rows.some((r) => r.source === 'Alert'), needs.slice(0, 120));
   }
 
   const activity = cardText['Recent activity'] || '';
   const events = api.audit.ok ? api.audit.data.events.map((e) => e.event) : [];
-  rec('Recent activity shows the sign-in the harness produced as a sentence',
-    events.indexOf('auth.login.succeeded') !== -1 && activity.indexOf(ctx.subject + ' signed in from') !== -1, events.slice(0, 4).join(','));
-  rec('Recent activity says it is held in memory since the API started', /Held in memory since the API started/.test(activity) && /All audit events/.test(activity));
+  const activityRows = await page.evaluate(() => Array.from(document.querySelectorAll('#main [data-panel="activity"] tbody tr[data-key]')).map((tr) => Array.from(tr.querySelectorAll('td')).map((td) => { const e = td.querySelector('[data-event]'); return e ? e.textContent + '|' + e.getAttribute('data-event') : td.textContent; })));
+  rec('Recent activity shows the sign-in the harness produced as a row with operator, a plain event label over the raw name, and source',
+    events.indexOf('auth.login.succeeded') !== -1 && activityRows.some((r) => r[1] === ctx.subject && r[2] === 'Signed in|auth.login.succeeded' && /\d/.test(r[3])), events.slice(0, 4).join(','));
+  const unsealRows = rows.filter((r) => /sandbox unseal/i.test(r.item)).length;
+  rec('Needs attention shows one row per subject, so the sandbox unseal is listed once', unsealRows <= 1, unsealRows + ' unseal rows');
+  rec('Recent activity says it is held in memory since the API started', /In memory since the API started/.test(activity) && /View audit log/.test(activity));
 
   const stamps = await page.evaluate(() => Array.from(document.querySelectorAll('#main .livepanel[data-state="ok"]')).map((b) => {
     const s = b.querySelectorAll('.readstamp');
@@ -121,15 +132,16 @@ module.exports = async function (ctx) {
     stamps.length > 0 && stamps.every((s) => s.n === 1 && s.last && /^Read \d\d:\d\dZ$/.test(s.text)), JSON.stringify(stamps));
 
   const health = cardText['Service health'] || '';
-  const bars = await page.evaluate(() => document.querySelectorAll('#main .healthrow svg.hbbar').length);
+  const bars = await page.evaluate(() => document.querySelectorAll('#main [data-panel="health"] tbody svg.hbbar').length);
   rec('Service health draws one heartbeat bar per monitor', bars === monitors.length && monitors.every((m) => health.indexOf(m.label) !== -1), bars + ' bars, ' + monitors.length + ' monitors');
-  const firstRow = await page.evaluate(() => { const r = document.querySelector('#main .healthrow .rlink'); return r ? r.textContent : ''; });
+  const firstRow = await page.evaluate(() => { const r = document.querySelector('#main [data-panel="health"] tbody tr .rlink'); return r ? r.textContent : ''; });
   const rank = (m) => (m.status === 0 ? 0 : m.status === 2 ? 1 : m.status === null ? 2 : m.status === 3 ? 3 : 4);
   const worst = monitors.slice().sort((a, b) => rank(a) - rank(b))[0];
   rec('the worst monitor is at the top of Service health', !worst || rank(monitors.filter((m) => (m.label || m.id) === firstRow)[0] || worst) === rank(worst), firstRow);
 
-  rec('the Sites card says the two-site topology is not in this stack', /Not in this stack/.test(cardText['Sites'] || '') && /one machine/.test(cardText['Sites'] || ''));
-  rec('Traffic and Reconciler say they are not in this stack', /Not in this stack/.test(cardText['Reconciler'] || '') && /Not in this stack/.test(cardText['Traffic, last 24 hours'] || ''));
+  const absent = await page.evaluate(() => { const n = document.querySelector('#main .nis-strip'); return n ? { list: n.getAttribute('data-not-in-stack'), text: n.textContent } : { list: '', text: '' }; });
+  rec('one Not in this stack alert says the two-site topology is absent', /Sites/.test(absent.list) && /one machine/.test(absent.text) && /Not in this stack/.test(absent.text), absent.list);
+  rec('Traffic and Reconciler are listed in the same Not in this stack alert', /Traffic/.test(absent.list) && /Reconciler/.test(absent.list), absent.list);
 
   const leaked = FIXTURE_WORDS.filter((w) => text.indexOf(w) !== -1);
   rec('no fixture host or person appears on the live overview', leaked.length === 0, leaked.join(', ') || 'none');
@@ -140,7 +152,8 @@ module.exports = async function (ctx) {
   rec('no panel is in an error state', errors === 0, errors + ' error panels');
 
   const links = tiles.map((t) => t.href).filter(Boolean);
-  rec('the tiles deep-link to their screens', links.indexOf('#/security/alerts') !== -1 && links.indexOf('#/apps') !== -1 && links.indexOf('#/stack') !== -1 && links.indexOf('#/system') !== -1, links.join(' '));
+  const appsLink = await page.evaluate(() => !!document.querySelector('#main [data-panel="platform"] a[href="#/apps"]'));
+  rec('the tiles deep-link to their screens and Platform links to Applications', links.indexOf('#/security/alerts') !== -1 && appsLink && links.indexOf('#/stack') !== -1 && links.indexOf('#/system') !== -1, links.join(' '));
   await page.evaluate(() => { window.location.hash = '#/security/alerts'; });
   const resolved = await ctx.waitFor(page, () => window.ARGUS.state.route === 'security' && window.ARGUS.state.rest[0] === 'alerts');
   rec('the alerts deep link from a tile still resolves', resolved);
@@ -157,14 +170,11 @@ module.exports = async function (ctx) {
     pagedHero && pagedHero.kind === 'paging' && pagedHero.tone === 'bad' && /NodeDown \(3 firing\)/.test(pagedHero.text) && !/Nothing is failing/.test(pagedHero.text), JSON.stringify(pagedHero));
   const pagedTile = await page.evaluate(() => {
     const t = Array.from(document.querySelectorAll('#main .tile')).filter((n) => n.querySelector('.tile-label').textContent === 'Open alerts')[0];
-    return t ? { value: t.querySelector('.tile-value').textContent.trim(), note: t.querySelector('.tile-note').textContent } : null;
+    return t ? { value: t.querySelector('.tile-value').textContent.trim(), status: (t.querySelector('.tile-status') || {}).textContent || '', note: t.querySelector('.tile-note').textContent } : null;
   });
-  rec('the alerts tile counts every firing alert and names the worst group', pagedTile && pagedTile.value === '5' && /3 paging/.test(pagedTile.note) && /NodeDown/.test(pagedTile.note), JSON.stringify(pagedTile));
-  const pagedNeeds = await page.evaluate(() => {
-    const c = Array.from(document.querySelectorAll('#main .card')).filter((n) => (n.querySelector('.card-title') || {}).textContent === 'Needs you')[0];
-    return c ? c.textContent : '';
-  });
-  rec('Needs you groups alerts by name with a count', /Alert: NodeDown \(3 firing\)/.test(pagedNeeds) && /Alert: DiskFilling \(2 firing\)/.test(pagedNeeds), pagedNeeds.replace(/\s+/g, ' ').slice(0, 200));
+  rec('the alerts tile counts every firing alert and names the worst group', pagedTile && pagedTile.value === '5' && /3 paging/.test(pagedTile.status) && /NodeDown/.test(pagedTile.note), JSON.stringify(pagedTile));
+  const pagedRows = await needRows();
+  rec('Needs attention groups alerts by name with a count', hasRow(pagedRows, 'Alert', 'NodeDown (3 firing)') && hasRow(pagedRows, 'Alert', 'DiskFilling (2 firing)'), JSON.stringify(pagedRows.slice(0, 3)));
 
   const warnOnly = { alerts: firing('DiskFilling', 'warning', 2), count: 2, critical: 0 };
   await page.unroute('**/api/alerts/active');

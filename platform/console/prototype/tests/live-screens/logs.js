@@ -121,6 +121,7 @@ module.exports = async function (ctx) {
   s = await snap();
   rec('Follow live switches the view back to the tail', s.mode === 'follow' && s.follow === 'true' && s.qstate === null && !/mode=query/.test(s.hash), JSON.stringify({ mode: s.mode, q: s.qstate, hash: s.hash }));
 
+  await page.evaluate(() => window.ARGUS.forget());
   await goto(page, 'logs/nope');
   await waitFor(page, () => !!document.querySelector('#main .notfound'), null, 6000);
   s = await snap();
