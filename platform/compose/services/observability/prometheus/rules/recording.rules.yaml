@@ -18,7 +18,7 @@ groups:
         expr: 1 - avg without (cpu) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
 
       - record: argus_host:filesystem_used:ratio
-        expr: 1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"})
+        expr: 1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|rootfs",mountpoint!~".*/mnt/host/wslg/distro"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|rootfs",mountpoint!~".*/mnt/host/wslg/distro"})
 
   - name: argus.recording.postgres
     interval: 30s

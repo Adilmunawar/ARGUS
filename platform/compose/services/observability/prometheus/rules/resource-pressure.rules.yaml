@@ -141,7 +141,7 @@ groups:
 
       - alert: ArgusDiskWillFillIn24h
         expr: |
-          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs"}[6h], 24 * 3600) < 0
+          predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|rootfs",mountpoint!~".*/mnt/host/wslg/distro"}[6h], 24 * 3600) < 0
             and
           argus_host:filesystem_used:ratio > 0.70
         for: 30m
@@ -161,7 +161,7 @@ groups:
           description: 'Inode exhaustion presents as ENOSPC on a disk that shows free bytes. SeaweedFS needle files and the Loki chunk tree are the two inode consumers here.'
 
       - alert: ArgusFilesystemReadOnly
-        expr: node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|ramfs"} == 1
+        expr: node_filesystem_readonly{fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|rootfs",mountpoint!~".*/mnt/host/wslg/distro"} == 1
         for: 2m
         labels:
           severity: page
