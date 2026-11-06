@@ -94,7 +94,7 @@
         version: '2026.09.08.1', staging: '2026.09.08.2', health: 'ok', instances: 3,
         p95: 212, rps: 47, errorRate: 0.0021, slo: 99.94, uptimeDays: 14,
         deployedAt: hoursAgo(3), identity: 'gmsa-orders$', host: 'orders.example.com',
-        depends: { databases: ['orders_db', 'billing_db'], buckets: ['argus-uploads'], caches: ['Garnet'], queues: ['argus.ingest.orders.*'], secrets: ['kv/orders/jwt-signing-key', 'kv/orders/anthropic'], external: ['api.anthropic.com', 'earthengine.googleapis.com'] },
+        depends: { databases: ['orders_db', 'billing_db'], buckets: ['argus-uploads'], caches: ['Garnet'], queues: ['argus.ingest.orders.*'], secrets: ['kv/orders/jwt-signing-key', 'kv/orders/anthropic'], external: ['api.anthropic.com', 'tiles.example.com'] },
         services: [
           { name: 'OrdersGateway', exe: 'OrdersDashboard.Gateway.exe', instances: 2, port: 5140 },
           { name: 'OrdersApi', exe: 'OrdersDashboard.Api.exe', instances: 3, port: 5141 },
@@ -208,7 +208,7 @@
     secrets: [
       { path: 'kv/orders/jwt-signing-key', leases: 3, rotatedDays: 12, policyDays: 90, reads24h: 6 },
       { path: 'kv/orders/anthropic', leases: 1, rotatedDays: 44, policyDays: 90, reads24h: 214 },
-      { path: 'kv/orders/ee-service-key', leases: 1, rotatedDays: 103, policyDays: 90, reads24h: 18 },
+      { path: 'kv/maps/tiles-api-key', leases: 1, rotatedDays: 103, policyDays: 90, reads24h: 18 },
       { path: 'kv/orders/legacy-jwt', leases: 1, rotatedDays: 12, policyDays: 90, reads24h: 2 },
       { path: 'db/creds/orders-api', leases: 9, rotatedDays: 0, policyDays: 1, reads24h: 41 },
       { path: 'db/creds/billing-api', leases: 4, rotatedDays: 0, policyDays: 1, reads24h: 12 },

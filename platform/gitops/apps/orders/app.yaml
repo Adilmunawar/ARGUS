@@ -49,7 +49,6 @@ spec:
         PORT: "3100"
         HOSTNAME: 0.0.0.0
         ORDERS_API_BASE: http://localhost:5141/api/v1
-        EE_BASE64_KEY: "{{ openbao:kv/orders/ee-service-key#value }}"
         HTTPS_PROXY: http://egress.argus.local:3128
   ingress:
     host: orders.example.com
@@ -63,5 +62,5 @@ spec:
       healthCheckStableDurationSeconds: 120
       upgradeDomainTimeoutSeconds: 900
   egress:
-    allow: [api.anthropic.com, earthengine.googleapis.com]
+    allow: [api.anthropic.com]
   alerts: alerts.yaml

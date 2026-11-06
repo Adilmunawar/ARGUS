@@ -124,12 +124,12 @@ loki.process "argus_redact" {
 
 	stage.replace {
 		expression = "\\b(\\d{5}-\\d{7}-\\d)\\b"
-		replace    = "***CNIC-REDACTED***"
+		replace    = "***NATIONAL-ID-REDACTED***"
 	}
 
 	stage.replace {
 		expression = "\\b(\\d{13})\\b"
-		replace    = "***CNIC-REDACTED***"
+		replace    = "***NATIONAL-ID-REDACTED***"
 	}
 
 	stage.replace {
