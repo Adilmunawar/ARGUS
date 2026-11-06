@@ -1,5 +1,7 @@
 # ADR-0027: External services behind an egress proxy
 
+**Status:** Accepted · **Date:** 2026-09-08
+
 **Decision.** Google Earth Engine, the Anthropic API and OpenRouteService remain external. All egress from the platform goes through an allow-listing proxy (Caddy forward-proxy or OPNsense) with keys held in OpenBao and injected at runtime; no host has general internet access. OpenRouteService is self-hosted with a regional OSM extract in Phase 3 (Java, runs on Windows), removing the 2,000/day quota.
 
 ---

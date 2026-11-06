@@ -1,5 +1,7 @@
 # ADR-0024: CI on GitHub Actions self-hosted Windows runners; Forgejo mirror
 
+**Status:** Accepted · **Date:** 2026-09-08
+
 **Decision.** GitHub stays the collaboration surface; self-hosted runners (Windows, WDAC-compliant, no internet except allow-listed) build, test, sign and upload `.sfpkg` to `argus-artifacts`. Forgejo (Windows binary) mirrors every repo and can run the same workflows if GitHub is unreachable.
 
 ---

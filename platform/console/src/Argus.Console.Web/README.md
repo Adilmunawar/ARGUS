@@ -1,3 +1,3 @@
 # Argus Console web front end
 
-The browser interface of the Argus Console: a Next.js 16 standalone application built on the Orders design system, deployed with the console API as the `ArgusConsole` Service Fabric application and reachable only over the admin VPN. Its contents are added in the phase that owns this directory; see [the phases and runbooks plan](../../../../docs/06-PHASES-AND-RUNBOOKS.md).
+A placeholder from ADR-0022, which planned the console's front end as a Next.js 16 standalone application deployed as the `ArgusConsole` Service Fabric application. That decision is superseded by [ADR-0035](../../../../docs/adr/ADR-0035-the-console-as-built.md): the front end that exists is the ES5 prototype in [`platform/console/prototype`](../../prototype/README.md). Nothing here is built or referenced by a build.

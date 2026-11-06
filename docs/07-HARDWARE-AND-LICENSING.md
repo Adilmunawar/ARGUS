@@ -1,6 +1,6 @@
 # Hardware and licensing
 
-Reference-class hardware, approximate USD, mid-2026; verify with local vendors (±25 %). Assumes rack space, cooling and a generator with ATS at Site A.
+Reference-class hardware, approximate USD list prices, mid-2026. These are planning estimates, not quotes; verify with local vendors (±25 %). Assumes rack space, cooling and a generator with ATS at Site A.
 
 ## Tier 1: Phase 0-2 (Site A + minimal Site B)
 
@@ -36,7 +36,7 @@ Reference-class hardware, approximate USD, mid-2026; verify with local vendors (
 | Item | Need | Approx. |
 |---|---|---|
 | Windows Server 2025 **Datacenter** | S2D and unlimited VMs require Datacenter; licensed per physical core, 16-core minimum per host. 3 hosts × 32 cores (Phase 0) → 5 hosts | ~$6.2 k per 16-core pack list → ~$37 k for 96 cores; ~$62 k at 5 hosts (negotiate) |
-| Windows Server CALs | one per user or device accessing Windows services (AD, file); ~40 staff | ~$50 each → $2 k |
+| Windows Server CALs | one per user or device accessing Windows services (AD, file); sized here for 40 users, an illustrative figure | ~$50 each → $2 k |
 | SQL Server 2022 **Standard**, per core | `sql-01` 16 vCPU → 8 two-core packs; `sql-02` as a passive/DR replica is free under Software Assurance, otherwise licensed | ~$3.9 k per 2-core pack → ~$31 k (+ SA for the free DR replica) |
 | SQL Server Developer | all non-production, free | $0 |
 | Windows Admin Center, AD, AD FS, AD CS, HGS, DSC, Hyper-V, Failover Clustering, S2D | included in Datacenter | $0 |
@@ -50,4 +50,14 @@ Reference-class hardware, approximate USD, mid-2026; verify with local vendors (
 
 ## Three-year total (both tiers)
 
-Hardware ≈ $140-185 k · licences ≈ $70-100 k · platform FTE ≈ $90-135 k · power/connectivity ≈ $30 k → **≈ $330-450 k**. AWS estimate for the *current* footprint ≈ $150-250 k over the same period: which buys no GPUs, no local imagery, no sovereignty. The delta is the price of capability; the owner decides whether it is worth it (`08-OPEN-QUESTIONS.md` Q3).
+This is the one cost table in the repository; the master plan and the README link here rather than repeat it.
+
+| Item | Three years |
+|---|---|
+| Hardware, Tier 1 + Tier 2 | ≈ $140-185 k |
+| Licences (one-off, above) | ≈ $70-100 k |
+| Power and connectivity | ≈ $30 k |
+| **Total before staff** | **≈ $240-315 k** |
+| Platform engineering | one FTE for Phases 0-2 and half an FTE after (`00-MASTER-PLAN.md` §8), at local rates; not estimated here |
+
+Compare it with your own AWS bill for the same period (Q3 in `08-OPEN-QUESTIONS.md`). A small AWS footprint is usually cheaper than this; what the money buys is GPUs, locally served imagery and control over where the data lives. Whether that is worth it is the decision owner's call.

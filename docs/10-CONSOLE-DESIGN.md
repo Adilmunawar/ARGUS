@@ -97,7 +97,7 @@ The **environment switch** is the honest version of AWS's region selector: it is
 
 ## 3. Screen specifications
 
-Every screen uses the Orders component language: `PageHeader`, `StatTile`, `SectionCard`, `TableShell`, `FilterField`, `EmptyState`, `Skeleton`, `Button`, with the same tokens (`ink`, `muted`, `pine`, `cane`, `brand`, `leaf`, `cream`, `paper`). No new component is invented unless a screen below names it.
+Every screen uses the shared component language of the organisation's applications: `PageHeader`, `StatTile`, `SectionCard`, `TableShell`, `FilterField`, `EmptyState`, `Skeleton`, `Button`, with the same tokens (`ink`, `muted`, `pine`, `cane`, `brand`, `leaf`, `cream`, `paper`). No new component is invented unless a screen below names it.
 
 ### 3.1 Overview: the morning screen
 
@@ -143,7 +143,7 @@ Three lanes: **Awaiting approval** · **In flight** · **Recent**. A card per de
 
 | Mode | Protocol | For |
 |---|---|---|
-| **Desktop** | RDP through Apache Guacamole | `sql-01`, `legacy-landsurvey-01`, `adfs-01`, any Windows VM. Full desktop in the browser tab. |
+| **Desktop** | RDP through Apache Guacamole | `sql-01`, `legacy-app-01`, `adfs-01`, any Windows VM. Full desktop in the browser tab. |
 | **Shell** | SSH through Guacamole | `gpu-01`, `siem-01` |
 | **VM console** | VNC to the Hyper-V console | a VM that will not boot or has lost networking: the equivalent of standing at the rack |
 | **PowerShell** | JEA-scoped web terminal | routine tasks without a desktop; only the cmdlets the role allows |
@@ -177,7 +177,7 @@ How a connect actually works, so there is no ambiguity:
 
 **People**: AD users; name, tier, MFA method (passkey/FIDO2/TOTP), last sign-in, group membership, current elevations. A *Leaver* action that runs the offboarding runbook.
 
-**Access grants**, the screen that makes tiered admin usable: *Request* (group, hours, reason) → approver notified on WhatsApp → approve/deny in one tap → the console adds the AD group membership **with a TTL** so it expires on its own. A live list of who is elevated right now, with a *Revoke* button, is on the Overview when non-empty. This is JIT privileged access, which AWS sells as a separate product.
+**Access grants**, the screen that makes tiered admin usable: *Request* (group, hours, reason) → approver notified in the on-call chat → approve/deny in one tap → the console adds the AD group membership **with a TTL** so it expires on its own. A live list of who is elevated right now, with a *Revoke* button, is on the Overview when non-empty. This is JIT privileged access, which AWS sells as a separate product.
 
 **Secrets**: OpenBao paths as a tree, names only, never values. Per path: rotation age (amber past policy), active leases, last 20 reads with actor and time. Actions: *Rotate*, *Revoke all leases*. A *Request value* action exists for Admins, requires a reason, shows the value once, and pages the security channel.
 
@@ -195,7 +195,7 @@ How a connect actually works, so there is no ambiguity:
 
 ### 3.8 ML & geospatial
 
-**Pipelines**: the Dagster asset graph rendered natively (not an iframe); `regions → s2_periods → s1_periods → phenology → v5_train_table → v5_model → asset_predictions`: each node coloured by freshness against its SLA, click for the last run, logs, and *Materialise*. **Models**: MLflow runs filtered to the v5 series, metrics side by side, lineage back to the exact feature-table version, *Promote to endpoint*. **Endpoints**: Ray Serve latency, request rate, canary split. **Imagery**: a map of regional showing Sentinel mirror coverage by date, gaps in amber, a STAC search box, and a tile preview through TiTiler.
+**Pipelines**: the Dagster asset graph rendered natively (not an iframe); `regions → s2_periods → s1_periods → phenology → v5_train_table → v5_model → asset_predictions`: each node coloured by freshness against its SLA, click for the last run, logs, and *Materialise*. **Models**: MLflow runs filtered to the v5 series, metrics side by side, lineage back to the exact feature-table version, *Promote to endpoint*. **Endpoints**: Ray Serve latency, request rate, canary split. **Imagery**: a map of the regions showing Sentinel mirror coverage by date, gaps in amber, a STAC search box, and a tile preview through TiTiler.
 
 ### 3.9 Operations
 
@@ -225,15 +225,18 @@ A rule set evaluated against the estate as it is, not a report somebody ran last
 | **Preview before apply** | Any change shows the reconciler's plan and the blast radius first. |
 | **Destructive actions** | `danger` Button, a confirm dialog that requires typing the resource name, the environment restated, and never in the same dropdown group as a safe action. |
 | **Command palette** | `⌘K`: jump to any resource, run any runbook, connect to any VM, by typing. This is how experienced operators will use the console. |
-| **Deep links** | Every resource has a stable URL. Alerts, WhatsApp messages and runbooks link straight to the screen. |
+| **Deep links** | Every resource has a stable URL. Alerts, chat notifications and runbooks link straight to the screen. |
 | **Live by default** | Health, logs, sessions and deployments stream over SSE. No refresh button anywhere. |
-| **Honest empty and error states** | The Orders voice: say what happened and what to do. Never fake success. |
+| **Honest empty and error states** | Say what happened and what to do, in plain words. Never fake success. |
 | **Elevation is visible** | When elevated, the shell shows a `leaf` band with the remaining time and the reason. You always know what you are holding. |
 | **Mobile** | Overview, Alerts, Deployments (approve/reject) and Runbooks work on a phone, because approvals happen at 9 p.m. from a car. RDP does not pretend to. |
 
 ## 5. Design system
 
-Inherited wholesale from the Orders dashboard `DESIGN.md`, same tokens, same eight components, same Geist + Lora pairing, same chart palette in fixed order, same `motion-safe:` behaviour, same `/styleguide` route as the living reference. The console is a the organisation product and should look like one.
+> **Superseded.** The console no longer uses the palette and type pairing first described here (the `ink`, `pine`, `cane`, `leaf` tokens and the Geist and Lora pairing named elsewhere in this document). The design system the prototype implements is [`13-CONSOLE-DESIGN-SYSTEM.md`](13-CONSOLE-DESIGN-SYSTEM.md): a white, dense, data-first interface in the conventions of the major cloud consoles. Read token names in sections 2 to 4 as roles (primary action, status, terminal surface), not as colours.
+
+
+The console shares the design system of the organisation's own applications: the same tokens, the same eight components, the same Geist + Lora pairing, the same chart palette in fixed order, the same `motion-safe:` behaviour, and a `/styleguide` route as the living reference. The console is one of the organisation's products and should look like one. The prototype implements the tokens in `platform/console/prototype/assets/app.css`.
 
 Three console-only additions, each documented in the styleguide when built:
 
@@ -249,7 +252,7 @@ The console is worth building only in the order that retires an existing tool.
 
 | Stage | Ships | Retires |
 |---|---|---|
-| **C1** (Phase 2) | Overview, Applications (Overview/Logs/Deploy history), Deployments | `package.ps1` / `update.ps1` and the deploy WhatsApp thread |
+| **C1** (Phase 2) | Overview, Applications (Overview/Logs/Deploy history), Deployments | `package.ps1` / `update.ps1` and the deploy chat thread |
 | **C2** (Phase 2-3) | Compute → VMs → **Connect** (Guacamole), Sessions | RDP clients, the VPN-for-RDP habit, shared local admin passwords |
 | **C3** (Phase 3) | Data (Databases, Object storage, Query editor), Runbooks | ad-hoc SSMS sessions, S3 clients, tribal knowledge |
 | **C4** (Phase 4) | Identity & secrets, Access grants | standing admin rights |

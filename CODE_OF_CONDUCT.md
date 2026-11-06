@@ -68,18 +68,19 @@ when appropriate.
 ## Scope
 
 This code of conduct applies within all project spaces — the repository,
-issues, pull requests, discussions, and commit messages — and also applies
+issues, issue comments and commit messages — and also applies
 when an individual is officially representing the project in public spaces.
 
 ## Enforcement
 
-Report abusive, harassing, or otherwise unacceptable behaviour to the project
-maintainer through GitHub. All complaints will be reviewed and investigated
-promptly and fairly.
+Report abusive, harassing, or otherwise unacceptable behaviour privately by
+email to **adilmunawarx@gmail.com**. All complaints will be reviewed and
+investigated promptly and fairly.
 
-Maintainers are obliged to respect the privacy and security of the reporter of
-any incident. Reports about a maintainer are handled by a maintainer not
-involved in the incident where one is available.
+The project has one maintainer, the author, who is obliged to respect the
+privacy and security of the reporter of any incident. If a report concerns the
+author, say so in it; you may also report the behaviour to GitHub through its
+abuse reporting, which does not depend on this project.
 
 Security vulnerabilities are **not** reported here. Use the process in
 [SECURITY.md](SECURITY.md).

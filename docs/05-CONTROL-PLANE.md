@@ -2,6 +2,8 @@
 
 Three surfaces, one truth (ADR-0021). Everything below is `platform/`.
 
+> **Status.** This document is the target design. What exists today is smaller: a console prototype in ES5 served by a read-only Node API with four roles (ADR-0035, [`platform/console/README.md`](../platform/console/README.md)), a PowerShell module that is a client of that API ([`platform/cli/Argus/README.md`](../platform/cli/Argus/README.md)), and the GitOps tree as files with schemas but no reconciler. Sections 2 to 5 describe what is to be built, not what runs.
+
 ## 1. The truth: `argus-gitops`
 
 A private repository (`example-org/argus-gitops`, mirrored on Forgejo). Its `main` branch **is** production. Its `staging` branch is the staging tenant. The only process with write access to production systems is the reconciler (ADR-0023), and it only applies what a signed, reviewed commit says.
@@ -40,6 +42,8 @@ Every file is validated in CI by a schema (`platform/gitops/schemas/`). A PR tha
 
 ## 2. The reconciler (`platform/console/src/Argus.Reconciler`)
 
+*Target design; not built. `platform/console/src/Argus.Reconciler/` holds only a README.*
+
 A Service Fabric **stateful reliable service** (3 replicas, one primary) written in C#.
 
 Loop, every 60 s and on webhook:
@@ -55,9 +59,11 @@ Break-glass: a Tier 0 human can pause the reconciler from the console (logged, p
 
 ## 3. The console (`platform/console`)
 
+*Target design. The console as built is an ES5 classic-script prototype and a dependency-light Node API with session sign-in and read-only routes under `/api/`; ADR-0035 records why it diverged from §3.1. The roles, screens and `/api/v1` routes below are where it is meant to go.*
+
 ### 3.1 Stack
 
-`Argus.Console.Api`: .NET 10 minimal API, same conventions as the Orders API (bare camelCase records, RFC 9457 problems, `/api/v1/*`, rate limiting, OTel). `Argus.Console.Web`: Next.js 16 standalone, the Orders design system (Geist + display serif, cream/leaf palette, colour-blind-safe status colours). Deployed as one SF application `ArgusConsole`, behind Caddy at `console.example.com`, reachable only over the admin VPN. Login: AD FS OIDC (PKCE). Authorisation: AD groups → roles.
+As first designed (ADR-0022, superseded by ADR-0035): `Argus.Console.Api`, a .NET 10 minimal API (bare camelCase records, RFC 9457 problems, `/api/v1/*`, rate limiting, OTel), and `Argus.Console.Web`, a Next.js 16 standalone front end on a shared design system (Geist + display serif, cream/leaf palette, colour-blind-safe status colours). Deployed as one SF application `ArgusConsole`, behind Caddy at `console.example.com`, reachable only over the admin VPN. Login: AD FS OIDC (PKCE). Authorisation: AD groups → roles.
 
 ### 3.2 Roles
 
@@ -89,7 +95,9 @@ Break-glass: a Tier 0 human can pause the reconciler from the console (logged, p
 
 Day one (Phase 0-2), before these screens exist: Windows Admin Center for hosts/VMs, Grafana for everything observable, GitHub for PRs. The console's first shipped screens are **Deployments** and **Applications**, because they are what `update.ps1` does today.
 
-### 3.4 API surface (excerpt)
+### 3.4 API surface (target design, excerpt)
+
+None of these routes exist. The built API serves `/api/health`, `/api/capabilities`, `/api/auth/login`, `/api/auth/logout` and a set of read-only `GET` routes, each gated by role (viewer, operator, security, admin); see [the server README](../platform/console/server/README.md).
 
 ```
 GET  /api/v1/health
@@ -114,6 +122,8 @@ Every `POST` records `{actor, role, action, target, before, after, prUrl?}` in `
 
 ## 4. The CLI (`platform/cli`)
 
+*Target design. The module that exists signs in with the console's session cookie and only reads; [`platform/cli/Argus/README.md`](../platform/cli/Argus/README.md) documents it. The device-code login, deploy and grant cmdlets below are not built.*
+
 `Argus` PowerShell module (signed, in the WDAC policy) and a thin `argus` .NET tool: both are clients of the console API; neither has privileges of its own.
 
 ```powershell
@@ -128,18 +138,18 @@ Invoke-ArgusRunbook sql-01-restore-drill -Param @{ Target = 'sql-drill-01' }
 Get-ArgusAudit -Since (Get-Date).AddDays(-1)
 ```
 
-`argus` mirrors these for the Linux hosts and CI (`argus app deploy orders --version ...`). Claude Code's `argus-deploy` and `argus-ops` plugins call `argus`.
+`argus` mirrors these for the Linux hosts and CI (`argus app deploy orders --version ...`).
 
-## 5. How a change flows (the whole loop)
+## 5. How a change flows (the whole loop, target design)
 
 ```
-1. Riley merges a Orders PR on GitHub
+1. A developer merges an Orders PR on GitHub
 2. Self-hosted Windows runner: build · test · scan · sign · package → argus-artifacts/orders/2026.09.08.1.sfpkg (WORM)
 3. Runner opens PR #1842 on argus-gitops: environments/staging.yaml  orders: 2026.09.08.1
 4. Reconciler applies staging within 60 s; SF rolling upgrade; health OK
-5. Adil, from the console Deployments screen (or `Publish-ArgusApp ... -Environment production`), promotes: PR #1843 on production.yaml
+5. The release owner, from the console Deployments screen (or `Publish-ArgusApp ... -Environment production`), promotes: PR #1843 on production.yaml
 6. Approver (a different Tier 1 person) approves in the console
-7. Reconciler: verify signatures → SF upgrade on production with rollback policy → status green → WhatsApp "orders 2026.09.08.1 live, p95 212 ms"
+7. Reconciler: verify signatures → SF upgrade on production with rollback policy → status green → chat message "orders 2026.09.08.1 live, p95 212 ms"
 ```
 
 Wall clock from step 1 to step 7 with prompt approval: under 10 minutes. Rollback is `Publish-ArgusApp orders -Version <previous>`: a PR like any other.

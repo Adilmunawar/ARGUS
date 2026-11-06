@@ -1,5 +1,7 @@
 # ADR-0005: Service Fabric as the application scheduler; guest executables
 
+**Status:** Accepted · **Date:** 2026-09-08
+
 **Context.** The applications are .NET services (API, gateway, console, functions host) and Node processes (Next.js standalone). They need placement, health-gated rolling upgrades, automatic restart and horizontal scaling, what Kubernetes gives Linux.
 
 **Options.** (a) Service Fabric standalone cluster on Windows Server. (b) HashiCorp Nomad (Windows binary; BSL licence). (c) Windows Containers on Kubernetes worker nodes with a Linux control plane. (d) WinSW/NSSM services per host with a custom supervisor (status quo, scaled).

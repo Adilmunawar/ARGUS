@@ -1,6 +1,6 @@
 # ADR-0033: The console is the primary surface; Windows Admin Center is retired at parity
 
-**Status:** Accepted (8 September 2026)
+**Status:** Accepted · **Date:** 2026-09-08
 
 ## Context
 

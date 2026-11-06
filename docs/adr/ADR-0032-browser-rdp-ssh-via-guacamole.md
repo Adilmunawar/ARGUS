@@ -1,10 +1,10 @@
 # ADR-0032: Browser RDP/SSH/VM-console via Apache Guacamole
 
-**Status:** Accepted (8 September 2026)
+**Status:** Accepted · **Date:** 2026-09-08 · **Amends:** [ADR-0003](ADR-0003-two-accepted-linux-exceptions.md)
 
 ## Context
 
-`05-CONTROL-PLANE.md` assumed operators reach servers with an RDP client over the admin VPN. That means: a VPN client on every laptop, credentials typed into `mstsc`, shared or LAPS-retrieved local admin passwords, standing access, and **no record of what anyone did inside the session**. For a platform whose whole security case rests on "no long-lived credentials" and "evidence, not assurance", that is the largest remaining hole. The owner's requirement is explicit: RDP and everything else controlled from the web interface.
+`05-CONTROL-PLANE.md` assumed operators reach servers with an RDP client over the admin VPN. That means: a VPN client on every laptop, credentials typed into `mstsc`, shared or LAPS-retrieved local admin passwords, standing access, and **no record of what anyone did inside the session**. For a platform whose whole security case rests on "no long-lived credentials" and "evidence, not assurance", that is the largest remaining hole. The decision owner's requirement is explicit: RDP and everything else controlled from the web interface.
 
 AWS itself has no answer here. Session Manager is text-only.
 

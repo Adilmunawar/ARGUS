@@ -24,7 +24,7 @@ DNS zone `argus.local` (AD-integrated, internal) and `example.com` (public, at t
 
 ## 3. Edge
 
-OPNsense HA (CARP) at each site. WAN: two ISPs at Site A with failover (PTCL fibre + a second provider), one at Site B. Inbound: 443/tcp+udp only, to the Caddy VIP, with Suricata inline. Admin: WireGuard on a non-standard port, NPS/RADIUS (AD) + MFA, per-device keys, PAW-only for Tier 0 subnets. Site-to-site: WireGuard, always on, carries AD replication, Hyper-V Replica, SQL AG, SeaweedFS replication, backups; QoS gives AG and Replica priority.
+OPNsense HA (CARP) at each site. WAN: two ISPs at Site A with failover (a fibre provider and a second, independent provider), one at Site B. Inbound: 443/tcp+udp only, to the Caddy VIP, with Suricata inline. Admin: WireGuard on a non-standard port, NPS/RADIUS (AD) + MFA, per-device keys, PAW-only for Tier 0 subnets. Site-to-site: WireGuard, always on, carries AD replication, Hyper-V Replica, SQL AG, SeaweedFS replication, backups; QoS gives AG and Replica priority.
 
 ## 4. Inside
 
@@ -36,7 +36,7 @@ No default route from PLATFORM, DATA, ML or BUILD. A forward proxy on the DMZ (C
 
 ## 6. Bandwidth plan for Site B
 
-Initial seed of ~5 TB (backups + survey pictures) by physical disk. Steady state: SQL log backups ~2 GB/day, Kopia incrementals ~5-20 GB/day, Hyper-V Replica deltas ~10-50 GB/day, AD replication negligible. A 100 Mbps dedicated link comfortably carries this; a 1 Gbps link makes the DR fail-back fast. Both sites keep a second ISP.
+Initial seed of ~5 TB (backups + uploaded images; an illustrative figure) by physical disk. Steady state: SQL log backups ~2 GB/day, Kopia incrementals ~5-20 GB/day, Hyper-V Replica deltas ~10-50 GB/day, AD replication negligible. A 100 Mbps dedicated link comfortably carries this; a 1 Gbps link makes the DR fail-back fast. Both sites keep a second ISP.
 
 ## 7. Power
 

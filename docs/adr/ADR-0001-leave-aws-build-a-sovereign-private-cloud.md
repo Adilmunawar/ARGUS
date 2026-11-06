@@ -1,6 +1,8 @@
 # ADR-0001: Leave AWS; build a sovereign private cloud
 
-**Context.** The Orders dashboard uses two AWS services: one Windows EC2 instance and one S3 bucket for backups (audit of `example-org/orders`, 7 Sep 2026). The ML pipelines use GPU hours wherever they can be found. Data about customers, regions and billing currently sits in ap-southeast-1.
+**Status:** Accepted · **Date:** 2026-09-08
+
+**Context.** The Orders dashboard uses two AWS services: one Windows EC2 instance and one S3 bucket for backups (audit of `example-org/orders`, 7 Sep 2026). The ML pipelines use GPU hours wherever they can be found. Data about customers, regions and billing currently sits in an AWS region outside the country.
 
 **Options.** (a) Stay on AWS. (b) Hybrid: local GPUs and storage, AWS for the database. (c) Full exit onto owned hardware.
 

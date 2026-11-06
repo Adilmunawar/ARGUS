@@ -1,5 +1,7 @@
 # Console stress testing, the performance findings, and the fix plan
 
+> **As of 9 September 2026 (prototype v3).** This is a dated record, kept as it was found. The console has since gained a live mode, a console API and a new design system ([docs/13](13-CONSOLE-DESIGN-SYSTEM.md)), so screen names, colours, budgets, counts and layouts below may no longer match the prototype. The current test suites and their counts are in the [README](../README.md#the-tests) and [docs/09](09-VALIDATION-STATUS.md).
+
 Written 9 September 2026 against prototype v3, after a four-way parallel audit and a new measurement harness. Everything in Part 2 was measured, not reasoned about. Everything in Part 3 was reproduced in a browser before it was written down.
 
 ---

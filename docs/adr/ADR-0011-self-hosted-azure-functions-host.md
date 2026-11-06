@@ -1,5 +1,7 @@
 # ADR-0011: Self-hosted Azure Functions host
 
+**Status:** Accepted · **Date:** 2026-09-08
+
 **Context.** Scheduled and event-driven jobs (hourly precompute, 15-day feature tables, exports, change detection) currently run as cron or inside a request.
 
 **Decision.** The **Azure Functions host runtime** (MIT), isolated-worker .NET model, deployed as a Service Fabric guest executable per function app, triggered by NATS (custom trigger) and timers. No Azure account involved.

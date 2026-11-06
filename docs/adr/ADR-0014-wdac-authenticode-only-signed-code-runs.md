@@ -1,4 +1,6 @@
-# ADR-0014, WDAC + Authenticode: only signed code runs
+# ADR-0014: WDAC + Authenticode: only signed code runs
+
+**Status:** Accepted · **Date:** 2026-09-08
 
 **Decision.** **Windows Defender Application Control** in enforced mode on every server: only code signed by the Argus code-signing certificate (AD CS, key on an HSM or at minimum a TPM-bound cert on the build server) or by Microsoft runs; binaries, DLLs, drivers, PowerShell scripts. CI signs every artefact; `.sfpkg` packages are also signed and verified by the reconciler before deployment. PowerShell Constrained Language Mode everywhere but Tier 0 PAWs.
 

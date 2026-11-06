@@ -1,5 +1,7 @@
 # ADR-0004: Hyper-V + Failover Clustering + Storage Spaces Direct
 
+**Status:** Accepted · **Date:** 2026-09-08
+
 **Context.** The platform needs compute for VMs (SQL Server, legacy API, SIEM) and block storage that survives a node failure.
 
 **Options.** (a) Hyper-V cluster with S2D (hyper-converged). (b) Hyper-V with a separate SAN. (c) Proxmox.

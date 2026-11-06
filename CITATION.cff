@@ -1,6 +1,6 @@
 cff-version: 1.2.0
-message: "Argus is not open source; use requires the author's written permission. If you have that permission and use Argus in your work, please cite it as below."
-title: "Argus: a sovereign, Windows first private cloud that replaces AWS on owned hardware"
+message: "Citing Argus needs no permission. Please cite it as below. Any other use of the work needs the author's written permission; see USE-POLICY.md."
+title: "Argus: a reference design for a Windows-first private cloud on owned hardware, with a console prototype"
 type: software
 authors:
   - family-names: Munawar
@@ -23,7 +23,9 @@ keywords:
   - zero trust
   - architecture decision records
 abstract: >
-  Argus is the complete design record for replacing AWS with hardware you own:
-  thirty four architecture decisions, an application infrastructure map, a
-  hardware rooted security architecture, runbooks, a self hosted stack and a
-  tested web console with browser RDP.
+  Argus is a design record for moving a mid-sized organisation's AWS
+  workloads onto Windows Server hardware it owns: thirty-five architecture
+  decisions, an application infrastructure map, a hardware-rooted security
+  architecture and a phased plan. The platform itself is not built. A console
+  prototype, a read-only console API and a Docker Compose stack of the
+  open-source components run and are tested.

@@ -1,5 +1,7 @@
 # ADR-0028: Local Sentinel mirror + STAC
 
+**Status:** Accepted · **Date:** 2026-09-08
+
 **Decision.** Sentinel-1 GRD and Sentinel-2 L2A for the regional AOIs pulled via `eodag` from the Copernicus Data Space, converted to COGs, stored in `argus-sentinel`, indexed in `pgstac` on PostgreSQL. TiTiler (Python, Windows) serves dynamic raster tiles; Martin (Rust, Windows build) serves region vector tiles from PostGIS.
 
 **Why.** The single largest performance change available: pipelines stop pulling scenes over a constrained uplink on every run, and the dashboard map stops shipping megabyte GeoJSON.

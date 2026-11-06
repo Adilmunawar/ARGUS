@@ -2,10 +2,45 @@
 
 All notable changes to the Argus plan and platform. Dated, with the reason, because a platform whose history nobody can explain is a platform nobody can safely change.
 
+The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) as it applies before 1.0: the public surface may change in any minor release, and a minor version is bumped for every release that adds or changes a feature, a decision or a document a reader relies on. Patch releases fix what the previous release got wrong. Each version below links to its tag; [Unreleased] compares the latest tag with `main`.
+
 ## [Unreleased]
 
 ### Changed
-- **Argus is now organisation-neutral.** It began as one company's design record, so the tree named that company, its domains, its production host, its private repositories, its staff, its databases and their sizes, and its sites. All of that is gone. The sample applications are Orders, Billing and Maps; domains are `example.com`; repositories are `example-org/*`; people in the sample dataset are fictional; regions are generic; the default timezone is UTC; the PowerShell module is credited to the author. The superseded plan written for that company is deleted rather than reworded. The repository never held customer records, dumps or datasets, in the tree or in its history.
+- **The console has a new design system**, written down in `docs/13-CONSOLE-DESIGN-SYSTEM.md` and recorded in ADR-0035, which supersedes ADR-0022. The old look read as a prototype. The values come from the published, Apache-2.0 Cloudscape design tokens, so the console reads like the consoles its operators already know:
+  - a white page under a dark 48px top bar, with a white 240px side navigation;
+  - one accent colour, three status colours and a five-step type scale;
+  - fixed radii for buttons, containers and inputs.
+- **Every screen follows one of three patterns: dashboard, resource list or resource detail.**
+  - **Overview** is a dashboard: one alert line, four key figures, a Platform summary, and compact Needs attention and Recent activity tables.
+  - **Lists** put the filter, the table and the pagination in one container, with a counter in the header. They show at most seven columns by default, and the rest sit behind the column preference.
+  - **Detail pages** open with breadcrumbs, the resource name with its status, tabs, and a key-value Details container.
+  - **Shared changes:** status is an icon and text, not a pill. Explanatory paragraphs became one-line descriptions or collapsed details. Logs read as aligned columns.
+  - **Smaller fixes:**
+    - Compute shows a one-shot container that exited 0 as Completed rather than as an error.
+    - Image digests are cut to 12 characters.
+    - The Stack screen is now called Services.
+- **The compose stack is cross-platform and least-privilege.**
+  - `node platform/compose/stack.js` replaces the Windows-only bootstrap with `bootstrap`, `up`, `down`, `reset`, `status`, `logs` and `doctor`, and bootstrap only ever adds to an existing `.env`.
+  - The socket proxy allowlists the few Docker paths the console and Alloy read, and the console no longer sees any S3 secret key.
+  - Only the console and Grafana are published by default.
+  - Every service drops all capabilities and adds back only what it needs.
+  - Every image is pinned by digest, and the image no longer ships the test suites.
+- **The console API is hardened.** Every error now has one envelope.
+  - Unknown Host headers are refused, which closes DNS rebinding.
+  - Roles are checked on every route.
+  - Live streams end with the session.
+  - Sign-in is throttled per source.
+  - The audit trail is persisted.
+  - `/metrics` needs a token.
+  - The test harness is no longer served.
+- **The repository checks fail closed.**
+  - The ownership check starts from a fixed commit, because its date filter had been read as a time of day and so had checked nothing.
+  - GitOps validation fails on unknown kinds and cross-checks references between files.
+  - CI now also runs these jobs: a link checker, ESLint, an image build and scan, PowerShell lint and tests, config validation, OpenTofu validation and a compose smoke job. The smoke job runs the live suite against the composed stack.
+- The README leads with what runs today, a diagram and a roadmap, with screenshots of the new design. The project pages and every numbered document were brought in line with it.
+- The log redaction labels and the sample dataset no longer name a country's identity card, a satellite imagery service or its key.
+- **Argus is now organisation-neutral.** The tree names no real organisation, domain, host, private repository, person, database or site; it is written as a reference design for a mid-sized organisation. The sample applications are Orders, Billing and Maps; domains are `example.com`; repositories are `example-org/*`; people in the sample dataset are fictional; regions are generic; data sizes and estate figures are illustrative round numbers; the default timezone is UTC; the PowerShell module is credited to the author. The superseded Linux plan is not in the tree. The tree holds no customer records, dumps or datasets.
 - The renamed specs were brought up on the running stack: the bucket, identities and alert rules all resolve under the new names.
 
 - **Licence.** The MIT licence is withdrawn for every version from this date on. The repository is now all rights reserved: it may be read on GitHub, and any other use, copy, deployment or derivative requires the author's prior written permission, asked for and granted case by case. `LICENSE`, the README, both `package.json` manifests (`UNLICENSED`), `CITATION.cff`, `CONTRIBUTING.md` and the publish script say so. Copies obtained under the MIT licence before 1 November 2026 keep that licence; this cannot be undone for them, only for what is published from now.
@@ -38,6 +73,15 @@ All notable changes to the Argus plan and platform. Dated, with the reason, beca
 - **The rest of the review, each one measured against the budgets.** A single type scale of seven tokens replaces fourteen ad-hoc sizes, and the page title is now the largest type at every height instead of shrinking below the stat tiles on short screens. On a phone the top bar is one pinned row with search as a named icon button; below 340px wide or 480px tall it scrolls away, so at 400% zoom it never covers the content. Flashes float at the top right and no longer push the page down, with the same fallback to the page flow on short screens. Repeated Advisor findings share one row with each resource as a link and an Accept all; Show each finding brings back one row per finding, the counts always count findings, and a filter runs before grouping.
 
 ### Fixed
+- **Sample data leaked into the live console.** Signed in against the real stack, the inbox, the navigation badges, the command palette and most of the Security screen still showed fixture rows, some with action buttons in a read-only console. Live mode now shows only what the API answers. Every screen renders loading, empty, error and partial states from shared helpers. A failed probe no longer drops a served console to sample mode.
+- **The SeaweedFS filer crash-looped after a Docker restart.** SeaweedFS runs as root with every capability dropped, so it could not read config files owned by the console's user with mode 0400. It had only kept working because the files were already open. They are now owned by root, readable by the console group, at mode 0440.
+- **Two paging alerts fired on Docker Desktop's own mounts.** Docker Desktop mounts a read-only system image and a CD image that is always 100% full. The filesystem alerts treated them as a disk remounted read-only and a full disk. The filesystem rules now leave out `iso9660`, `rootfs` and the WSLg system distro.
+- **The secret scanner flagged two strings that are not credentials.** It took everything after a key as its value, so a map of error reasons such as `'invalid-credentials': 'signedOut'` was reported as a credential. It now reads a quoted value only up to its closing quote. It also no longer reports scrypt hash records, which are hashes, not secrets. Both cases are in its self-test.
+- **The instance detail page showed a finish time and exit code for a running container.** These were left over from the container's previous run. Both now read `-` while the container runs.
+- **The GitOps declarations were inconsistent**, which the stricter checks found:
+  - production pinned a console app that had no spec;
+  - a firewall rule named a principal that no account declared;
+  - the object-locked buckets did not declare versioning.
 - **The console froze for a signed-out browser opening the Advisor, and for an operator whose session ended there.** Each finished evaluation refreshed the navigation badge, which started the next evaluation; signed out, every read is refused locally with no network wait, so the cycle ran on promise callbacks alone and the page never painted the sign-in dialog. A finished evaluation now only paints the badge, nothing evaluates while signed out, and the screen says no rule has been evaluated rather than reporting nothing wrong. The live suite now opens all fifteen screens signed out in a fresh browser and ends a session on the Advisor, which is why it passed before: it always signed in on Overview first. Found by signing in to the rebuilt stack from a clean browser.
 - **The compose console service could not boot as written.** The image defaults to session auth with `/config/operators.json`, and nothing in compose or the bootstrap produced that file, so the container refused to start. Measured on Docker Desktop 29.8 on Windows 11, first run of the stack on this machine.
 - **Prometheus could not start:** `../gitops` was bind-mounted inside the read-only `/etc/prometheus` mount, and Docker cannot create the mount point. The gitops tree is now mounted at `/gitops` and the rule paths follow.
@@ -345,4 +389,20 @@ An adversarial audit was run against the console by an agent that did not write 
 - Commit `66a85df` was missing ten `platform/` files because the shell did not expand brace paths; added in `febbcb8` with identical content.
 
 ### Open
-- ADR-0031 (return `orders_db` to FULL recovery) awaits the owner's ruling: see `docs/08-OPEN-QUESTIONS.md` Q7.
+- ADR-0031 (return `orders_db` to FULL recovery) awaits the decision owner: see `docs/08-OPEN-QUESTIONS.md` Q7.
+
+[Unreleased]: https://github.com/Adilmunawar/argus/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Adilmunawar/argus/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/Adilmunawar/argus/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/Adilmunawar/argus/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/Adilmunawar/argus/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/Adilmunawar/argus/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/Adilmunawar/argus/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/Adilmunawar/argus/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/Adilmunawar/argus/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Adilmunawar/argus/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/Adilmunawar/argus/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/Adilmunawar/argus/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Adilmunawar/argus/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/Adilmunawar/argus/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/Adilmunawar/argus/releases/tag/v0.1.0

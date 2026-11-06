@@ -1,8 +1,9 @@
 # Security policy
 
-Argus is the control plane for a private cloud. A defect here is a defect in
-the thing that holds the keys, so this document says exactly what we support,
-how to report a problem, and what we will do about it.
+Argus is the design, and the first working pieces, of the control plane for a
+private cloud. A defect here is a defect in the thing meant to hold the keys, so
+this document says exactly what is supported, how to report a problem, and what
+happens next.
 
 ## Supported versions
 
@@ -11,26 +12,28 @@ carries fixes.
 
 | Version | Supported | Notes |
 | --- | --- | --- |
-| 0.6.x | Yes | Current release line |
-| 0.5.x | No | Superseded by 0.6.0 |
-| < 0.5 | No | Pre-naming (the earlier working name); no fixes |
+| `main` | Yes | Unreleased work after 0.12.0 |
+| 0.12.x | Yes | Current release line |
+| < 0.12 | No | Superseded; move to 0.12.x or `main` |
 
 ## Reporting a vulnerability
 
 **Do not open a public issue for a security defect.**
 
-Report privately through GitHub's advisory flow:
+Report privately by email to **adilmunawarx@gmail.com** with the subject
+*Argus security report*. If you would rather not send details by plain email,
+say so in a first message with no details, and a private channel will be agreed.
 
-- <https://github.com/Adilmunawar/Argus/security/advisories/new>
-
-If that is unavailable to you, contact the maintainer directly and say only
-that you have a security report; do not include details in the first message.
+GitHub's private vulnerability reporting is not enabled on this repository at
+the time of writing. If a *Report a vulnerability* button appears on the
+Security tab, it may be used instead.
 
 ### What to include
 
 A report we can act on has:
 
-1. The component: console prototype, GitOps schema, reconciler, IaC, CLI.
+1. The component: console prototype, console API, compose stack, GitOps
+   schema, IaC, CLI.
 2. The version or commit SHA.
 3. What an attacker gains — read of another tenant's data, privilege
    escalation across tiers, bypass of the elevation ladder, code execution.
@@ -67,14 +70,21 @@ above has run.
   validates but grants more than it declares.
 - `platform/iac/` and `platform/policies/` — a template that provisions
   something weaker than the ADR that mandates it.
+- `platform/console/server/` — authentication and sessions, the origin check,
+  the role checks (viewer, operator, security, admin), the read-only gate, path
+  traversal in the runbook and GitOps readers, and anything that returns a
+  secret value or a password record.
+- `platform/compose/` — a default that exposes a service beyond loopback, a
+  secret written somewhere readable by other users, a credential in a
+  committed file.
 - `platform/cli/Argus/` — argument injection, credential handling.
 - Any secret, key, certificate, or live hostname committed to this repository.
 
 ### Out of scope
 
-- The production deployment at `*.example.com`. This repository is the
-  design and the control plane; testing the live estate is not authorised by
-  this policy.
+- Any running deployment of Argus. There is no public one; `*.example.com`
+  names in the documents are samples. Testing someone else's installation is
+  not authorised by this policy.
 - Findings that require a compromised operator workstation or physical access
   to a domain-joined host.
 - Missing hardening headers on the prototype opened from `file://`. The
@@ -86,25 +96,32 @@ above has run.
 ## Design commitments
 
 These are properties the console is built to hold. A report that breaks one of
-them is a vulnerability, not a feature request.
+them is a vulnerability, not a feature request. Each says where it holds
+today: **built** (enforced in the code and tested), **sample mode** (enforced by
+the interface on the bundled dataset only), or **design only** (specified, not
+built).
 
-- **No network egress.** The console fetches nothing — no fonts, no CDN, no
+- **No network egress** (built). The console fetches nothing — no fonts, no CDN, no
   analytics, no telemetry (ADR-0027). Any outbound request is a defect.
-- **No HTML from data.** Screens build DOM through `ui.el()`, which escapes by
+- **No HTML from data** (built). Screens build DOM through `ui.el()`, which escapes by
   construction. `innerHTML` is not used with data anywhere; `ui.el` throws on
   an `html` attribute. Alert rules, log lines, commit messages, and file names
   all arrive from outside the product.
-- **Content Security Policy.** `default-src 'none'` with `script-src 'self'`
+- **Content Security Policy** (built). `default-src 'none'` with `script-src 'self'`
   and no inline handlers. The test suite fails the build if an inline handler
   or an external origin appears.
-- **Elevation is time-boxed and recorded.** Standing rights do not include
-  destructive operations. Elevation requires a second factor, carries a
-  reason, expires on a wall clock, and is written to the audit.
-- **Destructive actions name their environment.** Anything irreversible
+- **Elevation is time-boxed and recorded** (sample mode). Standing rights do
+  not include destructive operations. Elevation requires a second factor,
+  carries a reason, expires on a wall clock, and is written to the audit. The
+  API has no elevation; each operator's role is fixed in the operator file.
+- **Destructive actions name their environment** (sample mode; the API has
+  no destructive action). Anything irreversible
   requires typing the resource name and displays the environment it will run
   against.
-- **No credential ever reaches the browser.** Session credentials are
-  one-time, issued by OpenBao, and never rendered.
+- **No credential ever reaches the browser** (built for the API; design only
+  for remote sessions). The API never returns a password record or a secret
+  value. One-time remote-session credentials issued by OpenBao are design only,
+  because the console does not broker sessions yet.
 
 ## Verification
 
@@ -117,7 +134,8 @@ handler exists, and that no credential-shaped string is rendered. Run it with:
 npm test
 ```
 
-The suite exits with the number of failures, so CI gates on it
+The console API's authentication, roles and gate are covered by `npm test` in
+`platform/console/server`. Both exit non-zero on failure, so CI gates on them
 (`.github/workflows/validate.yml`).
 
 ## Credit

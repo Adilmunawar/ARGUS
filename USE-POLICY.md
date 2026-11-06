@@ -35,7 +35,7 @@ Permission is asked for and granted case by case. Each grant names who, what, fo
 
 ## How to ask
 
-Email **adilmunawarx@gmail.com** or open a discussion on GitHub with the subject *Argus permission request* and these five lines:
+Email **adilmunawarx@gmail.com** with the subject *Argus permission request* and these five lines:
 
 1. **Who you are.** Name, organisation, country, and a link that confirms it.
 2. **What you want to use.** The paths or sections, or "the whole repository".

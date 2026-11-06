@@ -73,7 +73,7 @@ Detail in `04-NETWORK-AND-SITES.md`. The security-relevant summary:
 
 | Layer | Control |
 |---|---|
-| Perimeter | OPNsense HA: default deny in; only 443/tcp+udp to the Caddy VIP; Suricata IPS with ET Pro-equivalent rules; CrowdSec bouncer; GeoIP deny for non-PK/GB/US/AE admin sources (configurable); WireGuard for S2S and admin |
+| Perimeter | OPNsense HA: default deny in; only 443/tcp+udp to the Caddy VIP; Suricata IPS with ET Pro-equivalent rules; CrowdSec bouncer; GeoIP deny for admin sources outside a configurable country allow-list; WireGuard for S2S and admin |
 | East-west | IPsec domain isolation: all traffic between platform hosts must be authenticated (Kerberos machine identity or AD CS cert) and AES-256-GCM encrypted; unauthenticated inbound dropped; per-service inbound rules list allowed *identities*, not IPs |
 | Segmentation | VLANs per zone; Hyper-V extended port ACLs on every VM NIC as defence in depth; storage VLAN non-routed |
 | Egress | no default route from PLATFORM/DATA/ML zones; explicit proxy with allow-list; DNS only to the DCs; DoH blocked |
@@ -84,7 +84,7 @@ Detail in `04-NETWORK-AND-SITES.md`. The security-relevant summary:
 
 | Data | At rest | In transit | Field level |
 |---|---|---|---|
-| SQL databases | BitLocker on `sql-01` disks + **TDE** (keys in AD CS-issued cert, backed up in the safe) | IPsec + TLS 1.3 (`Encrypt=True;TrustServerCertificate=False`) | CNIC, phone numbers: **Always Encrypted** columns (column master key in OpenBao transit via a custom provider), Phase 6 |
+| SQL databases | BitLocker on `sql-01` disks + **TDE** (keys in AD CS-issued cert, backed up in the safe) | IPsec + TLS 1.3 (`Encrypt=True;TrustServerCertificate=False`) | national identity numbers, phone numbers: **Always Encrypted** columns (column master key in OpenBao transit via a custom provider), Phase 6 |
 | PostgreSQL | BitLocker | IPsec + TLS | `pgcrypto` for PII in `argus_geo` |
 | Object storage | SeaweedFS volume encryption + BitLocker | TLS from Caddy-fronted S3 endpoint; IPsec | applicant photos: OpenBao transit encryption before upload |
 | Backups | encrypted (SQL `ENCRYPTION` clause with AD CS cert; Kopia AES-256; wal-g) | TLS | - |
@@ -105,7 +105,7 @@ Detail in `04-NETWORK-AND-SITES.md`. The security-relevant summary:
 | Kubernetes-equivalent: Service Fabric events | SF EventStore → Alloy → Loki | Grafana | 400 d |
 | Console actions, reconciler applies | `argus_console_events` + Loki | console audit UI | forever |
 
-**Rules that page** (Alertmanager → WhatsApp, on-call rota): new local admin created; Tier 0 group change outside the console; WDAC block event on a production host; Sysmon event 1 with an unsigned parent on a server; LSASS access; Kerberoast pattern; backup age > 30 min; OpenBao sealed; AG not synchronising; Suricata high-severity; CrowdSec ban of an internal IP; Wazuh FIM change under `C:\Argus\` or `/etc`.
+**Rules that page** (Alertmanager → chat and SMS, on-call rota): new local admin created; Tier 0 group change outside the console; WDAC block event on a production host; Sysmon event 1 with an unsigned parent on a server; LSASS access; Kerberoast pattern; backup age > 30 min; OpenBao sealed; AG not synchronising; Suricata high-severity; CrowdSec ban of an internal IP; Wazuh FIM change under `C:\Argus\` or `/etc`.
 
 **Response:** runbooks in `docs/runbooks/` (`sec-01-suspected-compromise.md` isolates a host by moving its VM NIC to the QUARANTINE VLAN through the console; `sec-02-credential-leak.md` revokes OpenBao leases and rotates the gMSA; `sec-03-ransomware.md` freezes S3 buckets and starts restore from Site B). Blameless post-mortem within 5 working days, committed.
 
@@ -131,5 +131,5 @@ Nothing reaches a server that was not built from a signed commit, on a locked-do
 
 - **A service mesh**: IPsec is the mesh.
 - **A separate WAF appliance**: Coraza in Caddy is OWASP CRS; a hardware WAF is a Phase 7 question if the billing product grows.
-- **A commercial EDR**: Sysmon + Wazuh + Defender ASR cover the detections; Defender for Endpoint is a licensing decision for the owner, easily added.
+- **A commercial EDR**: Sysmon + Wazuh + Defender ASR cover the detections; Defender for Endpoint is a licensing decision for the decision owner, easily added.
 - **A hardware HSM**: recommended (YubiHSM 2 is ~$650 and holds the code-signing and CA keys); recorded in `08-OPEN-QUESTIONS.md`.

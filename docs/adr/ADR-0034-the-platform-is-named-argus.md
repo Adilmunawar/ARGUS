@@ -1,6 +1,6 @@
 # ADR-0034: The platform is named Argus
 
-**Status:** Accepted (8 September 2026)
+**Status:** Accepted · **Date:** 2026-09-08
 
 ## Context
 

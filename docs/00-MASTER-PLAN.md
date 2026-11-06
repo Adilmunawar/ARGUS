@@ -4,7 +4,9 @@
 
 ## 1. What we are building
 
-A private cloud, owned and operated by the organisation, on Windows Server 2025 at two sites, that provides every capability the company currently rents from AWS and several it cannot afford to rent, most importantly GPUs and locally served satellite imagery, with a security posture rooted in hardware and evidenced continuously.
+Argus is a reference design for a mid-sized organisation that runs a handful of line-of-business applications (the samples here are Orders, Billing and Maps) and an ML workload, and wants to move them off AWS onto hardware it owns. The target is a private cloud on Windows Server 2025 at two sites that provides every capability the organisation rents from AWS today and several it cannot afford to rent, most importantly GPUs and locally served satellite imagery for the ML workload, with a security posture rooted in hardware and evidenced continuously.
+
+This is a plan. What of it runs today, and against what, is in `09-VALIDATION-STATUS.md`.
 
 It is **not** a copy of AWS. It is the fourteen capabilities the organisation uses, built well, on one operating system the team already runs, designed so the fifteenth is a pull request.
 
@@ -40,11 +42,11 @@ It is **not** a copy of AWS. It is the fourteen capabilities the organisation us
 | 10 | Scheduled / event-driven jobs | Lambda / EventBridge / Step Functions | Azure Functions host + NATS + Dagster | 0011, 0010 |
 | 11 | Queues / events | SQS / SNS | NATS JetStream | 0010 |
 | 12 | Cache | ElastiCache | Garnet | 0009 |
-| 13 | Observability | CloudWatch / X-Ray | Prometheus, Grafana, Loki, Tempo-less OTel traces in Grafana, Alertmanager → WhatsApp | 0019 |
+| 13 | Observability | CloudWatch / X-Ray | Prometheus, Grafana, Loki, Tempo-less OTel traces in Grafana, Alertmanager → chat and SMS | 0019 |
 | 14 | CI/CD, artefacts, code | CodePipeline / ECR / CodeCommit | GitHub Actions self-hosted + Forgejo mirror; signed `.sfpkg` in S3; first-party reconciler | 0024, 0023, 0006 |
 | + | Satellite catalogue & tiles | (none) | Sentinel COG mirror, pgstac, TiTiler, Martin | 0028 |
 | + | Security ops | GuardDuty / Security Hub / Inspector | Sysmon + WEF + Wazuh, Defender ASR, WDAC, Falco-equivalent via Sysmon rules, kube-bench-equivalent via Wazuh SCA/CIS | 0014, 0018 |
-| + | Console | AWS Console | Argus Console (.NET 10 + Next.js) + Windows Admin Center + Grafana | 0021, 0022 |
+| + | Console | AWS Console | Argus Console (ES5 prototype and a Node API today, ADR-0035) + Windows Admin Center + Grafana | 0021, 0035 |
 
 ## 4. Reference topology
 
@@ -65,7 +67,7 @@ It is **not** a copy of AWS. It is the fourteen capabilities the organisation us
  │  SITE A: Hyper-V + S2D cluster  hv-01 hv-02 hv-03 (→05)   RDMA 25 GbE    │
  │                                                                            │
  │  Service Fabric cluster (5 nodes = 5 Windows Server Core VMs, 1 per host)  │
- │   ├─ argus-console      (API + Next.js)      ├─ orders-api/web/gateway (×3)   │
+ │   ├─ argus-console      (API + web UI)       ├─ orders-api/web/gateway (×3)   │
  │   ├─ argus-reconciler   (stateful)           ├─ billing-api  · maps-web         │
  │   ├─ caddy ×2                             ├─ functions-* (Azure Fn host)  │
  │   ├─ nats ×3 · garnet ×2 · openbao ×3     ├─ titiler · martin · ors       │
@@ -73,7 +75,7 @@ It is **not** a copy of AWS. It is the fourteen capabilities the organisation us
  │                                                                            │
  │  VMs (Shielded, Generation 2, TPM):                                        │
  │   dc-01 dc-02 · adfs-01 · ca-issuing-01 · sql-01 (AG primary)             │
- │   pg-01 (PostGIS) · legacy-landsurvey-01 · seaweed-master/volume ×3       │
+ │   pg-01 (PostGIS) · legacy-app-01 · seaweed-master/volume ×3              │
  │   wac-01 · wef-01 · siem-01 (Ubuntu, Wazuh) · runner-01/02 (CI)            │
  │                                                                            │
  │  Bare metal: gpu-01 (Ubuntu, 2× L40S); Ray · MLflow · Dagster · Jupyter  │
@@ -106,8 +108,8 @@ Full detail with exit gates in `06-PHASES-AND-RUNBOOKS.md`.
 | Phase | Weeks | Delivers | Exit gate |
 |---|---|---|---|
 | 0 Foundation | 1-6 | Hardware, AD forest, Hyper-V/S2D cluster, Service Fabric, OpenBao, AD CS, WDAC in audit, Caddy, observability, WAC | Pull a node's power: nothing user-visible happens; `git push` deploys a hello-world SF app in < 10 min |
-| 1 Storage & backups | 7-10 | SeaweedFS both sites, survey pictures + rasters migrated, SQL backups to object-locked S3, first restore drill | Two immutable copies of every backup at two sites; signed drill report; AWS bucket read-only |
-| 2 Orders cutover | 11-16 | Orders API/web/gateway on SF, Garnet, NATS jobs, AD FS web login, legacy API on a VM, secrets rotated (D16), OTel | 99.9 % for 14 days from Site A; EC2 is a warm standby |
+| 1 Storage & backups | 7-10 | SeaweedFS both sites, uploaded images + rasters migrated, SQL backups to object-locked S3, first restore drill | Two immutable copies of every backup at two sites; signed drill report; AWS bucket read-only |
+| 2 Orders cutover | 11-16 | Orders API/web/gateway on SF, Garnet, NATS jobs, AD FS web login, legacy API on a VM, secrets rotated, OTel | 99.9 % for 14 days from Site A; EC2 is a warm standby |
 | 3 ML & geo | 15-24 | `gpu-01`, Ray/MLflow/Dagster/JupyterHub, Sentinel mirror + pgstac, TiTiler/Martin, self-hosted ORS, v5 classifier + SegFormer pipelines ported | One season's feature table regenerated on-prem and matching; training faster than current best |
 | 4 Database & apps | 20-30 | SQL Always On to Site B, mobile apps repointed to an Argus DNS name, reporting on the replica, first PostGIS migrations | No client references the AWS IP; AWS SQL box off 30 days without incident |
 | 5 DR & exit | 28-34 | Site B to full spec, quarterly DR drill, AWS account closed | Signed DR report; AWS invoice $0 |
@@ -126,17 +128,17 @@ Full detail with exit gates in `06-PHASES-AND-RUNBOOKS.md`.
 
 | Responsibility | Effort | Owner |
 |---|---|---|
-| Platform engineering | 1 FTE Phases 0-2, 0.5 after | new hire or contractor, then Adil / Riley |
-| On-call | rota of 3, weekly | Adil, Riley, +1 |
-| Security operations (Wazuh triage, WDAC catalogues, patch Tuesday) | 0.25 FTE | rotating; Claude Code with `argus-security` for triage |
+| Platform engineering | 1 FTE Phases 0-2, 0.5 after | new hire or contractor, then the platform lead and a second engineer |
+| On-call | rota of 3, weekly | three engineers |
+| Security operations (Wazuh triage, WDAC catalogues, patch Tuesday) | 0.25 FTE | rotating |
 | Backup and DR drills | 1 day/month + 2 days/quarter | platform owner |
-| Windows / SQL administration | 0.25 FTE | existing DBA |
+| Windows / SQL administration | 0.25 FTE | the existing database administrator |
 | Hardware | reactive; spares on the shelf | platform owner |
 
 ## 9. Cost, three years, rough
 
-Hardware ≈ $150 k (both tiers, `07-HARDWARE-AND-LICENSING.md`) · Windows Server Datacenter + SQL Standard + CALs ≈ $35-55 k · one platform FTE locally ≈ $30-45 k/yr · power and connectivity ≈ $10 k/yr. **≈ $330-400 k over three years**, against an AWS estimate of $150-250 k for the *current* footprint plus GPU hours the company is not buying because they are too expensive. The financial case is reasonable; the capability and control case is the reason.
+The one cost table is in [`07-HARDWARE-AND-LICENSING.md`](07-HARDWARE-AND-LICENSING.md#three-year-total-both-tiers): hardware for both tiers, licences, and power and connectivity, with staffing left to local rates. The figures are list-price estimates, not quotes. The case for the design is capability and control; on cost alone a small AWS footprint is cheaper.
 
 ## 10. The hybrid checkpoint
 
-After Phase 3 the company has local GPUs, local imagery, local S3, sovereign CI, hardware-rooted security and real observability, and AWS is down to one Windows box and one SQL Server. Stopping there is a legitimate end state that never touches the surveyor phones. Phase 4 is the decision point, and it is the owner's.
+After Phase 3 the organisation has local GPUs, local imagery, local S3, sovereign CI, hardware-rooted security and real observability, and AWS is down to one Windows box and one SQL Server. Stopping there is a legitimate end state that never touches the mobile apps. Phase 4 is the decision point, and it belongs to the decision owner.

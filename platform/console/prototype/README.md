@@ -1,6 +1,6 @@
 # Console prototype
 
-A working prototype of the Argus Console. Open `index.html` in any browser: no build, no server, no network.
+A working prototype of the Argus Console. Open `index.html` in any browser (`start index.html` on Windows, `open` on macOS, `xdg-open` on Linux): no build, no server, no network. Opened that way it runs on the bundled sample dataset; served by the console API in `../server` it reads the live stack. [ADR-0035](../../../docs/adr/ADR-0035-the-console-as-built.md) records why it is built this way.
 
 ```
 index.html            the shell: navigation, top bar, session drawer
@@ -12,6 +12,8 @@ js/ui.js              the component library
 js/app.js             routing, command palette, dialogs, focus, elevation
 js/screens/*.js       one file per section
 tests/run-tests.js    the property suite
+tests/live.js         the live suite: the prototype served by the console API over http
+tests/live-screens/   one module of live checks per screen wired to the API
 tests/sandbox.js      the same console across nine viewport, theme and density environments
 tests/stress.js       the performance and retention budgets
 ```
@@ -20,15 +22,20 @@ The prototype uses classic scripts, not modules, because ES modules are blocked 
 
 ## Running the tests
 
+From the repository root:
+
 ```bash
 npm ci
 npx playwright install chromium
-node platform/console/prototype/tests/run-tests.js
+npm test                 # property suite, 423 assertions
+npm run test:live        # live suite, 386 checks; needs npm ci in platform/console/server
+npm run test:sandbox     # nine environments, 125 checks
+npm run test:stress      # performance and retention budgets
 ```
 
-The exit code is the number of failures, so CI can gate on it.
+Each exits with the number of failures, so CI gates on it. CI runs all four on every push.
 
-Every suite runs in headless Chromium against the real rendered DOM. The checks cover:
+Every suite runs in headless Chromium against the real rendered DOM. The property suite covers:
 
 * the shell booting and every screen registering;
 * every route and deep link resolving;
@@ -51,11 +58,11 @@ The security suite reads the source rather than the DOM, because the property th
 Served by the console API, the same files run in live mode. The API answers only to a signed-in operator, so the console opens with a sign-in dialog, and the operator pill, the audit actor and the data source pill all follow the session the API holds. A read that comes back 401, because the session idled out, brings the dialog back; signing out ends the session and clears the cookie.
 
 ```bash
-cd platform/compose && pwsh -File ./bootstrap.ps1
-docker compose up -d
+node platform/compose/stack.js bootstrap
+node platform/compose/stack.js up --wait
 ```
 
-Then open http://127.0.0.1:8787 and sign in as the operator the bootstrap wrote into `secrets/operators.json`, with the password in `secrets/console_operator_password`. The live suite proves this path on every push without the stack: it starts the API with a temporary operator and drives the sign-in, the fifteen screens, a reload, an expired session and a sign-out through headless Chromium over http:
+Then open http://127.0.0.1:8787 and sign in as `argus-admin`, with the password in `platform/compose/secrets/console_operator_password` ([the compose README](../../compose/README.md) has the details). Without Docker, start the API alone with an operator file, as the [repository README](../../../README.md#quick-start) shows. The live suite proves this path on every push without the stack: it starts the API with a temporary operator and drives the sign-in, the fifteen screens, a reload, an expired session and a sign-out through headless Chromium over http:
 
 ```bash
 node platform/console/prototype/tests/live.js
@@ -65,15 +72,19 @@ node platform/console/prototype/tests/live.js
 
 Every screen in the sidebar, and the interaction rules from [the console design](../../../docs/10-CONSOLE-DESIGN.md):
 
-* **Every write is a pull request.** Buttons say *Propose*, and the response shows the reconciler's plan and the blast radius before anything is applied. The two exceptions that run live, quarantine and revoke, both page security.
-* **Recorded, credential free browser RDP.** The Connect tab requests elevation, states that OpenBao issues a one time credential the operator never sees, and opens a session in a drawer that survives navigation.
+* **Every write is a pull request.** Buttons say *Propose*, and the response shows the reconciler's plan and the blast radius before anything is applied. In sample mode the plan and the pull request are simulated; there is no reconciler.
+* **Recorded, credential free browser RDP, as a design.** The Connect tab requests elevation, states that OpenBao would issue a one time credential the operator never sees, and opens a simulated session in a drawer that survives navigation. No remote session is made.
 * **Just in time elevation** with a reason, an approver, a maximum of four hours, and a countdown in the shell that you cannot miss.
 * **A command palette** (`Ctrl`/`Cmd` + `K`) over every resource, screen and action, plus `g` then letter jumps and `/` to filter.
 * **Compound audit filtering.** CloudTrail allows one attribute at a time; this allows several at once, which is the most complained about limitation in the product it replaces.
 
 ## What it is not
 
-There is no reconciler, no Guacamole and no write path. The screens that read the platform itself (data, object storage, stack, security, system and logs) go through the console API when one is running and say so plainly when it is not, rather than inventing a number. The rest are still fixtures shaped by [the application infrastructure map](../../../docs/02-APPLICATION-INFRASTRUCTURE-MAP.md). Opened straight from the filesystem there is no API to reach, which is the state three of the four suites exercise; the live suite is the one that starts the API.
+There is no reconciler, no Guacamole brokering and no write path. Served by the API and signed in, all fifteen screens read a real source, the stack or the GitOps tree, and mark what this stack does not have as "Not in this stack"; no sample figure is shown in live mode. Opened from the filesystem, eleven screens run on the sample dataset, shaped by [the application infrastructure map](../../../docs/02-APPLICATION-INFRASTRUCTURE-MAP.md), and four (Data, Object storage, Services, System) have no fixtures and say there is nothing to read. Three of the four suites exercise that file:// state; the live suite is the one that starts the API.
+
+The console is read only. Actions (approve, grant, rotate, freeze, silence, incidents, tags, Undo) exist in sample mode and change only the dataset in the browser; the API has no write routes besides sign-in and sign-out.
+
+The visual language is specified in [the console design system](../../../docs/13-CONSOLE-DESIGN-SYSTEM.md).
 
 These tests prove the interface is sound. They prove nothing about the platform, which remains as [the validation status](../../../docs/09-VALIDATION-STATUS.md) describes it.
 

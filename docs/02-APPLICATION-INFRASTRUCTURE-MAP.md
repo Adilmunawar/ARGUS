@@ -1,6 +1,6 @@
 # Application ↔ infrastructure map
 
-Every application the organisation runs, traced down to the host, service identity, port, data store, bucket, secret, backup and alert that carries it. This is the document an on-call engineer opens at 3 a.m. It is generated from `platform/gitops/` in Phase 2 onward; until then it is maintained by hand and every change is a commit.
+Every application the reference organisation runs (Orders, Billing, Maps, an ML workload and the console), traced down to the host, service identity, port, data store, bucket, secret, backup and alert that carries it. This is the document an on-call engineer opens at 3 a.m. It is generated from `platform/gitops/` in Phase 2 onward; until then it is maintained by hand and every change is a commit.
 
 Conventions: `gMSA` names end in `$`; ports are TCP unless noted; "SF" = Service Fabric application; VMs are Shielded Generation 2 unless noted; zones are defined in `04-NETWORK-AND-SITES.md`.
 
@@ -43,7 +43,7 @@ Conventions: `gMSA` names end in `$`; ports are TCP unless noted; "SF" = Service
 | `pg-01` | A | 8 / 64 GB / OS 100 GB + data 1 TB | PostgreSQL 17 + PostGIS 3.5: `pgstac`, `argus_geo`, `argus_ml`, `argus_console_events` | `gmsa-pg$` | DATA 31 | `pg_basebackup` nightly + WAL via wal-g → `argus-backups`; streaming replica on `pg-02` (B) in Phase 5 |
 | `sw-master-01..03` | A | 4 / 16 GB / 100 GB + volume disks on S2D capacity tier (3 × 60 TB) | SeaweedFS master + volume + filer + S3 gateway, replication `001` | `gmsa-seaweed$` | DATA 31 | Volumes are the storage; `argus-backups` replicated to B |
 | `sw-b01` | B | 4 / 16 GB / 100 TB | SeaweedFS replica; object lock 90 d on `argus-backups` | `gmsa-seaweed$` | DATA-B | - |
-| `legacy-landsurvey-01` | A | 4 / 16 GB / 200 GB | The old LandSurveyApp API (IIS), until Orders OPEN-DECISIONS D22 is retired | `gmsa-legacy$` | PLATFORM 30 (restricted) | Hyper-V Replica; weekly WSB |
+| `legacy-app-01` | A | 4 / 16 GB / 200 GB | The Orders application's legacy API (IIS), kept until its last consumers move to `OrdersApi` | `gmsa-legacy$` | PLATFORM 30 (restricted) | Hyper-V Replica; weekly WSB |
 | `siem-01` | A | 8 / 32 GB / 1 TB | Ubuntu; Wazuh manager + indexer + dashboard; Loki long-term index | `svc-wazuh` (AD, SSSD) | SEC 12 | Kopia of indexes → `argus-backups`; Hyper-V Replica |
 | `guac-01` | A | 4 / 8 GB / 200 GB | Ubuntu; Apache Guacamole + `guacd`, the browser RDP/SSH/VNC gateway (ADR-0032); reachable only from the console API | `gmsa-guacamole$` (AD, SSSD) | PLATFORM 30 (restricted) | Rebuilt from IaC; recordings live in `argus-sessions` |
 | `wef-01` | A | 4 / 16 GB / 500 GB | Windows Event Forwarding collector; Grafana Alloy ships to Loki | `gmsa-wef$` | SEC 12 | Loki is the durable copy |
@@ -64,7 +64,7 @@ Conventions: `gMSA` names end in `$`; ports are TCP unless noted; "SF" = Service
 | `Loki` | 1 | 3100 | `gmsa-loki$` | `argus-logs` bucket for chunks | `/ready` | ingest errors |
 | `Grafana` | 2 | 3000 | `gmsa-grafana$` | AD FS OIDC, Prometheus, Loki, SQL (reporting on `sql-02`) | `/api/health` | - |
 | `OtelCollector` | 2 | 4317 gRPC, 4318 HTTP | `gmsa-otel$` | Loki, Prometheus, Grafana traces | `/` | queue full |
-| `Alertmanager` + `Apprise` | 2 | 9093, 8000 | `gmsa-alert$` | WhatsApp/Telegram/SMS gateway via egress proxy | `/-/healthy` | - |
+| `Alertmanager` + `Apprise` | 2 | 9093, 8000 | `gmsa-alert$` | chat and SMS gateway via egress proxy | `/-/healthy` | - |
 | `ArgusConsoleApi` | 3 | 5200 | `gmsa-console$` | SQL `ArgusConsole`, OpenBao, Git (Forgejo), NATS, SF client API | `/api/v1/health` | 5xx; reconcile lag |
 | `ArgusConsoleWeb` | 2 | 3200 | `gmsa-console$` | `ArgusConsoleApi` | `/` | - |
 | `ArgusReconciler` | 1 stateful (3 replicas) | 5210 | `gmsa-reconciler$` | Git, SF client API, WMI to `hv-*`, SeaweedFS admin, OpenBao, DSC | SF replica health | desired ≠ actual > 15 min |
@@ -80,14 +80,13 @@ Conventions: `gMSA` names end in `$`; ports are TCP unless noted; "SF" = Service
 | Component | Runs as | Instances | Port | Identity | Talks to | Secrets (OpenBao path) | SLO |
 |---|---|---|---|---|---|---|---|
 | `OrdersGateway` (YARP) | SF guest exe | 2 | 5140→ routes | `gmsa-orders$` | Caddy → this; `OrdersApi`, `OrdersWeb` |: (plain HTTP behind Caddy; cert-store lookup removed, ADR-0016) | 99.9 % |
-| `OrdersApi` (.NET 10) | SF guest exe | 3 | 5141 | `gmsa-orders$` | `sql-01` (Kerberos via gMSA, IPsec), Garnet, NATS, OpenBao (dynamic SQL creds), egress proxy → Anthropic, ORS (local), `legacy-landsurvey-01` | `kv/orders/jwt-signing-key`, `kv/orders/legacy-jwt`, `db/creds/orders-api` (1 h), `kv/orders/anthropic`, `kv/orders/ors` | p95 < 300 ms |
-| `OrdersWeb` (Next.js standalone) | SF guest exe | 2 | 3100 | `gmsa-orders$` | `OrdersApi` (server-side via `ORDERS_API_BASE`), egress proxy → Earth Engine | `kv/orders/ee-service-key` | - |
+| `OrdersApi` (.NET 10) | SF guest exe | 3 | 5141 | `gmsa-orders$` | `sql-01` (Kerberos via gMSA, IPsec), Garnet, NATS, OpenBao (dynamic SQL creds), egress proxy → Anthropic, ORS (local), `legacy-app-01` | `kv/orders/jwt-signing-key`, `kv/orders/legacy-jwt`, `db/creds/orders-api` (1 h), `kv/orders/anthropic`, `kv/orders/ors` | p95 < 300 ms |
+| `OrdersWeb` (Next.js standalone) | SF guest exe | 2 | 3100 | `gmsa-orders$` | `OrdersApi` (server-side via `ORDERS_API_BASE`) | - | - |
 | Hourly precompute (`GetDailyStatistics` stage-and-swap) | Azure Functions host, timer trigger | 1 | - | `gmsa-orders-jobs$` | `sql-01` | `db/creds/orders-jobs` | must complete < 20 min |
-| Shapefile ingest, exports, AI briefings | Azure Functions host, NATS trigger `argus.ingest.orders.*` | 2 | - | `gmsa-orders-jobs$` | `sql-01`, `argus-uploads`, `argus-artifacts` | as above | queue age < 5 min |
-| Survey images (`/map-qc/image`, 1.16 M files) | SeaweedFS `argus-uploads` | - | S3 | `gmsa-orders$` (read), `gmsa-orders-jobs$` (write) | - | `s3/creds/orders-pictures` (30 d rotating) | - |
-| Corporate survey pictures | SeaweedFS `argus-uploads/corporate/` | - | S3 | as above | | | |
+| File ingest, exports, AI summaries | Azure Functions host, NATS trigger `argus.ingest.orders.*` | 2 | - | `gmsa-orders-jobs$` | `sql-01`, `argus-uploads`, `argus-artifacts` | as above | queue age < 5 min |
+| Uploaded images (about a million small files, illustrative) | SeaweedFS `argus-uploads` | - | S3 | `gmsa-orders$` (read), `gmsa-orders-jobs$` (write) | - | `s3/creds/orders-pictures` (30 d rotating) | - |
 | Databases | `sql-01`: `orders_db` (main), `billing_db` (finance) | - | 1433 (IPsec, gMSA only) | `gmsa-sql$` | | | RPO 15 min |
-| Legacy exports + geojson (D22) | `legacy-landsurvey-01` (IIS) via Caddy path `/legacy/*` | 1 | 443 | `gmsa-legacy$` | `sql-01` | `kv/legacy/*` | best effort |
+| Legacy exports | `legacy-app-01` (IIS) via Caddy path `/legacy/*` | 1 | 443 | `gmsa-legacy$` | `sql-01` | `kv/legacy/*` | best effort |
 | Web login | AD FS OIDC (Phase 2); API also validates | | | | | | |
 | Mobile login | API-minted JWT, HMAC-SHA512 passwords (frozen, ADR-0030) | | | | | | |
 | Backups | SQL native → `argus-backups/sql/orders_db/` (lock 35 d) → Site B (lock 90 d); Kopia of `argus-uploads` → `argus-backups/kopia/pictures/` | | | `gmsa-backup$` (PUT only) | | | drill monthly |
@@ -102,7 +101,7 @@ Conventions: `gMSA` names end in `$`; ports are TCP unless noted; "SF" = Service
 | Mobile app (Expo) | phones | talks to `billing.example.com` via Caddy; certificate pinning to the Argus chain; repointed from AWS in Phase 4 |
 | Applicant images | `argus-uploads/billing/` | same bucket, own prefix, own S3 credential |
 
-### D.3 Maps (`Adilmunawar/Maps`, Next.js + Firebase)
+### D.3 Maps (`example-org/maps`, Next.js + Firebase)
 
 | Component | Runs as | Notes |
 |---|---|---|
@@ -118,12 +117,12 @@ Conventions: `gMSA` names end in `$`; ports are TCP unless noted; "SF" = Service
 | SegFormer-B5 land use (8 classes) | `gpu-01` (GPU) | Ray Train job from Dagster; checkpoints to `argus-ml/checkpoints/segformer/` | `argus-sentinel`, patches cache on local NVMe | prediction rasters → `argus-rasters/landuse/{aoi}/{season}.tif` | `svc-ml` |
 | Image segmentation (UNet-CBAM, HRNet-W48) | `gpu-01` (GPU) | Ray Train; `final_finetune.py` becomes a Dagster op | as above | `argus-rasters/imagery/` | `svc-ml` |
 | Boundary vectorisation (`boundary_to_polygons_ram_safe.py`) | `gpu-01` (CPU, Ray tasks per tile) | Dagster asset `region_polygons` | HRNet boundary rasters | `argus_geo.regions_candidate` (PostGIS), QA in Maps | `svc-ml` |
-| Change detection (per-region index drop) | `gpu-01` | Dagster sensor on `argus.sentinel.scene.landed` | `argus-sentinel`, `argus_geo.regions` | `argus_ml.change_events` → Orders dashboard harvest pace | `svc-ml` |
+| Change detection (per-region index drop) | `gpu-01` | Dagster sensor on `argus.sentinel.scene.landed` | `argus-sentinel`, `argus_geo.regions` | `argus_ml.change_events`, published on NATS for any subscriber | `svc-ml` |
 | Inference endpoint (region classifier) | `gpu-01`, Ray Serve | behind Caddy at `ml.example.com/v5/predict`, AD FS-protected | | | `svc-ml` |
 | Notebooks | `gpu-01`, JupyterHub | AD FS login; per-user GPU memory limits via Ray; `argus-ml` mounted | | | per user |
 | Backups | MLflow DB (`argus_ml`) via wal-g; `argus-ml` and `argus-rasters` via Kopia (weekly, since they are reproducible); `argus-sentinel` **not** backed up (re-pullable): documented exception | | | | `gmsa-backup$` |
 
-### D.5 the assistant (inside Orders)
+### D.5 The assistant (inside Orders)
 
 | Component | Notes |
 |---|---|
@@ -137,18 +136,20 @@ See `05-CONTROL-PLANE.md`. Database `ArgusConsole` on `sql-01`; events in `argus
 
 ## E. Data stores: summary
 
+The sizes are illustrative round figures for a mid-sized estate, chosen to size the hardware in `07-HARDWARE-AND-LICENSING.md`. They are not measurements of any real system.
+
 | Store | Engine | Host | Size (now → 3 y) | Owner identity | Backup | Lock |
 |---|---|---|---|---|---|---|
-| `orders_db` | SQL Server | `sql-01`/`sql-02` | ~600 GB → 1.5 TB | `gmsa-sql$` | 15 min log | - |
-| `billing_db` | SQL Server | same | ~50 GB | | | |
+| `orders_db` | SQL Server | `sql-01`/`sql-02` | 500 GB → 1.5 TB | `gmsa-sql$` | 15 min log | - |
+| `billing_db` | SQL Server | same | 50 GB | | | |
 | `ArgusConsole` | SQL Server | same | small | | | |
 | `pgstac`, `argus_geo`, `argus_ml`, `argus_console_events` | PostgreSQL | `pg-01` | 200 GB → 2 TB | `gmsa-pg$` | WAL continuous | |
-| `argus-uploads` | SeaweedFS | `sw-*` | ~1.2 TB → 3 TB | `gmsa-seaweed$` | Kopia weekly + daily incremental | - |
+| `argus-uploads` | SeaweedFS | `sw-*` | 1 TB → 3 TB | `gmsa-seaweed$` | Kopia weekly + daily incremental | - |
 | `argus-rasters` | SeaweedFS | | 2 TB → 10 TB | | Kopia monthly | |
 | `argus-sentinel` | SeaweedFS | | 5 TB → 30 TB | | none (re-pullable) | |
 | `argus-ml` | SeaweedFS | | 500 GB → 5 TB | | Kopia weekly | |
 | `argus-artifacts` | SeaweedFS | | small | | replicated | WORM 365 d |
-| `argus-backups` | SeaweedFS | A + B | 3.2 TB → 8 TB | `gmsa-backup$` (PUT) | is the backup | WORM 35 d (A), 90 d (B) |
+| `argus-backups` | SeaweedFS | A + B | 3 TB → 8 TB | `gmsa-backup$` (PUT) | is the backup | WORM 35 d (A), 90 d (B) |
 | `argus-logs` | SeaweedFS | | 1 TB → 4 TB | `gmsa-loki$` | replicated to B | WORM 400 d |
 
 ## F. External dependencies
@@ -156,9 +157,9 @@ See `05-CONTROL-PLANE.md`. Database `ArgusConsole` on `sql-01`; events in `argus
 | Dependency | Consumer | Egress route | Credential | Failure behaviour |
 |---|---|---|---|---|
 | Copernicus Data Space | Sentinel mirror | proxy allow-list `*.dataspace.copernicus.eu` | `kv/ml/cdse` | mirror lags; pipelines use last scene |
-| Google Earth Engine | `OrdersWeb` land monitoring | proxy allow-list `earthengine.googleapis.com` | `kv/orders/ee-service-key` | feature answers 503 (already coded) |
+| Google Earth Engine | ML pipelines, for archive scenes outside the local mirror | proxy allow-list `earthengine.googleapis.com` | `kv/ml/ee-service-key` | pipelines wait for the mirror |
 | Anthropic | `OrdersApi` | proxy allow-list `api.anthropic.com` | `kv/orders/anthropic` | vLLM fallback |
 | Let's Encrypt | Caddy | proxy | - | 90-day window; alert at 14 d |
 | GitHub | runners, Forgejo mirror | proxy | fine-grained PAT in `kv/ci/github` | Forgejo runs CI |
-| WhatsApp/Telegram/SMS gateway | Apprise | proxy | `kv/alerting/*` | email fallback via local SMTP |
+| Chat and SMS gateway | Apprise | proxy | `kv/alerting/*` | email fallback via local SMTP |
 | Windows Update / WSUS | all Windows | WSUS on `wac-01` | - | - |

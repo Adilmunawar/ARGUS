@@ -1,5 +1,7 @@
 # Console UX benchmark, test results, and the fix plan
 
+> **As of 8 September 2026 (prototype v2).** This is a dated record, kept as it was found. The console has since gained a live mode, a console API and a new design system ([docs/13](13-CONSOLE-DESIGN-SYSTEM.md)), so screen names, colours, counts and layouts below may no longer match the prototype. The current test suites and their counts are in the [README](../README.md#the-tests) and [docs/09](09-VALIDATION-STATUS.md).
+
 Written 8 September 2026 against prototype v2. Everything in the test section was executed, not reasoned about.
 
 ---
