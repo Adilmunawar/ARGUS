@@ -11,17 +11,9 @@ docker compose --profile parity up -d
 docker compose exec parity node src/runner.js --once
 ```
 
-The container's healthcheck polls `/healthz`, which only exists while the harness is serving, and the compose service passes no arguments. It therefore needs one of these two lines, which live in a file this directory does not own:
+The compose service sets `ARGUS_PARITY_SERVE=1`, so the container keeps serving `/healthz` and the latest report on 9781 and reruns every `ARGUS_PARITY_INTERVAL_MS`. `--once` on the `exec` above is what keeps a manual run from trying to bind 9781 a second time.
 
-```
-      ARGUS_PARITY_SERVE: "1"
-```
-
-```
-    command: ["node", "src/runner.js", "--serve"]
-```
-
-Without one of them the container performs a single run, exits, and the healthcheck never passes. `--once` on the `exec` above is what keeps a manual run from trying to bind 9781 a second time.
+The container runs from the console image (`argus/console-api`), which already carries the console's production `node_modules` at `/app/node_modules`; `NODE_PATH` points there and only this directory is mounted. No host `npm ci` is needed.
 
 Or on the Windows host, with the console's dependencies installed (`cd platform/console/server && npm ci`):
 
@@ -101,7 +93,7 @@ The JS SDK v3 defaults `requestChecksumCalculation` to `when_supported`, which s
 
 ## Presigned URLs
 
-`@aws-sdk/s3-request-presigner` is not a dependency of `platform/console/server`, and the parity container mounts that `node_modules` read only, so the harness signs its own presigned URLs in `src/presign.js` using `node:crypto` and nothing else. The implementation was verified to produce byte identical signatures to `@smithy/signature-v4` for GET, for PUT, and for a key containing `+`, a space and a non ASCII character with an additional signed header.
+`@aws-sdk/s3-request-presigner` is not a dependency of `platform/console/server`, and the parity container resolves its SDK from the console image's own `node_modules`, so the harness signs its own presigned URLs in `src/presign.js` using `node:crypto` and nothing else. The implementation was verified to produce byte identical signatures to `@smithy/signature-v4` for GET, for PUT, and for a key containing `+`, a space and a non ASCII character with an additional signed header.
 
 ## Adding a leg
 

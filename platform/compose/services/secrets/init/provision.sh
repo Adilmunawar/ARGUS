@@ -15,6 +15,7 @@ ROOT_FILE="$SEAL_DIR/root.token"
 STATUS_FILE="$SEAL_DIR/status.json"
 APPROLE_FILE="$SEAL_DIR/console-approle.env"
 SANDBOX_MARK="$SEAL_DIR/SANDBOX-UNSEAL-KEY-IS-ON-THIS-DISK.txt"
+PROVISIONED_FILE="$SEAL_DIR/provisioned.at"
 
 CEREMONY_SHARES=5
 CEREMONY_THRESHOLD=3
@@ -31,6 +32,7 @@ S_POLICIES=""
 S_DB="not configured"
 S_APPROLE="not issued"
 S_NOTES=""
+TOKEN_IS_EPHEMERAL=false
 
 log()  { echo "[bao-init] $*"; }
 warn() { echo "[bao-init] WARNING: $*"; }
@@ -49,7 +51,7 @@ sandbox_banner() {
 [bao-init] ╠══════════════════════════════════════════════════════════════════╣
 [bao-init] ║  The vault is sealed with ONE Shamir share, and that share is    ║
 [bao-init] ║  stored on THIS MACHINE, in the argus_openbao_seal volume, next  ║
-[bao-init] ║  to the raft it opens. So is the root token. Anybody who can     ║
+[bao-init] ║  to the raft it opens. Anybody who can                           ║
 [bao-init] ║  read that volume -- which is anybody with the Docker socket --  ║
 [bao-init] ║  owns every secret in this estate, with no ceremony and nobody   ║
 [bao-init] ║  to notice. A backup of this laptop is a backup of the keys.     ║
@@ -135,7 +137,23 @@ write_status() {
   sync 2>/dev/null
 }
 
+revoke_ephemeral() {
+  if [ "$TOKEN_IS_EPHEMERAL" = true ] && [ -n "${BAO_TOKEN:-}" ]; then
+    if bao token revoke -self >/dev/null 2>&1; then
+      log "root token revoked; none is left at rest or in the vault"
+    else
+      warn "could not revoke the root token this run used. Revoke it by hand: bao token revoke -self"
+    fi
+    BAO_TOKEN=""
+    TOKEN_IS_EPHEMERAL=false
+  fi
+  if [ -f "$ROOT_FILE" ]; then
+    rm -f "$ROOT_FILE" && log "removed the legacy root token file $ROOT_FILE"
+  fi
+}
+
 finish() {
+  revoke_ephemeral
   write_status
   log "status: $STATUS_FILE  (read it with: docker compose exec openbao-unseal cat $STATUS_FILE)"
   exit "$1"
@@ -445,7 +463,7 @@ the ceremony; see the bao-init log for the exact commands."
   if [ -f "$KEY_FILE" ]; then
     keep="$KEY_FILE.superseded-$(date -u +%Y%m%dT%H%M%SZ)"
     mv "$KEY_FILE" "$keep"
-    [ -f "$ROOT_FILE" ] && mv "$ROOT_FILE" "$ROOT_FILE.superseded-$(date -u +%Y%m%dT%H%M%SZ)"
+    rm -f "$ROOT_FILE" "$ROOT_FILE".superseded-*
     note "an unseal key was already on this volume but the vault is uninitialised, so the raft was rebuilt \
 without it. The old key is kept at $keep because it is still the only thing that could open an older \
 snapshot; delete it yourself once you are certain no such snapshot exists."
@@ -470,7 +488,9 @@ snapshot; delete it yourself once you are certain no such snapshot exists."
   fi
 
   printf '%s' "$unseal_key" > "$KEY_FILE"; chmod 0600 "$KEY_FILE"
-  printf '%s' "$root_token" > "$ROOT_FILE"; chmod 0600 "$ROOT_FILE"
+  BAO_TOKEN="$root_token"
+  export BAO_TOKEN
+  TOKEN_IS_EPHEMERAL=true
   sync 2>/dev/null
   rm -f "$SEAL_DIR/.init.json"
 
@@ -480,15 +500,15 @@ snapshot; delete it yourself once you are certain no such snapshot exists."
   fi
 
   cat > "$SANDBOX_MARK" <<'MARK'
-This volume contains the OpenBao UNSEAL KEY and the ROOT TOKEN, in clear text,
-on the same machine as the data they open.
+This volume contains the OpenBao UNSEAL KEY, in clear text, on the same
+machine as the data it opens. No root token is kept: the one created at
+initialisation provisions the vault and is revoked before bao-init exits.
 
 That is ARGUS_UNSEAL_MODE=sandbox. It exists so that one command produces a
 working system on a laptop. ADR-0013 requires 3-of-5 Shamir shares held by three
 named people, and this is not that.
 
   unseal.key   the single Shamir share. Whoever has it can unseal this vault.
-  root.token   unrestricted access to every secret, with no policy and no TTL.
 
 If you are reading this on anything other than a development laptop, treat every
 secret in this vault as compromised and re-key it. Copying this volume -- into a
@@ -496,7 +516,7 @@ backup, an image, or another machine -- copies the keys with it.
 MARK
   chmod 0600 "$SANDBOX_MARK"
 
-  log "initialised. unseal key and root token written to $SEAL_DIR (0600)"
+  log "initialised. unseal key written to $SEAL_DIR (0600); the root token is held in memory only"
   read_status
 fi
 
@@ -548,12 +568,29 @@ if [ "$S_SEALED" = true ]; then
   fi
 fi
 
-if [ -n "${BAO_TOKEN:-}" ]; then
+if [ "$TOKEN_IS_EPHEMERAL" = true ]; then
+  log "authenticating with the root token from initialisation (held in memory, revoked at the end of this run)"
+elif [ -n "${BAO_TOKEN:-}" ]; then
   log "authenticating with BAO_TOKEN from the environment"
 elif [ -f "$ROOT_FILE" ]; then
   BAO_TOKEN=$(cat "$ROOT_FILE")
   export BAO_TOKEN
-  log "authenticating with the stored root token (sandbox)"
+  TOKEN_IS_EPHEMERAL=true
+  log "authenticating with a legacy root token file; it is revoked and deleted at the end of this run"
+elif [ -f "$PROVISIONED_FILE" ]; then
+  S_PROVISIONED=true
+  log "already provisioned ($(cat "$PROVISIONED_FILE")). No root token is kept: the one that provisioned this vault"
+  log "was revoked before that run ended, so this run changes nothing. To re-apply policies or mounts, run"
+  log "pass two with a token you mint yourself, or reset the sandbox:"
+  log "  docker compose --profile secrets run --rm -e BAO_TOKEN bao-init"
+  note "provisioned earlier; no root token at rest, so nothing was re-applied on this run."
+  finish 0
+elif [ "$MODE" = sandbox ]; then
+  err "the vault is initialised and unsealed but was never fully provisioned, and no root token exists"
+  err "any more. A sandbox in this state cannot recover by itself: run node stack.js reset --yes, or run"
+  err "pass two with BAO_TOKEN set."
+  note "initialised but not provisioned, and no token is available."
+  finish 1
 else
   log "the vault is unsealed but this container holds no token, so it cannot provision anything."
   log "That is the expected state in ceremony mode. Run pass two:"
@@ -581,6 +618,7 @@ ensure_audit
 write_mode_marker
 
 S_PROVISIONED=true
+date -u +%Y-%m-%dT%H:%M:%SZ > "$PROVISIONED_FILE" && chmod 0644 "$PROVISIONED_FILE"
 log "provisioning complete."
 [ "$MODE" = sandbox ] && sandbox_banner
 finish 0

@@ -4,7 +4,7 @@ This directory holds the committed source of the Alertmanager configuration and 
 
 `alertmanager.yml.tmpl` is the committed source. It is **not** what Alertmanager reads.
 
-`docker-compose.yml` mounts `./secrets/alertmanager.yml` at `/etc/alertmanager/alertmanager.yml`. `bootstrap.ps1` renders this template into that path. `secrets/` is gitignored, so no credential ever reaches the repository.
+`docker-compose.yml` mounts `./secrets/alertmanager.yml` at `/etc/alertmanager/alertmanager.yml`. `node stack.js bootstrap` renders this template into that path. `secrets/` is gitignored, so no credential ever reaches the repository.
 
 ## Why a template and not environment variables
 
@@ -12,11 +12,11 @@ Alertmanager v0.28.1 performs **no environment expansion of any kind**. There is
 
 ## Placeholder syntax
 
-Placeholders are `@@NAME@@`. `bootstrap.ps1` resolves each one against a key of the same name in `.env` and substitutes it with a plain `String.Replace` (no escaping, no regex, no expression language). It refuses to write the file if any placeholder has no value or any `@@` survives.
+Placeholders are `@@NAME@@`. `node stack.js bootstrap` resolves each one against a key of the same name in `.env` and substitutes it with a plain `String.Replace` (no escaping, no regex, no expression language). It refuses to write the file if any placeholder has no value or any `@@` survives.
 
 `@@` was chosen over `${...}` so that a failed substitution is visibly broken in the rendered file rather than being mistaken for a shell variable that something else might expand later. It also keeps the CI grep for `${` meaningful as an independent second gate.
 
-Every placeholder here must have a matching key in `.env.example`, or `bootstrap.ps1` stops before writing anything at all, including `.env` and every other secret. Adding a placeholder to this template is therefore a change to `.env.example` as well.
+Every placeholder here must have a matching key in `.env.example`, or `node stack.js bootstrap` stops before writing anything at all, including `.env` and every other secret. Adding a placeholder to this template is therefore a change to `.env.example` as well.
 
 ## Placeholders
 
@@ -28,7 +28,7 @@ Every placeholder here must have a matching key in `.env.example`, or `bootstrap
   <tr><td><code>@@PLATFORM_EMAIL@@</code></td><td><code>PLATFORM_EMAIL</code></td><td>recipient for <code>severity: ticket</code></td></tr>
 </table>
 
-`bootstrap.ps1` maps `@@SMTP_SMARTHOST@@` to either `SMTP_SMARTHOST` or `SMTP_HOST`; the rest resolve by exact name.
+`node stack.js bootstrap` maps `@@SMTP_SMARTHOST@@` to either `SMTP_SMARTHOST` or `SMTP_HOST`; the rest resolve by exact name.
 
 ## Why TLS is not required on the SMTP leg
 

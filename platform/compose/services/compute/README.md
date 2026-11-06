@@ -22,13 +22,15 @@ Every other service in `docker-compose.yml` carries `security_opt: ["no-new-priv
 
 That exception matters more than it looks, because of what else this service holds:
 
-* `cap_add: SYS_ADMIN`
+* every capability dropped and a task driver's set added back, `SYS_ADMIN` among them
 * `pid: host`
 * `apparmor:unconfined`
 * the Docker socket, read and write
 * `/sys/fs/cgroup`, read and write
 
 Any one of those is close to root on the host. Together they are root on the host, and `no-new-privileges` would not meaningfully change that. That is the honest reason the exception costs little, rather than a claim that the service is confined.
+
+Nomad runs on its own network (`argus_nomad`), shared only with the console and `nomad-acl-init`, with a memory and pid limit. `nomad-acl-init` runs `nomad acl bootstrap` once, the first time the profile starts, and writes the management token to `platform/compose/secrets/nomad_token`, so the first caller to reach the API is this stack and not whoever gets there first. Anonymous requests are refused from then on. If that file is lost, the ACL system has to be reset by the procedure in the Nomad documentation before a new token can be issued. State lives in the `argus_nomad_data` volume unless `ARGUS_NOMAD_DATA` names a host path; set a host path identical inside and outside the container on a Linux host if jobs need the docker driver's allocation directories.
 
 The consequence is the part to keep in mind: **whoever can submit a Nomad job can take the host.** The profile is off by default, its ACL configuration is the real control surface, and nothing should enable this profile on a machine where that trust does not already hold. The parity profile's own rule (it observes, it cannot act, and it is deliberately given no Docker socket) is the contrast worth measuring this against.
 

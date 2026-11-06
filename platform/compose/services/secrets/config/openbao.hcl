@@ -30,3 +30,12 @@ max_lease_ttl = "24h"
 
 log_level  = "info"
 log_format = "standard"
+
+audit "file" "file" {
+  description = "Argus compose audit trail"
+
+  options {
+    file_path = "/openbao/logs/audit.log"
+    mode      = "0640"
+  }
+}

@@ -1,0 +1,45 @@
+services:
+
+  seaweed-master:
+    ports: ["127.0.0.1:${SEAWEED_MASTER_PORT:-9333}:9333"]
+
+  seaweed-volume:
+    ports: ["127.0.0.1:${SEAWEED_VOLUME_PORT:-8080}:8080"]
+
+  seaweed-filer:
+    ports: ["127.0.0.1:${SEAWEED_FILER_PORT:-8888}:8888"]
+
+  seaweed-s3:
+    ports: ["127.0.0.1:${SEAWEED_S3_PORT:-8333}:8333"]
+
+  postgres:
+    ports: ["127.0.0.1:${PG_PORT:-5432}:5432"]
+
+  garnet:
+    ports: ["127.0.0.1:${GARNET_PORT:-6379}:6379"]
+
+  nats:
+    ports:
+      - "127.0.0.1:${NATS_PORT:-4222}:4222"
+      - "127.0.0.1:${NATS_MONITOR_PORT:-8222}:8222"
+
+  openbao:
+    ports: ["127.0.0.1:${OPENBAO_PORT:-8200}:8200"]
+
+  prometheus:
+    ports: ["127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"]
+
+  alertmanager:
+    ports: ["127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"]
+
+  mailpit:
+    ports: ["127.0.0.1:${MAILPIT_PORT:-8025}:8025"]
+
+  nomad:
+    ports: ["127.0.0.1:${NOMAD_PORT:-4646}:4646"]
+
+  parity:
+    ports: ["127.0.0.1:${PARITY_PORT:-9781}:9781"]
+
+  parity-reference:
+    ports: ["127.0.0.1:${LOCALSTACK_PORT:-4566}:4566"]

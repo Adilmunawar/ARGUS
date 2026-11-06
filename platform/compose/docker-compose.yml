@@ -6,23 +6,35 @@ x-logging: &logging
 
 x-hardening: &hardening
   restart: unless-stopped
+  logging: *logging
   security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
 
 x-oneshot: &oneshot
   restart: "no"
   networks: [argus]
+  logging: *logging
   security_opt: ["no-new-privileges:true"]
   cap_drop: [ALL]
   pids_limit: 128
 
 x-seaweed: &seaweed
-  image: chrislusf/seaweedfs:${SEAWEEDFS_TAG:-3.97}
+  image: ${SEAWEEDFS_IMAGE:?run node stack.js bootstrap}
   restart: unless-stopped
   networks: [argus]
   logging: *logging
   security_opt: ["no-new-privileges:true"]
   cap_drop: [ALL]
+  read_only: true
+  tmpfs: ["/tmp:size=32m,mode=1777"]
   pids_limit: 256
+
+x-console-build: &console-build
+  context: ../console
+  dockerfile: server/Dockerfile
+  args:
+    NODE_IMAGE: ${NODE_IMAGE:?run node stack.js bootstrap}
+    ARGUS_VERSION: ${ARGUS_VERSION:-0.1.0}
 
 networks:
   argus:
@@ -35,6 +47,13 @@ networks:
     name: argus_socket
     driver: bridge
     internal: true
+  argus_targets:
+    name: argus_targets
+    driver: bridge
+    internal: true
+  argus_nomad:
+    name: argus_nomad
+    driver: bridge
 
 secrets:
   pg_superuser_password:  { file: ./secrets/pg_superuser_password }
@@ -42,12 +61,14 @@ secrets:
   grafana_admin_password: { file: ./secrets/grafana_admin_password }
   grafana_db_password:    { file: ./secrets/grafana_db_password }
   console_alert_token:    { file: ./secrets/console_alert_token }
+  console_metrics_token:  { file: ./secrets/console_metrics_token }
 
 volumes:
   argus_seaweed_master:    { name: argus_seaweed_master }
   argus_seaweed_volume:    { name: argus_seaweed_volume }
   argus_seaweed_filer:     { name: argus_seaweed_filer }
   argus_seaweed_conf:      { name: argus_seaweed_conf }
+  argus_seaweed_public:    { name: argus_seaweed_public }
   argus_pg_data:           { name: argus_pg_data }
   argus_garnet_data:       { name: argus_garnet_data }
   argus_nats_data:         { name: argus_nats_data }
@@ -55,14 +76,16 @@ volumes:
   argus_openbao_logs:      { name: argus_openbao_logs }
   argus_openbao_seal:      { name: argus_openbao_seal }
   argus_console_state:     { name: argus_console_state }
+  argus_console_audit:     { name: argus_console_audit }
   argus_prometheus_data:   { name: argus_prometheus_data }
-  argus_mailpit_data:
+  argus_mailpit_data:      { name: argus_mailpit_data }
   argus_alertmanager_data: { name: argus_alertmanager_data }
   argus_loki_data:         { name: argus_loki_data }
   argus_alloy_data:        { name: argus_alloy_data }
   argus_grafana_data:      { name: argus_grafana_data }
   argus_guac_recordings:   { name: argus_guac_recordings }
   argus_guac_drives:       { name: argus_guac_drives }
+  argus_nomad_data:        { name: argus_nomad_data }
   argus_azurite_data:      { name: argus_azurite_data }
   argus_parity_results:    { name: argus_parity_results }
 
@@ -72,19 +95,20 @@ services:
     <<: *seaweed
     restart: "no"
     container_name: argus-seaweed-config
-    cap_add: [CHOWN]
+    pids_limit: 64
     entrypoint: ["/bin/sh", "-euc"]
     command:
       - |
-        umask 077
-        : "${ARGUS_S3_ADMIN_SECRET:?empty}"
-        rm -f /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
+        umask 022
+        : "$${ARGUS_S3_ADMIN_SECRET:?empty}"
+        rm -f /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json /etc/seaweedfs/s3.json.tmp /public/s3-public.json /public/s3-public.json.tmp
         cat > /etc/seaweedfs/filer.toml <<'TOML'
         [leveldb2]
         enabled = true
         dir = "/data/filerldb2"
         TOML
-        cat > /etc/seaweedfs/s3.json <<JSON
+        umask 077
+        cat > /etc/seaweedfs/s3.json.tmp <<JSON
         { "identities": [
           { "name": "argus-admin",
             "credentials": [{ "accessKey": "argus-admin", "secretKey": "$${ARGUS_S3_ADMIN_SECRET}" }],
@@ -124,22 +148,27 @@ services:
             "actions": ["Admin"] }
         ] }
         JSON
-        chmod 0440 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
-        chown 0:1000 /etc/seaweedfs/filer.toml /etc/seaweedfs/s3.json
-        echo "wrote filer.toml and s3.json, readable by root and the console group"
+        mv /etc/seaweedfs/s3.json.tmp /etc/seaweedfs/s3.json
+        umask 022
+        sed -e 's/, *"secretKey": *"[^"]*"//' /etc/seaweedfs/s3.json > /public/s3-public.json.tmp
+        if grep -q secretKey /public/s3-public.json.tmp; then echo "s3-public.json still carries a secretKey; refusing to publish it" >&2; exit 1; fi
+        mv /public/s3-public.json.tmp /public/s3-public.json
+        chmod 0400 /etc/seaweedfs/s3.json
+        chmod 0444 /etc/seaweedfs/filer.toml /public/s3-public.json
+        echo "wrote filer.toml and s3.json (root only) and s3-public.json (names, access keys and actions, no secret keys)"
     environment:
-      ARGUS_S3_ADMIN_SECRET:       ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_CONSOLE_SECRET:     ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_APP_SECRET:         ${ARGUS_S3_APP_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_LOKI_SECRET:        ${ARGUS_S3_LOKI_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_GUAC_SECRET:        ${ARGUS_S3_GUAC_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_PARITY_SECRET:      ${ARGUS_S3_PARITY_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_PARITY_DENY_SECRET: ${ARGUS_S3_PARITY_DENY_SECRET:?run bootstrap.ps1}
-      ARGUS_S3_PARITY_ADMIN_SECRET: ${ARGUS_S3_PARITY_ADMIN_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_ADMIN_SECRET:       ${ARGUS_S3_ADMIN_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_CONSOLE_SECRET:     ${ARGUS_S3_CONSOLE_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_APP_SECRET:         ${ARGUS_S3_APP_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_LOKI_SECRET:        ${ARGUS_S3_LOKI_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_GUAC_SECRET:        ${ARGUS_S3_GUAC_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_PARITY_SECRET:      ${ARGUS_S3_PARITY_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_PARITY_DENY_SECRET: ${ARGUS_S3_PARITY_DENY_SECRET:?run node stack.js bootstrap}
+      ARGUS_S3_PARITY_ADMIN_SECRET: ${ARGUS_S3_PARITY_ADMIN_SECRET:?run node stack.js bootstrap}
     volumes:
       - argus_seaweed_conf:/etc/seaweedfs
+      - argus_seaweed_public:/public
     mem_limit: 64m
-    pids_limit: 64
 
   seaweed-master:
     <<: *seaweed
@@ -150,7 +179,6 @@ services:
       -volumeSizeLimitMB=${ARGUS_S3_VOLUME_SIZE_MB:-1024}
       -volumePreallocate=false -garbageThreshold=0.3 -metricsPort=9324
     volumes: [argus_seaweed_master:/data]
-    ports: ["127.0.0.1:9333:9333"]
     mem_limit: 256m
     stop_grace_period: 30s
     healthcheck:
@@ -159,6 +187,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+      start_interval: 2s
 
   seaweed-volume:
     <<: *seaweed
@@ -168,7 +197,6 @@ services:
       -port=8080 -dir=/data -max=${ARGUS_S3_MAX_VOLUMES:-60}
       -index=leveldb -dataCenter=site-a -rack=compose -metricsPort=9325
     volumes: [argus_seaweed_volume:/data]
-    ports: ["127.0.0.1:8080:8080"]
     mem_limit: 512m
     stop_grace_period: 60s
     depends_on:
@@ -179,6 +207,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+      start_interval: 2s
 
   seaweed-filer:
     <<: *seaweed
@@ -189,7 +218,6 @@ services:
     volumes:
       - argus_seaweed_filer:/data
       - argus_seaweed_conf:/etc/seaweedfs:ro
-    ports: ["127.0.0.1:8888:8888"]
     mem_limit: 384m
     stop_grace_period: 60s
     depends_on:
@@ -201,6 +229,7 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+      start_interval: 2s
 
   seaweed-s3:
     <<: *seaweed
@@ -210,27 +239,24 @@ services:
       -config=/etc/seaweedfs/s3.json -metricsPort=9327
     volumes:
       - argus_seaweed_conf:/etc/seaweedfs:ro
-    ports: ["127.0.0.1:8333:8333"]
     mem_limit: 256m
     depends_on:
       seaweed-filer:  { condition: service_healthy }
       seaweed-config: { condition: service_completed_successfully }
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:9327/metrics"]
+      test: ["CMD-SHELL", "wget -q -T 3 -O /dev/null http://127.0.0.1:8333/healthz"]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 25s
+      start_interval: 2s
 
   storage-init:
     <<: *oneshot
     image: argus/console-api:${ARGUS_VERSION:-0.1.0}
-    build:
-      context: ../console
-      dockerfile: server/Dockerfile
-      args:
-        NODE_TAG: ${NODE_TAG:-22-bookworm-slim}
+    build: *console-build
     container_name: argus-storage-init
+    init: true
     read_only: true
     tmpfs: ["/tmp:size=16m,mode=1777"]
     command: ["node", "/app/tools/init-object-storage.js"]
@@ -239,10 +265,10 @@ services:
       ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
       ARGUS_SEAWEED_MASTER_URL: http://seaweed-master:9333
       ARGUS_BUCKETS_FILE: /config/buckets.yaml
-      ARGUS_S3_IDENTITIES_FILE: /config/seaweed/s3.json
+      ARGUS_S3_IDENTITIES_FILE: /config/seaweed-public/s3-public.json
       ARGUS_STATE_DIR: /state
       AWS_ACCESS_KEY_ID: argus-admin
-      AWS_SECRET_ACCESS_KEY: ${ARGUS_S3_ADMIN_SECRET:?run bootstrap.ps1}
+      AWS_SECRET_ACCESS_KEY: ${ARGUS_S3_ADMIN_SECRET:?run node stack.js bootstrap}
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       ARGUS_PROFILE: ${ARGUS_PROFILE:-dev}
@@ -252,18 +278,22 @@ services:
     volumes:
       - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
       - argus_console_state:/state
-      - argus_seaweed_conf:/config/seaweed:ro
+      - argus_seaweed_public:/config/seaweed-public:ro
     mem_limit: 192m
     depends_on:
       seaweed-s3: { condition: service_healthy }
 
   postgres:
     <<: *hardening
-    image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
+    image: ${POSTGIS_IMAGE:?run node stack.js bootstrap}
     container_name: argus-postgres
     hostname: postgres
     networks: [argus]
-    logging: *logging
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    read_only: true
+    tmpfs:
+      - /var/run/postgresql:size=8m,mode=2777
+      - /tmp:size=64m,mode=1777
     shm_size: 256m
     stop_signal: SIGINT
     stop_grace_period: 120s
@@ -297,7 +327,6 @@ services:
     secrets: [pg_superuser_password]
     volumes:
       - argus_pg_data:/var/lib/postgresql/data
-    ports: ["127.0.0.1:${PG_PORT:-5432}:5432"]
     mem_limit: 1024m
     pids_limit: 512
     healthcheck:
@@ -306,29 +335,32 @@ services:
       timeout: 5s
       retries: 12
       start_period: 60s
+      start_interval: 2s
 
   pg-init:
     <<: *oneshot
-    image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
+    image: ${POSTGIS_IMAGE:?run node stack.js bootstrap}
     container_name: argus-pg-init
     pids_limit: 64
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     environment:
       PGHOST: postgres
       PGUSER: postgres
       PGDATABASE: postgres
       PGPASSWORD_FILE: /run/secrets/pg_superuser_password
-      ARGUS_PG_APP_PASSWORD:      ${ARGUS_PG_APP_PASSWORD:?run bootstrap.ps1}
-      ARGUS_PG_CONSOLE_PASSWORD:  ${ARGUS_PG_CONSOLE_PASSWORD:?run bootstrap.ps1}
-      ARGUS_PG_EXPORTER_PASSWORD: ${ARGUS_PG_EXPORTER_PASSWORD:?run bootstrap.ps1}
-      ARGUS_PG_GUAC_PASSWORD:     ${ARGUS_PG_GUAC_PASSWORD:?run bootstrap.ps1}
-      ARGUS_PG_GRAFANA_PASSWORD:  ${ARGUS_PG_GRAFANA_PASSWORD:?run bootstrap.ps1}
-      ARGUS_PG_PARITY_PASSWORD:   ${ARGUS_PG_PARITY_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_APP_PASSWORD:      ${ARGUS_PG_APP_PASSWORD:?run node stack.js bootstrap}
+      ARGUS_PG_CONSOLE_PASSWORD:  ${ARGUS_PG_CONSOLE_PASSWORD:?run node stack.js bootstrap}
+      ARGUS_PG_EXPORTER_PASSWORD: ${ARGUS_PG_EXPORTER_PASSWORD:?run node stack.js bootstrap}
+      ARGUS_PG_GUAC_PASSWORD:     ${ARGUS_PG_GUAC_PASSWORD:?run node stack.js bootstrap}
+      ARGUS_PG_GRAFANA_PASSWORD:  ${ARGUS_PG_GRAFANA_PASSWORD:?run node stack.js bootstrap}
+      ARGUS_PG_PARITY_PASSWORD:   ${ARGUS_PG_PARITY_PASSWORD:?run node stack.js bootstrap}
     secrets: [pg_superuser_password]
     volumes:
       - ./sql:/sql:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - 'export PGPASSWORD="$$(cat $$PGPASSWORD_FILE)"; psql -v ON_ERROR_STOP=1 -f /sql/00-roles-and-databases.sql && psql -v ON_ERROR_STOP=1 -f /sql/10-extensions.sql && psql -v ON_ERROR_STOP=1 -f /sql/20-grants.sql && echo "pg-init complete"'
+      - 'export PGPASSWORD="$$(cat $$PGPASSWORD_FILE)"; i=0; until pg_isready -q -h postgres -p 5432 -U postgres; do i=$$((i+1)); [ $$i -ge 60 ] && { echo "postgres did not become ready in 120s" >&2; exit 1; }; sleep 2; done; psql -v ON_ERROR_STOP=1 -f /sql/00-roles-and-databases.sql && psql -v ON_ERROR_STOP=1 -f /sql/10-extensions.sql && psql -v ON_ERROR_STOP=1 -f /sql/20-grants.sql && echo "pg-init complete"'
     mem_limit: 128m
     depends_on:
       postgres: { condition: service_healthy }
@@ -336,17 +368,17 @@ services:
   garnet:
     <<: *hardening
     profiles: [cache]
-    image: ghcr.io/microsoft/garnet:${GARNET_TAG:-2.1.5}
+    image: ${GARNET_IMAGE:?run node stack.js bootstrap}
     container_name: argus-garnet
     hostname: garnet
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     command: ["--config-import-path=/etc/garnet/conf/garnet.conf"]
     volumes:
       - argus_garnet_data:/data
       - ./services/cache:/etc/garnet/conf:ro
-      - ./secrets/garnet:/etc/garnet/secrets:ro
-    ports: ["127.0.0.1:${GARNET_PORT:-6379}:6379"]
+      - ./secrets/garnet/users.acl:/etc/garnet/secrets/users.acl:ro
     mem_limit: ${GARNET_MEM_LIMIT:-768m}
     pids_limit: 256
     ulimits:
@@ -358,15 +390,17 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+      start_interval: 2s
 
   garnet-init:
     <<: *oneshot
     profiles: [cache]
-    image: valkey/valkey:${VALKEY_TAG:-9.1.2-alpine}
+    image: ${VALKEY_IMAGE:?run node stack.js bootstrap}
     container_name: argus-garnet-init
     pids_limit: 64
+    read_only: true
     environment:
-      GARNET_CONSOLE_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      GARNET_CONSOLE_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run node stack.js bootstrap}
     volumes:
       - ./services/cache/init.sh:/init.sh:ro
     entrypoint: ["/bin/sh", "/init.sh"]
@@ -377,21 +411,19 @@ services:
   nats:
     <<: *hardening
     profiles: [queues, parity]
-    image: nats:${NATS_TAG:-2.11.4-alpine}
+    image: ${NATS_IMAGE:?run node stack.js bootstrap}
     container_name: argus-nats
     hostname: nats
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     command: ["--config", "/etc/nats/nats-server.conf", "--name", "nats-1"]
     environment:
-      NATS_ARGUS_PASSWORD: ${NATS_ARGUS_PASSWORD:?run bootstrap.ps1}
-      NATS_AGENT_PASSWORD: ${NATS_AGENT_PASSWORD:?run bootstrap.ps1}
+      NATS_ARGUS_PASSWORD: ${NATS_ARGUS_PASSWORD:?run node stack.js bootstrap}
+      NATS_AGENT_PASSWORD: ${NATS_AGENT_PASSWORD:?run node stack.js bootstrap}
     volumes:
       - ./services/queues/nats-server.conf:/etc/nats/nats-server.conf:ro
       - argus_nats_data:/data
-    ports:
-      - "127.0.0.1:${NATS_PORT:-4222}:4222"
-      - "127.0.0.1:8222:8222"
     mem_limit: 512m
     pids_limit: 256
     stop_grace_period: 30s
@@ -401,17 +433,20 @@ services:
       timeout: 3s
       retries: 6
       start_period: 30s
+      start_interval: 2s
 
   nats-init:
     <<: *oneshot
     profiles: [queues]
-    image: natsio/nats-box:${NATS_BOX_TAG:-0.17.0}
+    image: ${NATS_BOX_IMAGE:?run node stack.js bootstrap}
     container_name: argus-nats-init
     pids_limit: 64
+    read_only: true
+    tmpfs: ["/tmp:size=8m,mode=1777"]
     environment:
       NATS_URL: nats://nats:4222
       NATS_USER: argus
-      NATS_PASSWORD: ${NATS_ARGUS_PASSWORD:?run bootstrap.ps1}
+      NATS_PASSWORD: ${NATS_ARGUS_PASSWORD:?run node stack.js bootstrap}
       ARGUS_NATS_REPLICAS: "1"
     volumes:
       - ./services/queues/init:/init:ro
@@ -423,36 +458,40 @@ services:
   openbao:
     <<: *hardening
     profiles: [secrets, parity]
-    image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
+    image: ${OPENBAO_IMAGE:?run node stack.js bootstrap}
     container_name: argus-openbao
     hostname: openbao
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     command: ["server", "-config=/etc/argus/config/openbao.hcl"]
     environment:
       BAO_ADDR: http://127.0.0.1:8200
       SKIP_CHOWN: "true"
+      SKIP_SETCAP: "true"
     volumes:
       - argus_openbao_data:/openbao/file
       - argus_openbao_logs:/openbao/logs
       - ./services/secrets/config:/etc/argus/config:ro
-    ports: ["127.0.0.1:${OPENBAO_PORT:-8200}:8200"]
     mem_limit: 256m
     pids_limit: 128
     healthcheck:
-      test: ["CMD-SHELL", "bao status >/dev/null 2>&1 || [ $$? -eq 2 ]"]
+      test: ["CMD-SHELL", "bao status >/dev/null 2>&1"]
       interval: 10s
       timeout: 3s
       retries: 6
-      start_period: 15s
+      start_period: 90s
+      start_interval: 3s
 
   bao-init:
+    <<: *oneshot
     profiles: [secrets]
-    image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
+    image: ${OPENBAO_IMAGE:?run node stack.js bootstrap}
     container_name: argus-bao-init
-    restart: "no"
     user: "0:0"
-    networks: [argus]
+    pids_limit: 64
+    read_only: true
+    tmpfs: ["/tmp:size=8m,mode=1777"]
     environment:
       BAO_ADDR: http://openbao:8200
       ARGUS_UNSEAL_MODE: ${ARGUS_UNSEAL_MODE:-sandbox}
@@ -462,19 +501,19 @@ services:
       - ../gitops/identity/openbao-policies:/etc/argus/policies:ro
     entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /etc/argus/init/provision.sh > /tmp/p.sh && exec /bin/sh /tmp/p.sh"]
     mem_limit: 128m
-    pids_limit: 64
-    security_opt: ["no-new-privileges:true"]
     depends_on:
       openbao: { condition: service_started }
 
   openbao-unseal:
+    <<: *hardening
     profiles: [secrets]
-    image: openbao/openbao:${OPENBAO_TAG:-2.6.2}
+    image: ${OPENBAO_IMAGE:?run node stack.js bootstrap}
     container_name: argus-openbao-unseal
-    restart: unless-stopped
     init: true
     user: "0:0"
     networks: [argus]
+    read_only: true
+    tmpfs: ["/tmp:size=8m,mode=1777"]
     environment:
       BAO_ADDR: http://openbao:8200
       ARGUS_UNSEAL_MODE: ${ARGUS_UNSEAL_MODE:-sandbox}
@@ -484,33 +523,30 @@ services:
     entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /etc/argus/init/unseal-loop.sh > /tmp/u.sh && exec /bin/sh /tmp/u.sh"]
     mem_limit: 64m
     pids_limit: 32
-    security_opt: ["no-new-privileges:true"]
     depends_on:
       openbao: { condition: service_started }
 
   console:
     <<: *hardening
     image: argus/console-api:${ARGUS_VERSION:-0.1.0}
-    build:
-      context: ../console
-      dockerfile: server/Dockerfile
-      args:
-        NODE_TAG: ${NODE_TAG:-22-bookworm-slim}
+    build: *console-build
     container_name: argus-console
-    networks: [argus, argus_socket]
-    logging: *logging
+    init: true
+    networks: [argus, argus_socket, argus_nomad]
     read_only: true
     tmpfs: ["/tmp:size=16m,mode=1777"]
-    cap_drop: [ALL]
     environment:
       TZ: ${TZ:-UTC}
       ARGUS_HOST: "0.0.0.0"
       ARGUS_PORT: "8787"
       ARGUS_ALLOW_WRITES: ${ARGUS_ALLOW_WRITES:-0}
+      ARGUS_ENVIRONMENT: ${ARGUS_ENVIRONMENT:-sandbox}
       ARGUS_WEB_ROOT: ../../prototype
       ARGUS_AUTH: session
       ARGUS_AUTH_OPERATORS_FILE: /config/operators.json
       ARGUS_AUTH_SECURE_COOKIES: ${ARGUS_AUTH_SECURE_COOKIES:-0}
+      ARGUS_ALLOWED_HOSTS: console:8787,127.0.0.1:${CONSOLE_PORT:-8787},localhost:${CONSOLE_PORT:-8787}
+      ARGUS_METRICS_TOKEN_FILE: /run/secrets/console_metrics_token
       ARGUS_DOCKER_PROXY_URL: ${ARGUS_DOCKER_PROXY_URL:-http://docker-socket-proxy:2375}
       ARGUS_SEAWEED_MASTER_URL: http://seaweed-master:9333
       ARGUS_SEAWEED_FILER_URL: http://seaweed-filer:8888
@@ -518,26 +554,27 @@ services:
       ARGUS_S3_REGION: ${ARGUS_S3_REGION:-us-east-1}
       ARGUS_BUCKETS_FILE: /config/buckets.yaml
       ARGUS_STATE_DIR: /state
+      ARGUS_AUDIT_DIR: /audit
       ARGUS_GITOPS_DIR: /config/gitops
       ARGUS_RUNBOOKS_DIR: /config/runbooks
-      ARGUS_S3_IDENTITIES_FILE: /config/seaweed/s3.json
+      ARGUS_S3_IDENTITIES_FILE: /config/seaweed-public/s3-public.json
       ARGUS_S3_ACCESS_KEY_ID: argus-console
       AWS_EC2_METADATA_DISABLED: "true"
-      ARGUS_S3_SECRET_ACCESS_KEY: ${ARGUS_S3_CONSOLE_SECRET:?run bootstrap.ps1}
+      ARGUS_S3_SECRET_ACCESS_KEY: ${ARGUS_S3_CONSOLE_SECRET:?run node stack.js bootstrap}
       AWS_REQUEST_CHECKSUM_CALCULATION: when_required
       AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
       ARGUS_PG_HOST: postgres
       ARGUS_PG_USER: argus_console
-      ARGUS_PG_PASSWORD: ${ARGUS_PG_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      ARGUS_PG_PASSWORD: ${ARGUS_PG_CONSOLE_PASSWORD:?run node stack.js bootstrap}
       ARGUS_GARNET_HOST: garnet
       ARGUS_GARNET_PORT: "6379"
       ARGUS_GARNET_USER: console
-      ARGUS_GARNET_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      ARGUS_GARNET_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run node stack.js bootstrap}
       ARGUS_GARNET_MEM_LIMIT_BYTES: ${ARGUS_GARNET_MEM_LIMIT_BYTES:-805306368}
       ARGUS_NATS_MONITOR_URL: http://nats:8222
       ARGUS_NATS_URL: nats://nats:4222
       ARGUS_NATS_USER: agent
-      ARGUS_NATS_PASSWORD: ${NATS_AGENT_PASSWORD:?run bootstrap.ps1}
+      ARGUS_NATS_PASSWORD: ${NATS_AGENT_PASSWORD:?run node stack.js bootstrap}
       ARGUS_OPENBAO_ADDR: http://openbao:8200
       ARGUS_UNSEAL_MODE: ${ARGUS_UNSEAL_MODE:-sandbox}
       ARGUS_PROM_URL: ${ARGUS_PROM_URL:-http://prometheus:9090}
@@ -547,34 +584,70 @@ services:
       ARGUS_PARITY_URL: ${ARGUS_PARITY_URL:-http://parity:9781}
       ARGUS_NOMAD_URL: ${ARGUS_NOMAD_URL:-http://nomad:4646}
       ARGUS_UPSTREAM_TIMEOUT_MS: ${ARGUS_UPSTREAM_TIMEOUT_MS:-8000}
+    secrets:
+      - source: console_metrics_token
+        target: console_metrics_token
     volumes:
       - ../gitops:/config/gitops:ro
       - ../gitops/storage/buckets.yaml:/config/buckets.yaml:ro
       - ./secrets/operators.json:/config/operators.json:ro
       - ../../docs/runbooks:/config/runbooks:ro
-      - argus_seaweed_conf:/config/seaweed:ro
+      - argus_seaweed_public:/config/seaweed-public:ro
       - argus_console_state:/state:ro
+      - argus_console_audit:/audit
     ports: ["127.0.0.1:${CONSOLE_PORT:-8787}:8787"]
     mem_limit: 320m
     pids_limit: 512
     depends_on:
       seaweed-s3:   { condition: service_healthy }
       storage-init: { condition: service_completed_successfully }
-
+      pg-init:      { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "node", "-e", "const h=require('node:http');const t=setTimeout(()=>process.exit(1),4000);t.unref();h.get('http://127.0.0.1:8787/api/health',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 6
       start_period: 20s
+      start_interval: 2s
+
+  docker-socket-proxy:
+    <<: *hardening
+    image: ${SOCKET_PROXY_IMAGE:?run node stack.js bootstrap}
+    container_name: argus-docker-socket-proxy
+    hostname: docker-socket-proxy
+    user: "0:0"
+    networks: [argus_socket]
+    read_only: true
+    command:
+      - -loglevel=warn
+      - -listenip=0.0.0.0
+      - -proxyport=2375
+      - -allowfrom=console,alloy
+      - -allowhealthcheck
+      - -shutdowngracetime=5
+      - -watchdoginterval=300
+      - -stoponwatchdog
+      - -allowGET=(/v1\.[0-9]+)?/(_ping|version|info|containers/json|containers/[a-zA-Z0-9_.-]+/(json|stats|logs)|events|networks)
+      - -allowHEAD=(/v1\.[0-9]+)?/(_ping|version|info|containers/json|containers/[a-zA-Z0-9_.-]+/(json|stats|logs)|events|networks)
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 32m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+      start_interval: 2s
 
   prometheus:
     <<: *hardening
     profiles: [observability]
-    image: prom/prometheus:${PROMETHEUS_TAG:-v3.5.0}
+    image: ${PROMETHEUS_IMAGE:?run node stack.js bootstrap}
     container_name: argus-prometheus
     networks: [argus]
-    logging: *logging
+    read_only: true
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -582,17 +655,18 @@ services:
       - --storage.tsdb.retention.size=${PROM_RETENTION_SIZE:-6GB}
       - --storage.tsdb.wal-compression
       - --web.listen-address=0.0.0.0:9090
-      - --web.enable-lifecycle
       - --query.timeout=30s
       - --query.max-samples=5000000
     environment:
       ARGUS_SITE: ${ARGUS_SITE:-site-a}
       ARGUS_ENVIRONMENT: ${ARGUS_ENVIRONMENT:-sandbox}
+    secrets:
+      - source: console_metrics_token
+        target: console_metrics_token
     volumes:
       - argus_prometheus_data:/prometheus
       - ./services/observability/prometheus:/etc/prometheus:ro
       - ../gitops:/gitops:ro
-    ports: ["127.0.0.1:9090:9090"]
     mem_limit: 1536m
     pids_limit: 256
     healthcheck:
@@ -601,14 +675,15 @@ services:
       timeout: 10s
       retries: 10
       start_period: 120s
+      start_interval: 3s
 
   alertmanager:
     <<: *hardening
     profiles: [observability]
-    image: prom/alertmanager:${ALERTMANAGER_TAG:-v0.28.1}
+    image: ${ALERTMANAGER_IMAGE:?run node stack.js bootstrap}
     container_name: argus-alertmanager
     networks: [argus]
-    logging: *logging
+    read_only: true
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
       - --storage.path=/alertmanager
@@ -617,7 +692,6 @@ services:
       - argus_alertmanager_data:/alertmanager
       - ./secrets/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     secrets: [console_alert_token]
-    ports: ["127.0.0.1:9093:9093"]
     mem_limit: 128m
     pids_limit: 128
     depends_on:
@@ -628,14 +702,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+      start_interval: 2s
 
   mailpit:
     <<: *hardening
     profiles: [observability]
-    image: axllent/mailpit:${MAILPIT_TAG:-v1.27}
+    image: ${MAILPIT_IMAGE:?run node stack.js bootstrap}
     container_name: argus-mailpit
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     environment:
       TZ: ${TZ:-UTC}
       MP_SMTP_BIND_ADDR: 0.0.0.0:1025
@@ -646,7 +722,6 @@ services:
       MP_SMTP_AUTH_ALLOW_INSECURE: "true"
     volumes:
       - argus_mailpit_data:/data
-    ports: ["127.0.0.1:8025:8025"]
     mem_limit: 128m
     pids_limit: 128
     healthcheck:
@@ -655,14 +730,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+      start_interval: 2s
 
   loki:
     <<: *hardening
     profiles: [observability]
-    image: grafana/loki:${LOKI_TAG:-3.5.0}
+    image: ${LOKI_IMAGE:?run node stack.js bootstrap}
     container_name: argus-loki
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     command: ["-config.file=/etc/loki/loki.yaml", "-config.expand-env=true"]
     environment:
       LOKI_RETENTION_DEFAULT: ${LOKI_RETENTION_DEFAULT:-360h}
@@ -678,14 +755,18 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+      start_interval: 3s
 
   alloy:
     <<: *hardening
     profiles: [observability]
-    image: grafana/alloy:${ALLOY_TAG:-v1.9.1}
+    image: ${ALLOY_IMAGE:?run node stack.js bootstrap}
     container_name: argus-alloy
+    hostname: alloy
+    user: "473:473"
     networks: [argus, argus_socket]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     command:
       - run
       - --server.http.listen-addr=0.0.0.0:12345
@@ -695,55 +776,32 @@ services:
     environment:
       DOCKER_HOST: tcp://docker-socket-proxy:2375
       LOKI_URL: http://loki:3100/loki/api/v1/push
+      ARGUS_SITE: ${ARGUS_SITE:-site-a}
+      ARGUS_ENVIRONMENT: ${ARGUS_ENVIRONMENT:-sandbox}
     volumes:
       - argus_alloy_data:/var/lib/alloy/data
       - ./services/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
     mem_limit: 256m
     pids_limit: 256
     depends_on:
-      loki: { condition: service_started }
-      docker-socket-proxy: { condition: service_started }
+      loki: { condition: service_healthy }
+      docker-socket-proxy: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/12345; printf \"GET /-/ready HTTP/1.0\\r\\n\\r\\n\" >&3; head -n 1 <&3 | grep -q \" 200 \"'"]
       interval: 20s
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  docker-socket-proxy:
-    <<: *hardening
-    profiles: [observability]
-    image: tecnativa/docker-socket-proxy:${SOCKET_PROXY_TAG:-v0.5.0}
-    container_name: argus-docker-socket-proxy
-    networks: [argus_socket]
-    logging: *logging
-    environment:
-      CONTAINERS: "1"
-      IMAGES: "1"
-      PING: "1"
-      VERSION: "1"
-      INFO: "1"
-      POST: "0"
-      EXEC: "0"
-      NETWORKS: "1"
-      VOLUMES: "0"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    mem_limit: 64m
-    pids_limit: 64
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2375/_ping >/dev/null || exit 1"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
+      start_interval: 3s
 
   grafana:
     <<: *hardening
     profiles: [observability]
-    image: grafana/grafana-oss:${GRAFANA_TAG:-12.0.2}
+    image: ${GRAFANA_IMAGE:?run node stack.js bootstrap}
     container_name: argus-grafana
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-argus-admin}
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
@@ -767,12 +825,12 @@ services:
     volumes:
       - argus_grafana_data:/var/lib/grafana
       - ./services/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-    ports: ["127.0.0.1:3000:3000"]
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3000}:3000"]
     mem_limit: 384m
     pids_limit: 512
     depends_on:
       prometheus: { condition: service_healthy }
-      loki:       { condition: service_started }
+      loki:       { condition: service_healthy }
       postgres:   { condition: service_healthy }
       pg-init:    { condition: service_completed_successfully }
     healthcheck:
@@ -781,14 +839,14 @@ services:
       timeout: 5s
       retries: 5
       start_period: 45s
+      start_interval: 3s
 
   node-exporter:
     <<: *hardening
     profiles: [observability]
-    image: prom/node-exporter:${NODE_EXPORTER_TAG:-v1.9.1}
+    image: ${NODE_EXPORTER_IMAGE:?run node stack.js bootstrap}
     container_name: argus-node-exporter
     networks: [argus]
-    logging: *logging
     command:
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
@@ -803,7 +861,6 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     read_only: true
-    cap_drop: [ALL]
     mem_limit: 64m
     pids_limit: 64
     healthcheck:
@@ -812,14 +869,14 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+      start_interval: 2s
 
   postgres-exporter:
     <<: *hardening
     profiles: [observability]
-    image: quay.io/prometheuscommunity/postgres-exporter:${PG_EXPORTER_TAG:-v0.17.1}
+    image: ${PG_EXPORTER_IMAGE:?run node stack.js bootstrap}
     container_name: argus-postgres-exporter
     networks: [argus]
-    logging: *logging
     command:
       - --auto-discover-databases
       - --exclude-databases=template0,template1
@@ -830,7 +887,6 @@ services:
       DATA_SOURCE_PASS_FILE: /run/secrets/pg_exporter_password
     secrets: [pg_exporter_password]
     read_only: true
-    cap_drop: [ALL]
     mem_limit: 96m
     pids_limit: 64
     healthcheck:
@@ -839,6 +895,7 @@ services:
       timeout: 8s
       retries: 3
       start_period: 20s
+      start_interval: 3s
     depends_on:
       postgres: { condition: service_healthy }
       pg-init:  { condition: service_completed_successfully }
@@ -846,35 +903,33 @@ services:
   garnet-exporter:
     <<: *hardening
     profiles: [observability]
-    image: oliver006/redis_exporter:${REDIS_EXPORTER_TAG:-v1.69.0-alpine}
+    image: ${REDIS_EXPORTER_IMAGE:?run node stack.js bootstrap}
     container_name: argus-garnet-exporter
     networks: [argus]
-    logging: *logging
     environment:
       REDIS_ADDR: redis://garnet:6379
       REDIS_USER: console
-      REDIS_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run bootstrap.ps1}
+      REDIS_PASSWORD: ${GARNET_CONSOLE_PASSWORD:?run node stack.js bootstrap}
       REDIS_EXPORTER_INCL_SYSTEM_METRICS: "false"
     read_only: true
-    cap_drop: [ALL]
     mem_limit: 96m
     pids_limit: 64
     healthcheck:
-      test: ["CMD", "/redis_exporter", "-version"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9121/metrics | grep -q '^redis_exporter_build_info' || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s
+      start_interval: 2s
 
   nats-exporter:
     <<: *hardening
     profiles: [observability]
-    image: natsio/prometheus-nats-exporter:${NATS_EXPORTER_TAG:-0.17.3}
+    image: ${NATS_EXPORTER_IMAGE:?run node stack.js bootstrap}
     container_name: argus-nats-exporter
     networks: [argus]
-    logging: *logging
     command: ["-port=7777", "-varz", "-connz", "-routez", "-healthz", "-jsz=all", "http://nats:8222"]
     read_only: true
-    cap_drop: [ALL]
     mem_limit: 96m
     pids_limit: 64
     healthcheck:
@@ -883,14 +938,16 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+      start_interval: 2s
 
   guacd:
     <<: *hardening
     profiles: [connect]
-    image: guacamole/guacd:${GUAC_TAG:-1.5.5}
+    image: ${GUACD_IMAGE:?run node stack.js bootstrap}
     container_name: argus-guacd
-    networks: [argus]
-    logging: *logging
+    networks: [argus, argus_targets]
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     environment:
       GUACD_LOG_LEVEL: info
     volumes:
@@ -907,14 +964,16 @@ services:
       timeout: 8s
       retries: 4
       start_period: 15s
+      start_interval: 2s
 
   guac-storage-init:
     <<: *oneshot
     profiles: [connect]
-    image: alpine:${ALPINE_TAG:-3.21}
+    image: ${ALPINE_IMAGE:?run node stack.js bootstrap}
     container_name: argus-guac-storage-init
     cap_add: [CHOWN, FOWNER]
     pids_limit: 32
+    read_only: true
     command:
       - sh
       - -c
@@ -933,10 +992,9 @@ services:
   guacamole:
     <<: *hardening
     profiles: [connect]
-    image: guacamole/guacamole:${GUAC_TAG:-1.5.5}
+    image: ${GUACAMOLE_IMAGE:?run node stack.js bootstrap}
     container_name: argus-guacamole
     networks: [argus]
-    logging: *logging
     environment:
       GUACD_HOSTNAME: guacd
       GUACD_PORT: "4822"
@@ -944,40 +1002,43 @@ services:
       POSTGRESQL_PORT: "5432"
       POSTGRESQL_DATABASE: guacamole_db
       POSTGRESQL_USER: guacamole_user
-      POSTGRESQL_PASSWORD: ${ARGUS_PG_GUAC_PASSWORD:?run bootstrap.ps1}
+      POSTGRESQL_PASSWORD: ${ARGUS_PG_GUAC_PASSWORD:?run node stack.js bootstrap}
       POSTGRESQL_AUTO_CREATE_ACCOUNTS: "false"
-      JSON_SECRET_KEY: ${GUAC_JSON_SECRET_KEY:?run bootstrap.ps1}
+      JSON_SECRET_KEY: ${GUAC_JSON_SECRET_KEY:?run node stack.js bootstrap}
       JSON_TRUSTED_NETWORKS: ${ARGUS_SUBNET:-172.28.0.0/16}
       EXTENSION_PRIORITY: json
       REMOTE_IP_VALVE_ENABLED: "true"
-      PROXY_ALLOWED_IPS_REGEX: ${ARGUS_SUBNET_REGEX:?run bootstrap.ps1}
+      PROXY_ALLOWED_IPS_REGEX: ${ARGUS_SUBNET_REGEX:?run node stack.js bootstrap}
     mem_limit: 768m
     pids_limit: 512
     expose: ["8080"]
     depends_on:
       postgres:  { condition: service_healthy }
       guac-init: { condition: service_completed_successfully }
-      guacd:     { condition: service_started }
+      guacd:     { condition: service_healthy }
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /guacamole/api/languages HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && timeout 8 head -c 256 <&3 | grep -qm1 '^HTTP/1\\.[01] 200'"]
       interval: 20s
       timeout: 10s
       retries: 5
       start_period: 120s
+      start_interval: 3s
 
   guac-init:
     <<: *oneshot
     profiles: [connect]
-    image: guacamole/guacamole:${GUAC_TAG:-1.5.5}
+    image: ${GUACAMOLE_IMAGE:?run node stack.js bootstrap}
     container_name: argus-guac-init
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
     environment:
       PGHOST: postgres
       PGUSER: guacamole_user
       PGDATABASE: guacamole_db
-      PGPASSWORD: ${ARGUS_PG_GUAC_PASSWORD:?run bootstrap.ps1}
+      PGPASSWORD: ${ARGUS_PG_GUAC_PASSWORD:?run node stack.js bootstrap}
       BREAKGLASS_USER: ${GUAC_BREAKGLASS_USER:-argus-breakglass}
-      BREAKGLASS_SALT_HEX: ${GUAC_BREAKGLASS_SALT_HEX:?run bootstrap.ps1}
-      BREAKGLASS_HASH_HEX: ${GUAC_BREAKGLASS_HASH_HEX:?run bootstrap.ps1}
+      BREAKGLASS_SALT_HEX: ${GUAC_BREAKGLASS_SALT_HEX:?run node stack.js bootstrap}
+      BREAKGLASS_HASH_HEX: ${GUAC_BREAKGLASS_HASH_HEX:?run node stack.js bootstrap}
     volumes:
       - ./services/connect/sql:/seed:ro
     entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /seed/init.sh > /tmp/i.sh && exec /bin/sh /tmp/i.sh"]
@@ -989,10 +1050,10 @@ services:
   target-ssh:
     <<: *hardening
     profiles: [targets]
-    image: lscr.io/linuxserver/openssh-server:${OPENSSH_TAG:-version-9.9_p2-r0}
+    image: ${OPENSSH_IMAGE:?run node stack.js bootstrap}
     container_name: argus-target-ssh
-    networks: [argus]
-    logging: *logging
+    networks: [argus_targets]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL, SYS_CHROOT, AUDIT_WRITE]
     environment:
       PUID: "1000"
       PGID: "1000"
@@ -1000,7 +1061,7 @@ services:
       USER_NAME: argusops
       SUDO_ACCESS: "false"
       PASSWORD_ACCESS: "true"
-      USER_PASSWORD: ${TARGET_SSH_PASSWORD:?run bootstrap.ps1}
+      USER_PASSWORD: ${TARGET_SSH_PASSWORD:?run node stack.js bootstrap}
     mem_limit: 128m
     pids_limit: 128
     expose: ["2222"]
@@ -1008,10 +1069,10 @@ services:
   target-rdp:
     <<: *hardening
     profiles: [targets]
-    image: lscr.io/linuxserver/rdesktop:${RDESKTOP_TAG:-ubuntu-xfce}
+    image: ${RDESKTOP_IMAGE:?run node stack.js bootstrap}
     container_name: argus-target-rdp
-    networks: [argus]
-    logging: *logging
+    networks: [argus_targets]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, FSETID, SETGID, SETUID, KILL, SYS_CHROOT, AUDIT_WRITE, NET_BIND_SERVICE]
     environment:
       PUID: "1000"
       PGID: "1000"
@@ -1023,24 +1084,27 @@ services:
 
   nomad:
     profiles: [compute]
-    image: hashicorp/nomad:${NOMAD_TAG:-1.11.3}
+    image: ${NOMAD_IMAGE:?run node stack.js bootstrap}
     container_name: argus-nomad
+    hostname: nomad
     restart: unless-stopped
-    networks: [argus]
+    networks: [argus_nomad]
     logging: *logging
     command: ["agent", "-config=/etc/nomad.d"]
     environment:
       NOMAD_ADDR: http://127.0.0.1:4646
     volumes:
-      - ${ARGUS_NOMAD_DATA:-/opt/argus/nomad/data}:${ARGUS_NOMAD_DATA:-/opt/argus/nomad/data}
+      - ${ARGUS_NOMAD_DATA:-argus_nomad_data}:/opt/argus/nomad/data
       - ./services/compute/nomad.d:/etc/nomad.d:ro
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
       - /var/run/docker.sock:/var/run/docker.sock
     cgroup: host
     pid: host
-    cap_add: ["SYS_ADMIN"]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, FSETID, KILL, SETGID, SETUID, SETPCAP, MKNOD, SYS_ADMIN, SYS_CHROOT, NET_BIND_SERVICE]
     security_opt: ["apparmor:unconfined"]
-    ports: ["127.0.0.1:4646:4646"]
+    mem_limit: 1024m
+    pids_limit: 1024
     stop_grace_period: 60s
     healthcheck:
       test: ["CMD-SHELL", "nomad operator api /v1/agent/health >/dev/null 2>&1 || exit 1"]
@@ -1048,17 +1112,60 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
+      start_interval: 3s
+
+  nomad-acl-init:
+    <<: *oneshot
+    profiles: [compute]
+    image: ${NOMAD_IMAGE:?run node stack.js bootstrap}
+    container_name: argus-nomad-acl-init
+    networks: [argus_nomad]
+    cap_add: [DAC_OVERRIDE]
+    pids_limit: 32
+    read_only: true
+    environment:
+      NOMAD_ADDR: http://nomad:4646
+    volumes:
+      - ./secrets/nomad_token:/out/nomad_token
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -u
+        if [ -s /out/nomad_token ]; then
+          if NOMAD_TOKEN="$$(cat /out/nomad_token)" nomad acl token self >/dev/null 2>&1; then
+            echo "nomad ACL already bootstrapped; secrets/nomad_token holds a valid management token"
+            exit 0
+          fi
+        fi
+        out=$$(nomad acl bootstrap -t '{{ .SecretID }}' 2>&1)
+        rc=$$?
+        if [ "$$rc" -eq 0 ] && [ -n "$$out" ]; then
+          printf '%s' "$$out" > /out/nomad_token
+          echo "nomad ACL bootstrapped; the management token is in secrets/nomad_token"
+          exit 0
+        fi
+        case "$$out" in
+          *"already done"*|*"bootstrap already"*)
+            echo "nomad ACL was bootstrapped earlier but secrets/nomad_token holds no valid token. Reset it with 'nomad acl bootstrap' after an ACL reset (see the compute README)." >&2
+            exit 1 ;;
+        esac
+        echo "nomad acl bootstrap failed (exit $$rc)" >&2
+        exit 1
+    mem_limit: 64m
+    depends_on:
+      nomad: { condition: service_healthy }
 
   azurite:
     <<: *hardening
     profiles: [compute]
-    image: mcr.microsoft.com/azure-storage/azurite:${AZURITE_TAG:-3.37.0}
+    image: ${AZURITE_IMAGE:?run node stack.js bootstrap}
     container_name: argus-azurite
     networks: [argus]
-    logging: *logging
+    read_only: true
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     command: ["azurite", "--location=/data", "--blobHost=0.0.0.0", "--queueHost=0.0.0.0", "--tableHost=0.0.0.0"]
     environment:
-      AZURITE_ACCOUNTS: "argus:${AZURITE_ACCOUNT_KEY:?run bootstrap.ps1}"
+      AZURITE_ACCOUNTS: "argus:${AZURITE_ACCOUNT_KEY:?run node stack.js bootstrap}"
     volumes:
       - argus_azurite_data:/data
     mem_limit: 512m
@@ -1069,24 +1176,26 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+      start_interval: 2s
 
   parity:
     <<: *hardening
     profiles: [parity]
-    image: node:${NODE_TAG:-22-bookworm-slim}
+    image: argus/console-api:${ARGUS_VERSION:-0.1.0}
+    build: *console-build
     container_name: argus-parity
     hostname: parity
     networks: [argus]
-    logging: *logging
     init: true
     user: "1000:1000"
     working_dir: /opt/argus/parity
     read_only: true
     tmpfs: ["/tmp:size=32m,mode=1777"]
-    cap_drop: [ALL]
+    entrypoint: []
     environment:
       TZ: ${TZ:-UTC}
-      NODE_PATH: /opt/argus/sdk
+      NODE_PATH: /app/node_modules
+      ARGUS_PARITY_SERVE: "1"
       ARGUS_PARITY_BIND: "0.0.0.0"
       ARGUS_PARITY_PORT: "9781"
       ARGUS_PARITY_INTERVAL_MS: "900000"
@@ -1099,11 +1208,11 @@ services:
       ARGUS_S3_WORM_RETAIN_SECONDS: "120"
       ARGUS_S3_FORBIDDEN_BUCKET: argus-parity-forbidden
       ARGUS_PARITY_ACCESS_KEY: argus-parity
-      ARGUS_PARITY_SECRET_KEY: ${ARGUS_S3_PARITY_SECRET:?run bootstrap.ps1}
+      ARGUS_PARITY_SECRET_KEY: ${ARGUS_S3_PARITY_SECRET:?run node stack.js bootstrap}
       ARGUS_PARITY_DENY_ACCESS_KEY: argus-parity-deny
-      ARGUS_PARITY_DENY_SECRET_KEY: ${ARGUS_S3_PARITY_DENY_SECRET:?run bootstrap.ps1}
+      ARGUS_PARITY_DENY_SECRET_KEY: ${ARGUS_S3_PARITY_DENY_SECRET:?run node stack.js bootstrap}
       ARGUS_PARITY_ADMIN_ACCESS_KEY: argus-parity-admin
-      ARGUS_PARITY_ADMIN_SECRET_KEY: ${ARGUS_S3_PARITY_ADMIN_SECRET:?run bootstrap.ps1}
+      ARGUS_PARITY_ADMIN_SECRET_KEY: ${ARGUS_S3_PARITY_ADMIN_SECRET:?run node stack.js bootstrap}
       ARGUS_PARITY_REPORT: /var/lib/argus/parity/latest.json
       ARGUS_PARITY_TIMEOUT_MS: "15000"
       ARGUS_PARITY_REFERENCE_ENDPOINT: ${ARGUS_PARITY_REFERENCE_ENDPOINT:-http://localstack:4566}
@@ -1113,33 +1222,32 @@ services:
       ARGUS_OPENBAO_ADDR: http://openbao:8200
     volumes:
       - ./services/parity:/opt/argus/parity:ro
-      - ../console/server/node_modules:/opt/argus/sdk:ro
       - argus_parity_results:/var/lib/argus/parity
-    ports: ["127.0.0.1:9781:9781"]
     command: ["node", "src/runner.js"]
     mem_limit: 384m
     pids_limit: 256
     depends_on:
       seaweed-s3:       { condition: service_healthy }
       nats:             { condition: service_healthy }
-      openbao:          { condition: service_started }
+      openbao:          { condition: service_healthy }
       parity-reference: { condition: service_healthy }
-      parity-pg:        { condition: service_started }
+      parity-pg:        { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "const h=require('node:http');const t=setTimeout(()=>process.exit(1),4000);t.unref();h.get('http://127.0.0.1:9781/healthz',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 180s
+      start_interval: 5s
 
   parity-reference:
     <<: *hardening
     profiles: [parity]
-    image: localstack/localstack:${LOCALSTACK_TAG:-4.14.0}
+    image: ${LOCALSTACK_IMAGE:?run node stack.js bootstrap}
     container_name: argus-parity-reference
     hostname: localstack
     networks: [argus]
-    logging: *logging
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID, KILL]
     environment:
       TZ: ${TZ:-UTC}
       SERVICES: s3
@@ -1152,8 +1260,7 @@ services:
     tmpfs:
       - /var/lib/localstack:size=512m
       - /tmp:size=256m
-    ports: ["127.0.0.1:4566:4566"]
-    mem_limit: 768m
+    mem_limit: 1536m
     pids_limit: 512
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:4566/_localstack/init/ready | grep -q '\"completed\": *true'"]
@@ -1161,21 +1268,24 @@ services:
       timeout: 5s
       retries: 20
       start_period: 90s
+      start_interval: 3s
 
   parity-pg:
     <<: *hardening
     profiles: [parity]
-    image: postgis/postgis:${POSTGIS_TAG:-17-3.5}
+    image: ${POSTGIS_IMAGE:?run node stack.js bootstrap}
     container_name: argus-parity-pg
     networks: [argus]
-    logging: *logging
     init: true
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     environment:
       TZ: ${TZ:-UTC}
       PGHOST: postgres
       PGDATABASE: argus_parity
       PGUSER: argus_parity
-      PGPASSWORD: ${ARGUS_PG_PARITY_PASSWORD:?run bootstrap.ps1}
+      PGPASSWORD: ${ARGUS_PG_PARITY_PASSWORD:?run node stack.js bootstrap}
       PGCONNECT_TIMEOUT: "10"
       ARGUS_PARITY_INTERVAL_S: "900"
     volumes:
@@ -1195,3 +1305,4 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+      start_interval: 5s

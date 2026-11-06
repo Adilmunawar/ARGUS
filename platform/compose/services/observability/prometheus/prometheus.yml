@@ -66,6 +66,17 @@ scrape_configs:
           tier: observability
           argus_profile: observability
 
+  - job_name: console
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/console_metrics_token
+    static_configs:
+      - targets: [console:8787]
+        labels:
+          tier: control
+          argus_profile: core
+
   - job_name: node
     scrape_interval: 30s
     static_configs:

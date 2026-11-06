@@ -95,14 +95,31 @@ loki.process "argus_redact" {
 		expression = "(?i)\\bspan[_-]?id[=:\"\\s]+(?P<span_id>[0-9a-f]{8,16})\\b"
 	}
 
-	stage.replace {
-		expression = "(?i)\\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key|authorization|auth[_-]?token|bearer|session[_-]?id|client[_-]?secret)\\s*[=:]\\s*(\"[^\"]*\"|'[^']*'|\\S+)"
-		replace    = "${1}=***REDACTED***"
+	stage.match {
+		selector            = "{service_name=\"docker-socket-proxy\"} !~ \"(?i)level=(warn|error)|denied|blocked|not allowed\""
+		pipeline_name       = "socket_proxy_access"
+		action              = "drop"
+		drop_counter_reason = "socket_proxy_access"
 	}
 
 	stage.replace {
-		expression = "(?i)\\bAuthorization:\\s*(Bearer|Basic)\\s+(\\S+)"
-		replace    = "Authorization: ${1} ***REDACTED***"
+		expression = "(?i)\\bAuthorization:\\s*(?:Bearer|Basic)\\s+(\\S+)"
+		replace    = "***REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)\"[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|authorization|cookie|session[_-]?id)[A-Za-z0-9_.-]*\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\""
+		replace    = "***REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)\"[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|authorization|cookie|session[_-]?id)[A-Za-z0-9_.-]*\"\\s*:\\s*(-?[0-9][0-9.eE+-]*|true|false)"
+		replace    = "***REDACTED***"
+	}
+
+	stage.replace {
+		expression = "(?i)\\b[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|authorization|session[_-]?id|bearer)[A-Za-z0-9_.-]*\\s*[=:]\\s*(\"[^\"]*\"|'[^']*'|[^\\s,;&\"']+)"
+		replace    = "***REDACTED***"
 	}
 
 	stage.replace {
@@ -121,8 +138,8 @@ loki.process "argus_redact" {
 	}
 
 	stage.replace {
-		expression = "(?i)://([^:@/\\s]+):([^@/\\s]+)@"
-		replace    = "://${1}:***REDACTED***@"
+		expression = "(?i)://[^:@/\\s]+:([^@/\\s]+)@"
+		replace    = "***REDACTED***"
 	}
 
 	stage.replace {
