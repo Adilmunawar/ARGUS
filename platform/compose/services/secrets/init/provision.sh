@@ -204,9 +204,11 @@ ensure_kv() {
   if mount_present argus-kv; then
     log "kv v2 at argus-kv/ : already enabled"
   else
-    bao secrets enable -path=argus-kv -version=2 kv >/dev/null 2>&1 \
-      && log "kv v2 at argus-kv/ : enabled" \
-      || { warn "could not enable kv at argus-kv/"; return 1; }
+    if bao secrets enable -path=argus-kv -version=2 kv >/dev/null 2>&1; then
+      log "kv v2 at argus-kv/ : enabled"
+    else
+      warn "could not enable kv at argus-kv/"; return 1
+    fi
   fi
   engine_note "argus-kv (kv v2)"
 }
@@ -215,9 +217,11 @@ ensure_transit() {
   if mount_present transit; then
     log "transit/ : already enabled"
   else
-    bao secrets enable transit >/dev/null 2>&1 \
-      && log "transit/ : enabled" \
-      || { warn "could not enable transit/"; return 1; }
+    if bao secrets enable transit >/dev/null 2>&1; then
+      log "transit/ : enabled"
+    else
+      warn "could not enable transit/"; return 1
+    fi
   fi
   engine_note "transit"
 }
@@ -226,9 +230,11 @@ ensure_database() {
   if mount_present database; then
     log "database/ : already enabled"
   else
-    bao secrets enable database >/dev/null 2>&1 \
-      && log "database/ : enabled" \
-      || { warn "could not enable database/"; return 1; }
+    if bao secrets enable database >/dev/null 2>&1; then
+      log "database/ : enabled"
+    else
+      warn "could not enable database/"; return 1
+    fi
   fi
   engine_note "database"
 
@@ -297,9 +303,11 @@ ensure_console_approle() {
   fi
 
   if ! auth_present approle; then
-    bao auth enable approle >/dev/null 2>&1 \
-      && log "approle auth : enabled" \
-      || { warn "could not enable the approle auth method"; S_APPROLE="not issued: approle auth could not be enabled"; return 1; }
+    if bao auth enable approle >/dev/null 2>&1; then
+      log "approle auth : enabled"
+    else
+      warn "could not enable the approle auth method"; S_APPROLE="not issued: approle auth could not be enabled"; return 1
+    fi
   fi
 
   bao write auth/approle/role/argus-console \
@@ -375,7 +383,7 @@ permanent warning while it is true."
   else
     w="Ceremony seal: $(sandbox_reason)."
   fi
-  bao kv put argus-kv/platform/unseal-mode \
+  if bao kv put argus-kv/platform/unseal-mode \
       fingerprint="$want" \
       mode="$MODE" \
       sandbox="$verdict" \
@@ -384,9 +392,11 @@ permanent warning while it is true."
       key_at_rest="$([ -f "$KEY_FILE" ] && echo true || echo false)" \
       adr=ADR-0013 \
       warning="$w" \
-      at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1 \
-    && log "kv marker argus-kv/platform/unseal-mode : written" \
-    || warn "could not write the kv mode marker"
+      at="$(date -u +%Y-%m-%dT%H:%M:%SZ)" >/dev/null 2>&1; then
+    log "kv marker argus-kv/platform/unseal-mode : written"
+  else
+    warn "could not write the kv mode marker"
+  fi
 }
 
 case "$MODE" in

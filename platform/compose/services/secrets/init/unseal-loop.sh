@@ -114,7 +114,7 @@ while true; do
     if [ "$state" != sealed-waiting ]; then
       log "SEALED. $threshold of $shares key holders must unseal it; this sidecar holds no key."
       log "  docker compose exec openbao bao operator unseal      (once per holder)"
-      state=sealed-waiting
+      state='sealed-waiting'
     fi
     nap "$POLL_OK"
     continue

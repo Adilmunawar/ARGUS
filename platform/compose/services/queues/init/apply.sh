@@ -93,7 +93,7 @@ create_stream() {
   name="$1"; subjects="$2"; retention="$3"; discard="$4"
   max_age="$5"; max_bytes="$6"; dupe="$7"; desc="$8"
 
-  subjects_json="$(printf '%s\n' $subjects | jq -R . | jq -s -c .)"
+  subjects_json="$(printf '%s' "$subjects" | jq -R -s -c 'split(" ") | map(select(length > 0))')"
   want="$(jq -n -c \
     --argjson subjects "$subjects_json" \
     --arg retention "$retention" \
