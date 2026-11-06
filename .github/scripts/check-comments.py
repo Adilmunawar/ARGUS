@@ -34,12 +34,12 @@ MARKERS = {
     ".conf": [HASH], ".hcl": [HASH, SLASH], ".tf": [HASH, SLASH], ".toml": [HASH],
     ".ps1": [HASH], ".psm1": [HASH], ".psd1": [HASH], ".sql": [DASH],
     ".example": [HASH], ".gitignore": [HASH], ".gitattributes": [HASH],
-    ".dockerignore": [HASH], ".css": [], ".jsonc": [SLASH],
+    ".dockerignore": [HASH], ".editorconfig": [HASH], ".css": [], ".jsonc": [SLASH],
     ".java": [SLASH], ".cs": [SLASH], ".alloy": [SLASH], ".tmpl": [HASH],
 }
 
 SHELL_LIKE = {".sh", ".bash", ".conf", ".yml", ".yaml", ".ps1", ".psm1", ".psd1", ".example",
-              ".gitignore", ".gitattributes", ".dockerignore", ".toml", "Dockerfile"}
+              ".gitignore", ".gitattributes", ".dockerignore", ".editorconfig", ".toml", "Dockerfile"}
 
 
 BLOCK_SCALAR = re.compile(r"^(\s*)(?:-\s+)?(?:[\w.$-]+\s*:\s*)?[|>][-+]?\d*\s*$")
@@ -58,6 +58,8 @@ def suffix_of(path):
         return ".example"
     if name == "garnet.conf":
         return ".jsonc"
+    if name.startswith(".") and name.count(".") == 1:
+        return name.lower()
     return pathlib.Path(path).suffix.lower()
 
 
@@ -197,6 +199,24 @@ SELF_TEST_STRIP = [
     (".sh", "uses: actions/checkout@" + "0" * 40 + " # v5.1.0\n", "uses: actions/checkout@" + "0" * 40 + "\n"),
 ]
 
+SELF_TEST_STRIP_NAMED = [
+    (".gitignore", "# local state\nnode_modules/\n", "node_modules/\n"),
+    ("platform/console/.dockerignore", "**/node_modules\n# build output\n**/*.log\n", "**/node_modules\n**/*.log\n"),
+    (".gitattributes", "# line endings\n* text=auto eol=lf\n", "* text=auto eol=lf\n"),
+    (".editorconfig", "# editors\nroot = true\n", "root = true\n"),
+]
+
+SELF_TEST_SUFFIX = [
+    (".gitignore", ".gitignore"),
+    ("platform/console/.dockerignore", ".dockerignore"),
+    (".gitattributes", ".gitattributes"),
+    (".editorconfig", ".editorconfig"),
+    ("platform/compose/.env.example", ".example"),
+    ("platform/console/server/Dockerfile", "Dockerfile"),
+    (".github/gitleaks.toml", ".toml"),
+    ("docs/README.md", ".md"),
+]
+
 
 def self_test():
     failures = []
@@ -208,11 +228,19 @@ def self_test():
         result = strip_text(source, suffix)
         if result != expected:
             failures.append(("did not strip a comment", suffix, source, result))
+    for name, expected in SELF_TEST_SUFFIX:
+        result = suffix_of(name)
+        if result != expected:
+            failures.append(("gave the wrong suffix", expected, name, result))
+    for name, source, expected in SELF_TEST_STRIP_NAMED:
+        result = strip_text(source, suffix_of(name))
+        if result != expected:
+            failures.append(("did not strip a comment", name, source, result))
     for why, suffix, source, result in failures:
         print(f"self-test {why} in a {suffix} file:")
         print(f"  before: {source!r}")
         print(f"  after:  {result!r}")
-    total = len(SELF_TEST) + len(SELF_TEST_STRIP)
+    total = len(SELF_TEST) + len(SELF_TEST_STRIP) + len(SELF_TEST_SUFFIX) + len(SELF_TEST_STRIP_NAMED)
     print(f"self-test: {total - len(failures)}/{total} samples stripped exactly as intended")
     return 1 if failures else 0
 

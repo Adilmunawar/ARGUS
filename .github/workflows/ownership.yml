@@ -14,8 +14,12 @@ jobs:
     permissions:
       pull-requests: write
     steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Close pull requests that are not from the owner
-        if: github.event.pull_request.user.login != 'Adilmunawar' && github.event.pull_request.user.login != 'dependabot[bot]'
+        if: github.event.pull_request.user.id != 127094634 && github.event.pull_request.user.id != 49699333
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}

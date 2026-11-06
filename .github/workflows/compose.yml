@@ -1,0 +1,121 @@
+name: compose
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'platform/compose/**'
+      - 'platform/console/**'
+      - 'platform/gitops/**'
+      - '.github/workflows/compose.yml'
+  pull_request:
+    paths:
+      - 'platform/compose/**'
+      - 'platform/console/**'
+      - 'platform/gitops/**'
+      - '.github/workflows/compose.yml'
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: compose-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  smoke:
+    name: Composed stack and the live suite against it
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            platform/console/server/package-lock.json
+
+      - name: Install the test dependencies
+        run: npm ci
+
+      - name: Install the console API dependencies
+        run: npm ci --omit=dev --no-audit --no-fund
+        working-directory: platform/console/server
+
+      - name: Resolve the Playwright version the lockfile pins
+        id: playwright-version
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright-version.outputs.version }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install the Chromium build and its system libraries
+        run: npx playwright install --with-deps chromium
+
+      - name: Generate the stack's secrets and environment
+        run: node platform/compose/stack.js bootstrap --ci
+
+      - name: Bring the stack up and wait for it to be healthy
+        run: node platform/compose/stack.js up --wait
+
+      - name: Report the stack's status
+        run: node platform/compose/stack.js status --json
+
+      - name: Live suite against the composed console
+        run: |
+          LIVE_TEST_SUBJECT="$(node -p "require('./platform/compose/secrets/operators.json').operators[0].subject")"
+          export LIVE_TEST_SUBJECT
+          node platform/console/prototype/tests/live.js
+        env:
+          LIVE_TEST_ORIGIN: http://127.0.0.1:8787
+          LIVE_TEST_PASSWORD_FILE: platform/compose/secrets/console_operator_password
+
+      - name: Collect the container logs
+        if: failure()
+        run: |
+          logs="${RUNNER_TEMP}/compose-logs"
+          mkdir -p "${logs}"
+          docker ps -a > "${logs}/containers.txt" 2>&1 || true
+          node platform/compose/stack.js logs --tail 5000 > "${logs}/compose.log" 2>&1 || true
+          for name in $(docker ps -a --filter label=com.docker.compose.project --format '{{.Names}}'); do
+            docker logs --timestamps "${name}" > "${logs}/${name}.log" 2>&1 || true
+          done
+
+      - name: Keep the container logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compose-logs
+          path: ${{ runner.temp }}/compose-logs
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Keep the live suite screenshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compose-live-screenshots
+          path: /tmp/argus-live-shots
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear the stack down with its volumes
+        if: always()
+        run: node platform/compose/stack.js down --volumes --yes

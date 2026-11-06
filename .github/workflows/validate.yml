@@ -27,11 +27,16 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
-      - run: pip install --disable-pip-version-check pyyaml jsonschema pglast python-hcl2 regress==2026.9.1
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+
+      - name: Install the hash-pinned checker dependencies
+        run: pip install --disable-pip-version-check --require-hashes -r .github/requirements-ci.txt
 
       - name: Secret scanner passes its own self-test
         run: python3 .github/scripts/scan-secrets.py --self-test
@@ -52,6 +57,9 @@ jobs:
 
       - name: No credential has ever been committed
         run: gitleaks git --no-banner --redact --config .github/gitleaks.toml --exit-code 1
+
+      - name: Ownership checker passes its own self-test
+        run: python3 .github/scripts/check-ownership.py --self-test
 
       - name: Licence, ownership and single-author invariants hold
         run: python3 .github/scripts/check-ownership.py
@@ -74,7 +82,10 @@ jobs:
       - name: Schema patterns are ECMA-262 regular expressions
         run: python3 .github/scripts/check-pattern-dialect.py
 
-      - name: GitOps specs validate against their schemas
+      - name: GitOps checker passes its own self-test
+        run: python3 .github/scripts/check-gitops.py --self-test
+
+      - name: GitOps specs validate against their schemas and each other
         run: python3 .github/scripts/check-gitops.py
 
       - name: Every compose bind mount exists in the repository
@@ -82,17 +93,17 @@ jobs:
 
       - name: Compose file resolves
         run: |
-          cp platform/compose/.env.example platform/compose/.env
+          node platform/compose/stack.js bootstrap --ci
           docker compose -f platform/compose/docker-compose.yml \
             --profile cache --profile queues --profile secrets --profile observability \
             --profile connect --profile compute --profile parity --profile targets \
             config -q
           rm platform/compose/.env
 
-  console:
-    name: Console prototype tests
+  lint:
+    name: JavaScript, Markdown and naming checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -101,10 +112,75 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '22'
           cache: 'npm'
+      - run: npm ci
+
+      - name: Private name guard passes its own self-test
+        run: node .github/scripts/check-identifying.js --self-test
+
+      - name: No private organisation, person, host or database is named
+        run: node .github/scripts/check-identifying.js
+
+      - name: JavaScript comment stripper passes its own self-test
+        run: node .github/scripts/check-comments.js --self-test
+
+      - name: JavaScript carries no comments
+        run: node .github/scripts/check-comments.js
+
+      - name: Link checker passes its own self-test
+        run: node .github/scripts/check-links.js --self-test
+
+      - name: Every relative link and anchor in Markdown resolves
+        run: node .github/scripts/check-links.js
+
+      - name: ESLint finds no unused, undefined, shadowed or redeclared names
+        run: npx --yes eslint@9.39.5 .
+
+      - name: No external requests in the console bundle
+        run: python3 .github/scripts/check-egress.py
+
+  console:
+    name: Console ${{ matrix.suite }} suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: a11y
+            script: run-tests.js
+            shots: /tmp/argus-console-shots
+          - suite: live
+            script: live.js
+            server: true
+            shots: /tmp/argus-live-shots
+          - suite: sandbox
+            script: sandbox.js
+            shots: /tmp/argus-sandbox-shots
+          - suite: stress
+            script: stress.js
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            platform/console/server/package-lock.json
       - run: npm ci
 
       - name: Resolve the Playwright version the lockfile pins
@@ -123,36 +199,13 @@ jobs:
       - name: Install the Chromium build and its system libraries
         run: npx playwright install --with-deps chromium
 
-      - name: Private name guard passes its own self-test
-        run: node .github/scripts/check-identifying.js --self-test
-
-      - name: No private organisation, person, host or database is named
-        run: node .github/scripts/check-identifying.js
-
-      - name: JavaScript comment stripper passes its own self-test
-        run: node .github/scripts/check-comments.js --self-test
-
-      - name: JavaScript carries no comments
-        run: node .github/scripts/check-comments.js
-
-      - name: No external requests in the console bundle
-        run: python3 .github/scripts/check-egress.py
-
-      - name: Accessibility, responsive, density and keyboard suite
-        run: node platform/console/prototype/tests/run-tests.js
-
       - name: Install the console API so the live suite can start it
+        if: matrix.server
         run: npm ci --omit=dev --no-audit --no-fund
         working-directory: platform/console/server
 
-      - name: Live suite over http against the console API with session sign-in
-        run: node platform/console/prototype/tests/live.js
-
-      - name: Full-scale sandbox
-        run: node platform/console/prototype/tests/sandbox.js
-
-      - name: Stress and performance budgets
-        run: node platform/console/prototype/tests/stress.js
+      - name: Run the ${{ matrix.suite }} suite
+        run: node "platform/console/prototype/tests/${{ matrix.script }}"
         env:
           STRESS_CYCLES: '160'
           STRESS_SCALES: '1,10,50'
@@ -160,7 +213,7 @@ jobs:
           STRESS_SOAK_MS: '8000'
 
       - name: Keep the last stress report
-        if: always()
+        if: always() && matrix.suite == 'stress'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: console-stress-report
@@ -168,15 +221,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Keep the screenshots from both suites
-        if: always()
+      - name: Keep the screenshots
+        if: always() && matrix.shots
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: console-screenshots
-          path: |
-            /tmp/argus-console-shots
-            /tmp/argus-sandbox-shots
-            /tmp/argus-live-shots
+          name: console-screenshots-${{ matrix.suite }}
+          path: ${{ matrix.shots }}
           if-no-files-found: ignore
           retention-days: 14
 
@@ -192,6 +242,8 @@ jobs:
           egress-policy: audit
 
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '22'
@@ -201,3 +253,217 @@ jobs:
         working-directory: platform/console/server
       - run: npm test
         working-directory: platform/console/server
+
+  image:
+    name: Console image build, lint and scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22'
+
+      - name: Fetch the pinned hadolint and Trivy releases
+        env:
+          HADOLINT_VERSION: '2.15.1'
+          HADOLINT_SHA256: 'c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507'
+          TRIVY_VERSION: '0.76.1'
+          TRIVY_SHA256: 'c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0'
+        run: |
+          cd "${RUNNER_TEMP}"
+          curl -fsSL -o hadolint \
+            "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          curl -fsSL -o trivy.tar.gz \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          printf '%s  %s\n' "${HADOLINT_SHA256}" hadolint "${TRIVY_SHA256}" trivy.tar.gz | sha256sum -c -
+          tar -xzf trivy.tar.gz trivy
+          sudo install -m 0755 hadolint trivy /usr/local/bin/
+          hadolint --version
+          trivy --version
+
+      - name: Dockerfile passes hadolint
+        run: hadolint --failure-threshold warning platform/console/server/Dockerfile
+
+      - name: Build the console image
+        run: docker build -f platform/console/server/Dockerfile -t argus/console-api:ci platform/console
+
+      - name: Image carries no fixable critical vulnerability
+        run: trivy image --no-progress --scanners vuln --severity CRITICAL --ignore-unfixed --exit-code 1 argus/console-api:ci
+
+      - name: Image starts and answers its health check
+        run: |
+          smoke="${RUNNER_TEMP}/smoke"
+          mkdir -p "${smoke}"
+          password="$(openssl rand -hex 24)"
+          record="$(printf '%s\n' "${password}" | node platform/console/server/src/auth/hash-password.js)"
+          node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({ operators: [{ subject: "ci-smoke", displayName: "CI smoke", roles: ["viewer"], password: process.argv[2] }] }))' \
+            "${smoke}/operators.json" "${record}"
+          chmod 0644 "${smoke}/operators.json"
+          docker run -d --name argus-smoke -p 127.0.0.1:8787:8787 \
+            -v "${smoke}/operators.json:/config/operators.json:ro" argus/console-api:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health > "${smoke}/health.json" 2>/dev/null \
+              && grep -Eq '"status": *"ok"' "${smoke}/health.json"; then
+              cat "${smoke}/health.json"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs argus-smoke
+          echo "::error::the console image did not answer /api/health within 60 seconds"
+          exit 1
+
+      - name: Remove the smoke container
+        if: always()
+        run: docker rm -f argus-smoke || true
+
+  powershell:
+    name: PowerShell analysis and tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned PSScriptAnalyzer and Pester
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          Install-Module -Name Pester -RequiredVersion 5.9.1 -Scope CurrentUser -Force -SkipPublisherCheck
+
+      - name: The Argus module passes PSScriptAnalyzer
+        run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          Invoke-ScriptAnalyzer -Path platform/cli -Recurse -Settings .github/PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: The compose scripts pass PSScriptAnalyzer
+        if: success() || failure()
+        run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.25.0
+          Invoke-ScriptAnalyzer -Path platform/compose -Settings .github/PSScriptAnalyzerSettings.psd1 -EnableExit
+
+      - name: The Argus module tests pass under Pester 5
+        if: success() || failure()
+        run: |
+          Import-Module Pester -RequiredVersion 5.9.1
+          Invoke-Pester -Path platform/cli/Argus/tests -CI
+
+  config:
+    name: Observability configuration and shell scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Fetch the pinned promtool, amtool and ShellCheck releases
+        env:
+          PROMETHEUS_VERSION: '3.5.0'
+          PROMETHEUS_SHA256: 'e811827af26d822afb09a4f28314f61b618b12cff5369835a67f674d8b46f39a'
+          ALERTMANAGER_VERSION: '0.28.1'
+          ALERTMANAGER_SHA256: '5ac7ab5e4b8ee5ce4d8fb0988f9cb275efcc3f181b4b408179fafee121693311'
+          SHELLCHECK_VERSION: '0.11.0'
+          SHELLCHECK_SHA256: '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198'
+        run: |
+          cd "${RUNNER_TEMP}"
+          curl -fsSL -o prometheus.tar.gz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz"
+          curl -fsSL -o alertmanager.tar.gz \
+            "https://github.com/prometheus/alertmanager/releases/download/v${ALERTMANAGER_VERSION}/alertmanager-${ALERTMANAGER_VERSION}.linux-amd64.tar.gz"
+          curl -fsSL -o shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          printf '%s  %s\n' \
+            "${PROMETHEUS_SHA256}" prometheus.tar.gz \
+            "${ALERTMANAGER_SHA256}" alertmanager.tar.gz \
+            "${SHELLCHECK_SHA256}" shellcheck.tar.xz | sha256sum -c -
+          tar -xzf prometheus.tar.gz --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          tar -xzf alertmanager.tar.gz --strip-components=1 "alertmanager-${ALERTMANAGER_VERSION}.linux-amd64/amtool"
+          tar -xJf shellcheck.tar.xz --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          sudo install -m 0755 promtool amtool shellcheck /usr/local/bin/
+          promtool --version
+          amtool --version
+          shellcheck --version
+
+      - name: Prometheus configuration and every rule file pass promtool
+        env:
+          ARGUS_SITE: ci
+          ARGUS_ENVIRONMENT: ci
+        run: |
+          sudo mkdir -p /etc/prometheus
+          sudo ln -sfn "${GITHUB_WORKSPACE}/platform/compose/services/observability/prometheus/rules" /etc/prometheus/rules
+          sudo ln -sfn "${GITHUB_WORKSPACE}/platform/gitops" /gitops
+          promtool check config platform/compose/services/observability/prometheus/prometheus.yml
+          promtool check rules \
+            platform/compose/services/observability/prometheus/rules/*.rules.yaml \
+            platform/gitops/apps/*/*alerts.yaml
+
+      - name: The rendered Alertmanager configuration passes amtool
+        run: |
+          template=platform/compose/services/observability/alertmanager/alertmanager.yml.tmpl
+          rendered="${RUNNER_TEMP}/alertmanager.yml"
+          sed -e 's/@@SMTP_FROM@@/argus@example.com/g' \
+              -e 's/@@SMTP_SMARTHOST@@/mail.example.com:25/g' \
+              -e 's/@@[A-Z_]*EMAIL@@/ops@example.com/g' \
+              "${template}" > "${rendered}"
+          if grep -n '@@[A-Z_]*@@' "${rendered}"; then
+            echo "::error file=${template}::the template carries a placeholder this job cannot fill; add it to the sed list"
+            exit 1
+          fi
+          amtool check-config "${rendered}"
+
+      - name: Compose shell scripts pass ShellCheck as POSIX sh
+        run: git ls-files -z 'platform/compose/services/*.sh' | xargs -0 --no-run-if-empty shellcheck -s sh
+
+  iac:
+    name: OpenTofu format and validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.13.2
+          tofu_wrapper: false
+
+      - name: Every module is formatted
+        run: tofu fmt -check -recursive -diff
+        working-directory: platform/iac/tofu
+
+      - name: The root module initialises without a backend
+        run: tofu init -backend=false -input=false
+        working-directory: platform/iac/tofu
+
+      - name: The root module validates
+        run: tofu validate
+        working-directory: platform/iac/tofu

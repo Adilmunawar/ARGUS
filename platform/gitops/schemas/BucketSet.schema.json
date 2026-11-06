@@ -17,6 +17,8 @@
         "type": "object",
         "required": ["name", "owner"],
         "additionalProperties": false,
+        "if": { "required": ["objectLock"] },
+        "then": { "properties": { "versioning": { "const": true } } },
         "properties": {
           "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{2,62}$" },
           "owner": { "$ref": "#/$defs/principal" },

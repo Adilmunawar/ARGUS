@@ -47,3 +47,26 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+
+  - package-ecosystem: docker-compose
+    directory: /platform/compose
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      compose-images:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /.github
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      ci-checkers:
+        patterns:
+          - "*"
